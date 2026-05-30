@@ -51,6 +51,8 @@ runtime: codex
 
 **What's missing:** No gateway (unrestricted network). No bridge (codex runs directly). No channels. No customization.
 
+**Examples:** `examples/simple/` — minimal codex agent for testing.
+
 ---
 
 ### Phase 2: home-version-control Feature
