@@ -13,7 +13,17 @@ import (
 type AgentConfig struct {
 	Name     string                    `yaml:"name"`
 	Runtime  any                       `yaml:"runtime"` // string or inline map
+	Gateway  *bool                     `yaml:"gateway"` // nil = true (default enabled)
 	Features map[string]map[string]any `yaml:"features"`
+}
+
+// GatewayEnabled returns whether the gateway should be included.
+// Defaults to true if not specified.
+func (c *AgentConfig) GatewayEnabled() bool {
+	if c.Gateway == nil {
+		return true
+	}
+	return *c.Gateway
 }
 
 // RuntimeName returns the runtime name if it's a string reference.

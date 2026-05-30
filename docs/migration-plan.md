@@ -100,15 +100,15 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent with transparent proxy (all traffic passthrough, iptables enforced)
 ```
 
-- [ ] Gateway Go module (`gateway/`) — core proxy logic
-- [ ] TCP listener + SNI extraction
-- [ ] Passthrough mode (pipe bytes to destination)
-- [ ] DNS resolver (intercept UDP port 53)
-- [ ] go:embed gateway source in CLI
-- [ ] Multi-stage Dockerfile (compile gateway + runtime)
-- [ ] Entrypoint: iptables setup → gateway start → hooks → agent start
-- [ ] Gateway runs as `gateway` user (agent cannot kill it)
-- [ ] `RequestHandler` interface in gateway (for feature handlers)
+- [x] Gateway Go module (`gateway/`) — core proxy logic
+- [x] TCP listener + SNI extraction
+- [x] Passthrough mode (pipe bytes to destination)
+- [x] DNS resolver (intercept UDP port 53)
+- [x] go:embed gateway source in CLI
+- [x] Multi-stage Dockerfile (compile gateway + runtime)
+- [x] Entrypoint: iptables setup → gateway start → hooks → agent start
+- [x] Gateway runs as `gateway` user (agent cannot kill it)
+- [x] `RequestHandler` interface in gateway (for feature handlers)
 - [ ] Handler registry generation (active features → imports)
 - [ ] Integration test (verify traffic routes through gateway)
 
