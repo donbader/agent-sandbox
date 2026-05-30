@@ -53,6 +53,36 @@ agent-sandbox compose up --build       # docker compose passthrough
 - Each plugin is self-contained in its own directory
 - SDK interfaces are stable — additive changes only
 
+## Testing Guidelines
+
+**Write tests that verify behavior, not constants.**
+
+Don't write:
+```go
+// USELESS — just testing that a hardcoded value equals itself
+func TestPlugin_Name(t *testing.T) {
+    assert.Equal(t, "codex", New().Name())
+}
+```
+
+Do write:
+```go
+// USEFUL — tests that the generated output actually works
+func TestGenerator_Run(t *testing.T) {
+    g := &Generator{Config: cfg, Runtime: codex.New(), OutDir: outDir}
+    require.NoError(t, g.Run())
+    df, _ := os.ReadFile(filepath.Join(outDir, "Dockerfile"))
+    assert.Contains(t, string(df), "FROM node:22-slim")
+}
+```
+
+Rules:
+- If a function only returns constants (no logic, no branching), don't unit test it
+- Test the integration point where the output is consumed instead
+- Use `//go:build integration` for tests that need Docker
+- Run integration tests with `go test -tags integration ./...`
+- Prefer fewer meaningful tests over many trivial ones
+
 ## Design Docs
 
 See docs/ for architecture, plugin system, configuration, and security docs.
