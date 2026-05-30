@@ -72,6 +72,7 @@ func generateCmd() *cobra.Command {
 				Config:   cfg,
 				Runtime:  runtime,
 				Features: features,
+				Gateway:  cfg.GatewayEnabled(),
 				Dir:      dir,
 				OutDir:   outDir,
 			}

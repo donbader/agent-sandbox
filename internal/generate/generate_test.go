@@ -121,7 +121,7 @@ func TestGenerator_Run(t *testing.T) {
 		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
 		require.NoError(t, err)
 		assert.Contains(t, string(ep), "/opt/hooks/setup.sh")
-		assert.Contains(t, string(ep), "exec sleep infinity")
+		assert.Contains(t, string(ep), "exec su -c 'sleep infinity' agent")
 
 		// Hook should be copied
 		hook, err := os.ReadFile(filepath.Join(outDir, "hooks", "setup.sh"))
@@ -259,5 +259,73 @@ func TestGenerator_Run(t *testing.T) {
 
 		_, err = os.Stat(filepath.Join(outDir, ".env.example"))
 		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("with gateway", func(t *testing.T) {
+		srcDir := t.TempDir()
+		outDir := t.TempDir()
+
+		// Create minimal gateway source in the project dir
+		gwDir := filepath.Join(srcDir, "gateway")
+		require.NoError(t, os.MkdirAll(filepath.Join(gwDir, "cmd", "gateway"), 0755))
+		require.NoError(t, os.MkdirAll(filepath.Join(gwDir, "internal", "proxy"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(gwDir, "go.mod"), []byte("module gateway\ngo 1.24\n"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(gwDir, "cmd", "gateway", "main.go"), []byte("package main\nfunc main() {}\n"), 0644))
+
+		g := &Generator{
+			Config: &config.AgentConfig{
+				Name:    "coder",
+				Runtime: "codex",
+			},
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "codex",
+				BaseImage: "node:22-slim",
+				Install:   []string{"npm install -g @openai/codex@latest"},
+				Cmd:       []string{"sleep", "infinity"},
+				User:      "agent",
+			},
+			Gateway: true,
+			Dir:     srcDir,
+			OutDir:  outDir,
+		}
+
+		err := g.Run()
+		require.NoError(t, err)
+
+		// Dockerfile should be multi-stage
+		df, err := os.ReadFile(filepath.Join(outDir, "Dockerfile"))
+		require.NoError(t, err)
+		dfStr := string(df)
+		assert.Contains(t, dfStr, "FROM golang:1.24-alpine AS gateway-build")
+		assert.Contains(t, dfStr, "COPY gateway-src/ .")
+		assert.Contains(t, dfStr, "RUN go build -o /gateway ./cmd/gateway/")
+		assert.Contains(t, dfStr, "FROM node:22-slim")
+		assert.Contains(t, dfStr, "iptables")
+		assert.Contains(t, dfStr, "useradd -r -s /bin/false gateway")
+		assert.Contains(t, dfStr, "COPY --from=gateway-build /gateway /usr/local/bin/gateway")
+		assert.Contains(t, dfStr, `ENTRYPOINT ["/opt/entrypoint.sh"]`)
+
+		// Entrypoint should have iptables + gateway start
+		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
+		require.NoError(t, err)
+		epStr := string(ep)
+		assert.Contains(t, epStr, "iptables -t nat -A OUTPUT")
+		assert.Contains(t, epStr, "--to-port 8443")
+		assert.Contains(t, epStr, "/usr/local/bin/gateway")
+		assert.Contains(t, epStr, "exec su -c 'sleep infinity' agent")
+
+		// docker-compose.yml should have NET_ADMIN
+		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
+		require.NoError(t, err)
+		assert.Contains(t, string(dc), "NET_ADMIN")
+
+		// Gateway source should be copied
+		_, err = os.Stat(filepath.Join(outDir, "gateway-src", "go.mod"))
+		assert.NoError(t, err)
+
+		// Gateway config should exist
+		gwCfg, err := os.ReadFile(filepath.Join(outDir, "gateway-config.yaml"))
+		require.NoError(t, err)
+		assert.Contains(t, string(gwCfg), "listen:")
 	})
 }

@@ -17,6 +17,7 @@ type Generator struct {
 	Config   *config.AgentConfig
 	Runtime  *resolve.RuntimeConfig
 	Features []*resolve.FeatureContributions
+	Gateway  bool   // include gateway (transparent proxy)
 	Dir      string // source directory (where agent.yaml lives)
 	OutDir   string // output directory (.build/)
 }
@@ -25,6 +26,15 @@ type Generator struct {
 func (g *Generator) Run() error {
 	if err := os.MkdirAll(g.OutDir, 0755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
+	}
+
+	if g.Gateway {
+		if err := g.writeGatewaySource(); err != nil {
+			return err
+		}
+		if err := g.writeGatewayConfig(); err != nil {
+			return err
+		}
 	}
 
 	if err := g.writeDockerfile(); err != nil {
@@ -54,13 +64,12 @@ func (g *Generator) Run() error {
 	return nil
 }
 
-// hasFeatures returns true if any feature contributions exist.
-func (g *Generator) hasFeatures() bool {
-	return len(g.Features) > 0
-}
-
-// needsEntrypoint returns true if features require a custom entrypoint.
+// needsEntrypoint returns true when a custom entrypoint is needed.
+// Gateway always requires an entrypoint (iptables + gateway start).
 func (g *Generator) needsEntrypoint() bool {
+	if g.Gateway {
+		return true
+	}
 	for _, f := range g.Features {
 		if len(f.EntrypointHooks) > 0 || f.HomeOverride != "" {
 			return true
@@ -73,6 +82,64 @@ func (g *Generator) needsEntrypoint() bool {
 func (g *Generator) writeDockerfile() error {
 	var b strings.Builder
 
+	if g.Gateway {
+		g.writeMultiStageDockerfile(&b)
+	} else {
+		g.writeSingleStageDockerfile(&b)
+	}
+
+	path := filepath.Join(g.OutDir, "Dockerfile")
+	return os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+// writeMultiStageDockerfile produces a Dockerfile with gateway compilation stage.
+func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
+	// Stage 1: compile gateway
+	b.WriteString("# Stage 1: compile gateway\n")
+	b.WriteString("FROM golang:1.24-alpine AS gateway-build\n")
+	b.WriteString("WORKDIR /src\n")
+	b.WriteString("COPY gateway-src/ .\n")
+	b.WriteString("RUN go build -o /gateway ./cmd/gateway/\n\n")
+
+	// Stage 2: runtime
+	b.WriteString("# Stage 2: runtime\n")
+	b.WriteString(fmt.Sprintf("FROM %s\n\n", g.Runtime.BaseImage))
+
+	// Install iptables (required for transparent proxy)
+	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iptables && rm -rf /var/lib/apt/lists/*\n\n")
+
+	// Create gateway user (runs the proxy, agent cannot kill it)
+	b.WriteString("RUN useradd -r -s /bin/false gateway\n\n")
+
+	// Create agent user
+	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n\n", g.Runtime.User))
+
+	// Copy gateway binary
+	b.WriteString("COPY --from=gateway-build /gateway /usr/local/bin/gateway\n\n")
+
+	// Copy gateway config
+	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n\n")
+
+	// Runtime install commands
+	for _, cmd := range g.Runtime.Install {
+		b.WriteString(fmt.Sprintf("RUN %s\n", cmd))
+	}
+	if len(g.Runtime.Install) > 0 {
+		b.WriteString("\n")
+	}
+
+	// Feature install commands
+	g.writeFeatureCommands(b)
+
+	// Copy home override, hooks, entrypoint
+	g.writeCopyStatements(b)
+
+	// Entrypoint (always present with gateway)
+	b.WriteString("ENTRYPOINT [\"/opt/entrypoint.sh\"]\n")
+}
+
+// writeSingleStageDockerfile produces a simple Dockerfile without gateway.
+func (g *Generator) writeSingleStageDockerfile(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("FROM %s\n\n", g.Runtime.BaseImage))
 
 	// Create agent user
@@ -87,31 +154,10 @@ func (g *Generator) writeDockerfile() error {
 	}
 
 	// Feature install commands
-	for _, f := range g.Features {
-		for _, cmd := range f.Commands {
-			b.WriteString(fmt.Sprintf("RUN %s\n", cmd))
-		}
-	}
-	if g.hasFeatureCommands() {
-		b.WriteString("\n")
-	}
+	g.writeFeatureCommands(b)
 
-	// Copy home override directory if present
-	if g.hasHomeOverride() {
-		b.WriteString("COPY home-override/ /opt/home-override/\n\n")
-	}
-
-	// Copy entrypoint hooks
-	if g.hasHooks() {
-		b.WriteString("COPY hooks/ /opt/hooks/\n")
-		b.WriteString("RUN chmod +x /opt/hooks/*\n\n")
-	}
-
-	// Copy entrypoint script if needed
-	if g.needsEntrypoint() {
-		b.WriteString("COPY entrypoint.sh /opt/entrypoint.sh\n")
-		b.WriteString("RUN chmod +x /opt/entrypoint.sh\n\n")
-	}
+	// Copy home override, hooks, entrypoint
+	g.writeCopyStatements(b)
 
 	// Switch to agent user
 	b.WriteString(fmt.Sprintf("USER %s\n", g.Runtime.User))
@@ -129,9 +175,35 @@ func (g *Generator) writeDockerfile() error {
 			b.WriteString(fmt.Sprintf("CMD [%s]\n", strings.Join(quoted, ", ")))
 		}
 	}
+}
 
-	path := filepath.Join(g.OutDir, "Dockerfile")
-	return os.WriteFile(path, []byte(b.String()), 0644)
+// writeFeatureCommands writes RUN commands from features.
+func (g *Generator) writeFeatureCommands(b *strings.Builder) {
+	for _, f := range g.Features {
+		for _, cmd := range f.Commands {
+			b.WriteString(fmt.Sprintf("RUN %s\n", cmd))
+		}
+	}
+	if g.hasFeatureCommands() {
+		b.WriteString("\n")
+	}
+}
+
+// writeCopyStatements writes COPY statements for home override, hooks, and entrypoint.
+func (g *Generator) writeCopyStatements(b *strings.Builder) {
+	if g.hasHomeOverride() {
+		b.WriteString("COPY home-override/ /opt/home-override/\n\n")
+	}
+
+	if g.hasHooks() {
+		b.WriteString("COPY hooks/ /opt/hooks/\n")
+		b.WriteString("RUN chmod +x /opt/hooks/*\n\n")
+	}
+
+	if g.needsEntrypoint() {
+		b.WriteString("COPY entrypoint.sh /opt/entrypoint.sh\n")
+		b.WriteString("RUN chmod +x /opt/entrypoint.sh\n\n")
+	}
 }
 
 // writeCompose generates .build/docker-compose.yml.
@@ -145,6 +217,12 @@ func (g *Generator) writeCompose() error {
 	b.WriteString("      dockerfile: Dockerfile\n")
 	b.WriteString(fmt.Sprintf("    container_name: %s\n", g.Config.Name))
 	b.WriteString("    restart: unless-stopped\n")
+
+	// Gateway requires NET_ADMIN for iptables
+	if g.Gateway {
+		b.WriteString("    cap_add:\n")
+		b.WriteString("      - NET_ADMIN\n")
+	}
 
 	// Volumes from features
 	volumes := g.collectVolumes()
@@ -195,7 +273,7 @@ func (g *Generator) writeEnvExample() error {
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-// writeEntrypoint generates .build/entrypoint.sh if features need it.
+// writeEntrypoint generates .build/entrypoint.sh.
 func (g *Generator) writeEntrypoint() error {
 	if !g.needsEntrypoint() {
 		return nil
@@ -204,10 +282,27 @@ func (g *Generator) writeEntrypoint() error {
 	var b strings.Builder
 	b.WriteString("#!/bin/bash\nset -e\n\n")
 
+	if g.Gateway {
+		// iptables setup: redirect all outbound traffic through gateway
+		b.WriteString("# Setup iptables (must run as root)\n")
+		b.WriteString("# Redirect TCP port 443 to gateway\n")
+		b.WriteString("iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner gateway -j REDIRECT --to-port 8443\n")
+		b.WriteString("# Redirect DNS (UDP 53) to gateway resolver\n")
+		b.WriteString("iptables -t nat -A OUTPUT -p udp --dport 53 -m owner ! --uid-owner gateway -j REDIRECT --to-port 5353\n")
+		b.WriteString("# Drop all other UDP (except DNS handled above)\n")
+		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -m owner ! --uid-owner gateway -j DROP\n\n")
+
+		// Start gateway as gateway user
+		b.WriteString("# Start gateway (runs as gateway user)\n")
+		b.WriteString("su -s /bin/sh -c '/usr/local/bin/gateway &' gateway\n")
+		b.WriteString("sleep 0.5\n\n")
+	}
+
 	// Home override: copy files from staging to home
 	if g.hasHomeOverride() {
 		b.WriteString("# Copy home override files\n")
-		b.WriteString(fmt.Sprintf("if [ -d /opt/home-override ]; then\n  cp -rT /opt/home-override /home/%s\nfi\n\n", g.Runtime.User))
+		b.WriteString(fmt.Sprintf("if [ -d /opt/home-override ]; then\n  cp -rT /opt/home-override /home/%s\n  chown -R %s:%s /home/%s\nfi\n\n",
+			g.Runtime.User, g.Runtime.User, g.Runtime.User, g.Runtime.User))
 	}
 
 	// Run entrypoint hooks
@@ -216,18 +311,29 @@ func (g *Generator) writeEntrypoint() error {
 		for _, f := range g.Features {
 			for _, hook := range f.EntrypointHooks {
 				hookName := filepath.Base(hook)
-				b.WriteString(fmt.Sprintf("/opt/hooks/%s\n", hookName))
+				b.WriteString(fmt.Sprintf("su -c '/opt/hooks/%s' %s\n", hookName, g.Runtime.User))
 			}
 		}
 		b.WriteString("\n")
 	}
 
-	// Execute the runtime CMD
+	// Execute the runtime CMD as agent user
 	b.WriteString("# Start agent\n")
-	b.WriteString(fmt.Sprintf("exec %s\n", strings.Join(g.Runtime.Cmd, " ")))
+	b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
 
 	path := filepath.Join(g.OutDir, "entrypoint.sh")
 	return os.WriteFile(path, []byte(b.String()), 0755)
+}
+
+// writeGatewayConfig generates .build/gateway-config.yaml.
+func (g *Generator) writeGatewayConfig() error {
+	var b strings.Builder
+	b.WriteString("# Gateway configuration (auto-generated)\n")
+	b.WriteString("listen: \":8443\"\n")
+	b.WriteString("dns_listen: \":5353\"\n")
+
+	path := filepath.Join(g.OutDir, "gateway-config.yaml")
+	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
 // copyHooks copies entrypoint hook scripts to .build/hooks/.
@@ -271,7 +377,7 @@ func (g *Generator) copyHomeOverride() error {
 
 		srcDir := filepath.Join(g.Dir, f.HomeOverride)
 		if _, err := os.Stat(srcDir); os.IsNotExist(err) {
-			continue // skip if directory doesn't exist
+			continue
 		}
 
 		destDir := filepath.Join(g.OutDir, "home-override")
