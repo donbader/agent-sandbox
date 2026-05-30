@@ -8,26 +8,23 @@ New repo (`donbader/agent-sandbox`). agent-fleet stays in maintenance mode (secu
 
 ## Phases
 
-### Phase 0: Repo Setup
+### Phase 0: Repo Setup ✅
 
 **What works after this phase:** Repo exists, agent can work on it.
 
-**Scope:**
-- Create `donbader/agent-sandbox` repo
-- Go workspace (`go.work`)
-- AGENTS.md (instructions for coding agents)
-- README.md (project overview, phase roadmap)
-- Makefile (build, test, lint targets)
-- .gitignore
-- .golangci.yml
-- SDK module stub (`sdk/go.mod`, `sdk/plugin.go` with interfaces)
-- docs/ (copy design docs from agent-fleet PR #27)
-
-**Exit criteria:** Repo cloned, `go work sync` succeeds, agent has AGENTS.md to follow.
+- [x] Create `donbader/agent-sandbox` repo
+- [x] Go workspace (`go.work`)
+- [x] AGENTS.md (instructions for coding agents)
+- [x] README.md (project overview, phase roadmap)
+- [x] Makefile (build, test, lint targets)
+- [x] .gitignore
+- [x] .golangci.yml
+- [x] SDK module stub (`sdk/go.mod`, `sdk/plugin.go` with interfaces)
+- [x] docs/ (design docs)
 
 ---
 
-### Phase 1: Bare Container
+### Phase 1: Bare Container ✅
 
 **What works after this phase:**
 ```bash
@@ -35,23 +32,25 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent running in a container (direct entrypoint, no proxy, no bridge)
 ```
 
-**Scope:**
-- `codex` RuntimePlugin (sets base image, installs codex CLI)
-- `generate` command (reads agent.yaml → writes .build/)
-- `compose` passthrough command
-- Dockerfile generation (single stage, no gateway)
-- docker-compose.yml generation
-- .env.example generation (scan ${VAR} patterns)
+- [x] `codex` RuntimePlugin (sets base image, installs codex CLI)
+- [x] `generate` command (reads agent.yaml → writes .build/)
+- [x] `compose` passthrough command
+- [x] Dockerfile generation (single stage, no gateway)
+- [x] docker-compose.yml generation
+- [x] .env.example generation (scan ${VAR} patterns)
+- [x] Integration test (`//go:build integration` docker build test)
+- [x] Testing guidelines in AGENTS.md
+- [x] Reference docs (ADRs, bridge protocol, docker-api-proxy)
+- [x] Phase implementation guide in AGENTS.md
+- [x] GoReleaser release pipeline (`.github/workflows/release.yml`)
+- [x] `examples/simple/` for quick testing
+- [x] `install.sh` one-liner
 
 **Config:**
 ```yaml
 name: coder
 runtime: codex
 ```
-
-**What's missing:** No gateway (unrestricted network). No bridge (codex runs directly). No channels. No customization.
-
-**Examples:** `examples/simple/` — minimal codex agent for testing.
 
 ---
 
@@ -63,15 +62,14 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent with custom packages, startup hooks, persistent home
 ```
 
-**Scope:**
-- `home-version-control` FeaturePlugin
-- ImageContribution.Commands wiring (RUN in Dockerfile)
-- EntrypointContribution.Hooks wiring (scripts in entrypoint)
-- ComposeContribution.Volumes wiring (named volumes)
-- Home override directory (./home/ → /opt/home-override/ → cp on start)
-- Entrypoint script (runs hooks → starts agent)
-
-**Port from agent-fleet:** `runtimes/codex/entrypoint.sh` (override logic)
+- [ ] `home-version-control` FeaturePlugin (`plugins/home-version-control/plugin.go`)
+- [ ] Update `internal/generate/` to merge FeatureContributions into Dockerfile
+- [ ] ImageContribution.Commands wiring (RUN in Dockerfile)
+- [ ] EntrypointContribution.Hooks wiring (scripts in entrypoint)
+- [ ] ComposeContribution.Volumes wiring (named volumes)
+- [ ] Entrypoint script (runs hooks → starts agent)
+- [ ] Home override directory (./home/ → /opt/home-override/ → cp on start)
+- [ ] `examples/home-vc/` example
 
 **Config:**
 ```yaml
@@ -87,8 +85,6 @@ features:
       - "agent-home:/home/agent"
 ```
 
-**What's missing:** No network enforcement. No credential injection. No channels.
-
 ---
 
 ### Phase 3: Gateway (Network Enforcement)
@@ -99,19 +95,15 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent with transparent proxy (all traffic passthrough, iptables enforced)
 ```
 
-**Scope:**
-- Gateway binary (TCP proxy, SNI extraction, passthrough mode)
-- Multi-stage Dockerfile (compile gateway + runtime)
-- Entrypoint: iptables setup → gateway start → hooks → agent start
-- DNS resolver (redirects UDP DNS to gateway)
-- go:embed gateway source in CLI
-- Gateway runs as `gateway` user (agent cannot kill it)
-
-**Port from agent-fleet:** `pkg/gateway/` (proxy.go, sni.go)
-
-**Config:** Same as Phase 2 (no config change — gateway is always-on infrastructure).
-
-**What's missing:** No MITM, no credential injection. All traffic passes through unchanged.
+- [ ] Gateway Go module (`gateway/`)
+- [ ] TCP listener + SNI extraction
+- [ ] Passthrough mode (pipe bytes to destination)
+- [ ] DNS resolver (intercept UDP port 53)
+- [ ] go:embed gateway source in CLI
+- [ ] Multi-stage Dockerfile (compile gateway + runtime)
+- [ ] Entrypoint: iptables setup → gateway start → hooks → agent start
+- [ ] Gateway runs as `gateway` user (agent cannot kill it)
+- [ ] Integration test (verify traffic routes through gateway)
 
 ---
 
@@ -123,30 +115,17 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent reachable via Telegram (send message → agent responds)
 ```
 
-**Scope:**
-- Bridge runtime (TypeScript: spawn agent, plugin loader)
-- `telegram` FeaturePlugin (contributes gateway rules + bridge TypeScript)
-- BridgeContribution wiring (extract TypeScript to .build/, bridge-config.json)
-- Entrypoint: gateway → bridge → agent (process tree)
-- Telegram bot token injection via gateway (URL rewrite, MITM on api.telegram.org)
-- MITM logic in gateway (TLS termination, HTTP interception)
-- Sandbox CA generation
-
-**Port from agent-fleet:** `pkg/gateway/mitm.go`, `runtimes/channels-bridge/src/`
-
-**Config:**
-```yaml
-name: coder
-runtime: codex
-features:
-  home-version-control:
-    commands: ["apt-get install -y ripgrep"]
-  telegram:
-    bot_token: "${TELEGRAM_BOT_TOKEN}"
-    allowed_users: ["donbader"]
-```
-
-**What's missing:** No GitHub credential injection, no Docker access, no multi-agent.
+- [ ] Bridge TypeScript runtime (`bridge/`)
+- [ ] Agent process spawning (child process management)
+- [ ] Channel plugin loader (dynamic import from /opt/bridge/plugins/)
+- [ ] `telegram` FeaturePlugin (`plugins/telegram/plugin.go`)
+- [ ] GatewayContribution: MITM on api.telegram.org, inject bot token
+- [ ] BridgeContribution: embed TypeScript channel plugin (grammy)
+- [ ] MITM logic in gateway (TLS termination, HTTP interception)
+- [ ] Sandbox CA generation
+- [ ] BridgeContribution wiring (extract TypeScript to .build/)
+- [ ] Entrypoint: gateway → bridge → agent (process tree)
+- [ ] `examples/telegram/` example
 
 ---
 
@@ -158,33 +137,14 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → Full-featured agent: GitHub PAT, Docker, mcp-oauth, static-header
 ```
 
-**Scope:**
-- `github` FeaturePlugin (PAT injection via gateway MITM)
-- `docker` FeaturePlugin (DinD sidecar, DockerHandler, spawned container egress)
-- `mcp-oauth` FeaturePlugin (OAuth2 dynamic client registration)
-- `static-header` FeaturePlugin (generic header injection)
-- Additional RuntimePlugins: `claude-code`, `pi`
-- Security hardening (cap_drop, no-new-privileges, hidepid, file permissions)
-
-**Port from agent-fleet:** `pkg/gateway/mitm.go` (PAT injection logic)
-
-**Config:**
-```yaml
-name: coder
-runtime: codex
-features:
-  github:
-    token: "${GITHUB_PAT}"
-  docker: true
-  telegram:
-    bot_token: "${TELEGRAM_BOT_TOKEN}"
-    allowed_users: ["donbader"]
-  home-version-control:
-    commands: ["apt-get install -y ripgrep fd-find"]
-    runtime_volumes: ["agent-home:/home/agent"]
-```
-
-**What's missing:** No init wizard, no validate, no upgrade, no multi-agent.
+- [ ] `github` FeaturePlugin (PAT injection via gateway MITM)
+- [ ] `docker` FeaturePlugin (DinD sidecar, DockerHandler, spawned container egress)
+- [ ] `mcp-oauth` FeaturePlugin (OAuth2 dynamic client registration)
+- [ ] `static-header` FeaturePlugin (generic header injection)
+- [ ] `claude-code` RuntimePlugin
+- [ ] `pi` RuntimePlugin
+- [ ] Security hardening (cap_drop, no-new-privileges, hidepid, file permissions)
+- [ ] `examples/full/` example (all features)
 
 ---
 
@@ -198,26 +158,22 @@ agent-sandbox generate && agent-sandbox compose up --build
 agent-sandbox upgrade                   # self-update
 ```
 
-**Scope:**
-- `init` command (interactive, detect gh auth, suggest features)
-- `validate` command (config check + helpful errors)
-- `plugins` command (list/info)
-- `upgrade` command (self-update)
-- fleet.yaml support (multi-agent, shared features)
-
-**Port from agent-fleet:** `cmd/agent-fleet/cmd/init.go`, `pkg/selfupdate/`
+- [ ] `init` command (interactive, detect gh auth, suggest features)
+- [ ] `validate` command (config check + helpful errors)
+- [ ] `plugins` command (list/info)
+- [ ] `upgrade` command (self-update)
+- [ ] fleet.yaml support (multi-agent, shared features)
+- [ ] `examples/multi-agent/` example
 
 ---
 
 ### Phase 7: CI + Polish
 
-**Scope:**
-- GitHub Actions CI (lint, test, build on PR)
-- install.sh one-liner
-- README with quickstart
-- Migration guide for agent-fleet users
+- [ ] GitHub Actions CI (lint, test, build on PR)
+- [ ] README with quickstart (update)
+- [ ] Migration guide for agent-fleet users
 
-**Note:** GoReleaser release pipeline was added in Phase 1 (`.github/workflows/release.yml` + `.goreleaser.yml`). Tag any commit on main to trigger a release.
+**Note:** GoReleaser release pipeline and install.sh were added in Phase 1.
 
 ---
 
@@ -246,22 +202,7 @@ agent-sandbox upgrade                   # self-update
 
 ## agent-fleet Disposition
 
-- Tag final release (v0.12.0)
-- Update README: "maintenance mode, see agent-sandbox for new development"
-- Keep repo for reference
-- No new features, security fixes only
-
-## Estimated Effort
-
-| Phase | Deliverable | Size | Dependencies |
-|-------|-------------|------|-------------|
-| 0. Repo Setup | Agent can work | 1 day | None |
-| 1. Bare Container | `generate` + `compose up` | 3 days | Phase 0 |
-| 2. home-vc | Packages + hooks + volumes | 2 days | Phase 1 |
-| 3. Gateway | Transparent proxy | 3 days | Phase 2 |
-| 4. Bridge + Telegram | Remote messaging | 3 days | Phase 3 |
-| 5. All Features | GitHub, Docker, OAuth, hardening | 5 days | Phase 4 |
-| 6. CLI + Multi-Agent | Full CLI, fleet.yaml | 3 days | Phase 5 |
-| 7. CI + Release | Automated releases | 1 day | Phase 6 |
-
-Total: ~3 weeks sequential.
+- [ ] Tag final release (v0.12.0)
+- [ ] Update README: "maintenance mode, see agent-sandbox for new development"
+- [ ] Keep repo for reference
+- [ ] No new features, security fixes only
