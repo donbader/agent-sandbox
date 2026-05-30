@@ -10,8 +10,11 @@ import (
 
 // Config holds gateway configuration.
 type Config struct {
-	Listen    string `yaml:"listen"`     // TCP listen address (e.g., ":8443")
-	DNSListen string `yaml:"dns_listen"` // DNS listen address (e.g., ":53")
+	Listen      string   `yaml:"listen"`       // TCP listen address (e.g., ":8443")
+	DNSListen   string   `yaml:"dns_listen"`   // DNS listen address (e.g., ":53")
+	MITMDomains []string `yaml:"mitm_domains"` // domains to MITM (terminate TLS)
+	CACertPath  string   `yaml:"ca_cert"`      // path to CA certificate for MITM
+	CAKeyPath   string   `yaml:"ca_key"`       // path to CA private key for MITM
 }
 
 // RequestHandler intercepts connections to specific hosts.

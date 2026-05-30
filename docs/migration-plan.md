@@ -124,17 +124,17 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent reachable via Telegram (send message → agent responds)
 ```
 
-- [ ] Bridge TypeScript runtime (`bridge/`)
-- [ ] Agent process spawning (child process management)
-- [ ] Channel plugin loader (dynamic import from /opt/bridge/plugins/)
-- [ ] `plugins/telegram/feature.yaml`
-- [ ] `plugins/telegram/gateway/handler.go` — MITM on api.telegram.org
-- [ ] `plugins/telegram/bridge/src/telegram.ts` — grammy channel plugin
-- [ ] MITM logic in gateway core (TLS termination, HTTP interception)
-- [ ] Sandbox CA generation
-- [ ] Bridge config generation (bridge-config.json)
-- [ ] Entrypoint: gateway → bridge → agent (process tree)
-- [ ] `examples/telegram/` example
+- [x] Bridge TypeScript runtime (`bridge/`)
+- [x] Agent process spawning (child process management)
+- [x] Channel plugin loader (dynamic import from /opt/bridge/plugins/)
+- [x] `plugins/telegram/feature.yaml`
+- [x] `plugins/telegram/gateway/handler.go` — MITM on api.telegram.org
+- [x] `plugins/telegram/bridge/src/telegram.ts` — grammy channel plugin
+- [x] MITM logic in gateway core (TLS termination, HTTP interception)
+- [x] Sandbox CA generation
+- [x] Bridge config generation (bridge-config.json)
+- [x] Entrypoint: gateway → bridge → agent (process tree)
+- [x] `examples/telegram/` example
 
 ---
 

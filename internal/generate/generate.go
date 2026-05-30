@@ -3,11 +3,13 @@ package generate
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	sandbox "github.com/donbader/agent-sandbox"
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
@@ -18,6 +20,7 @@ type Generator struct {
 	Runtime  *resolve.RuntimeConfig
 	Features []*resolve.FeatureContributions
 	Gateway  bool   // include gateway (transparent proxy)
+	Bridge   bool   // include bridge (message relay)
 	Dir      string // source directory (where agent.yaml lives)
 	OutDir   string // output directory (.build/)
 }
@@ -33,6 +36,22 @@ func (g *Generator) Run() error {
 			return err
 		}
 		if err := g.writeGatewayConfig(); err != nil {
+			return err
+		}
+	}
+
+	// Generate CA if any feature requires MITM
+	if g.hasMITMDomains() {
+		if _, _, err := GenerateCA(g.OutDir); err != nil {
+			return fmt.Errorf("generating CA: %w", err)
+		}
+	}
+
+	if g.Bridge {
+		if err := g.writeBridgeSource(); err != nil {
+			return err
+		}
+		if err := g.writeBridgeConfig(); err != nil {
 			return err
 		}
 	}
@@ -65,9 +84,9 @@ func (g *Generator) Run() error {
 }
 
 // needsEntrypoint returns true when a custom entrypoint is needed.
-// Gateway always requires an entrypoint (iptables + gateway start).
+// Gateway or bridge always requires an entrypoint.
 func (g *Generator) needsEntrypoint() bool {
-	if g.Gateway {
+	if g.Gateway || g.Bridge {
 		return true
 	}
 	for _, f := range g.Features {
@@ -102,8 +121,19 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	b.WriteString("RUN go mod tidy\n")
 	b.WriteString("RUN go build -o /gateway ./cmd/gateway/\n\n")
 
-	// Stage 2: runtime
-	b.WriteString("# Stage 2: runtime\n")
+	// Stage 2: build bridge (if enabled)
+	if g.Bridge {
+		b.WriteString("# Stage 2: build bridge\n")
+		b.WriteString("FROM node:22-slim AS bridge-build\n")
+		b.WriteString("WORKDIR /src\n")
+		b.WriteString("COPY bridge-src/package.json bridge-src/tsconfig.json ./\n")
+		b.WriteString("RUN npm install\n")
+		b.WriteString("COPY bridge-src/src/ ./src/\n")
+		b.WriteString("RUN npm run build\n\n")
+	}
+
+	// Runtime stage
+	b.WriteString(fmt.Sprintf("# Stage %d: runtime\n", g.runtimeStageNum()))
 	b.WriteString(fmt.Sprintf("FROM %s\n\n", g.Runtime.BaseImage))
 
 	// Install iptables (required for transparent proxy)
@@ -120,6 +150,24 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 
 	// Copy gateway config
 	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n\n")
+
+	// Install CA cert if MITM is enabled
+	if g.hasMITMDomains() {
+		b.WriteString("# Install sandbox CA certificate\n")
+		b.WriteString("COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt\n")
+		b.WriteString("COPY certs/ca.crt /etc/gateway/ca.crt\n")
+		b.WriteString("COPY certs/ca.key /etc/gateway/ca.key\n")
+		b.WriteString("RUN update-ca-certificates\n\n")
+	}
+
+	// Copy bridge dist if enabled
+	if g.Bridge {
+		b.WriteString("# Install bridge\n")
+		b.WriteString("COPY --from=bridge-build /src/dist/ /opt/bridge/dist/\n")
+		b.WriteString("COPY --from=bridge-build /src/node_modules/ /opt/bridge/node_modules/\n")
+		b.WriteString("COPY --from=bridge-build /src/package.json /opt/bridge/package.json\n")
+		b.WriteString("COPY bridge-config.json /opt/bridge/config.json\n\n")
+	}
 
 	// Runtime install commands
 	for _, cmd := range g.Runtime.Install {
@@ -242,8 +290,21 @@ func (g *Generator) writeCompose() error {
 		}
 	}
 
-	// Scan for env vars
+	// Scan for env vars (from config references + feature contributions)
 	envVars := g.scanEnvVars()
+	featureEnvVars := g.collectFeatureEnvVars()
+	for _, v := range featureEnvVars {
+		found := false
+		for _, existing := range envVars {
+			if existing == v {
+				found = true
+				break
+			}
+		}
+		if !found {
+			envVars = append(envVars, v)
+		}
+	}
 	if len(envVars) > 0 {
 		b.WriteString("    environment:\n")
 		for _, v := range envVars {
@@ -267,6 +328,19 @@ func (g *Generator) writeCompose() error {
 // writeEnvExample generates .build/.env.example.
 func (g *Generator) writeEnvExample() error {
 	envVars := g.scanEnvVars()
+	featureEnvVars := g.collectFeatureEnvVars()
+	for _, v := range featureEnvVars {
+		found := false
+		for _, existing := range envVars {
+			if existing == v {
+				found = true
+				break
+			}
+		}
+		if !found {
+			envVars = append(envVars, v)
+		}
+	}
 	if len(envVars) == 0 {
 		return nil
 	}
@@ -327,8 +401,13 @@ func (g *Generator) writeEntrypoint() error {
 	}
 
 	// Execute the runtime CMD as agent user
-	b.WriteString("# Start agent\n")
-	b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
+	if g.Bridge {
+		b.WriteString("# Start bridge (spawns agent as child process)\n")
+		b.WriteString("exec node /opt/bridge/dist/index.js\n")
+	} else {
+		b.WriteString("# Start agent\n")
+		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
+	}
 
 	path := filepath.Join(g.OutDir, "entrypoint.sh")
 	return os.WriteFile(path, []byte(b.String()), 0755)
@@ -340,6 +419,17 @@ func (g *Generator) writeGatewayConfig() error {
 	b.WriteString("# Gateway configuration (auto-generated)\n")
 	b.WriteString("listen: \":8443\"\n")
 	b.WriteString("dns_listen: \":5353\"\n")
+
+	// MITM configuration
+	mitmDomains := g.collectMITMDomains()
+	if len(mitmDomains) > 0 {
+		b.WriteString("mitm_domains:\n")
+		for _, d := range mitmDomains {
+			b.WriteString(fmt.Sprintf("  - %s\n", d))
+		}
+		b.WriteString("ca_cert: /etc/gateway/ca.crt\n")
+		b.WriteString("ca_key: /etc/gateway/ca.key\n")
+	}
 
 	path := filepath.Join(g.OutDir, "gateway-config.yaml")
 	return os.WriteFile(path, []byte(b.String()), 0644)
@@ -494,4 +584,131 @@ func copyDir(src, dst string) error {
 		}
 		return os.WriteFile(destPath, data, info.Mode())
 	})
+}
+
+// hasMITMDomains returns true if any feature contributes MITM domains.
+func (g *Generator) hasMITMDomains() bool {
+	for _, f := range g.Features {
+		if len(f.MITMDomains) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// collectMITMDomains gathers all MITM domains from features.
+func (g *Generator) collectMITMDomains() []string {
+	var domains []string
+	seen := map[string]bool{}
+	for _, f := range g.Features {
+		for _, d := range f.MITMDomains {
+			if !seen[d] {
+				seen[d] = true
+				domains = append(domains, d)
+			}
+		}
+	}
+	return domains
+}
+
+// collectFeatureEnvVars gathers all env vars declared by features.
+func (g *Generator) collectFeatureEnvVars() []string {
+	var vars []string
+	seen := map[string]bool{}
+	for _, f := range g.Features {
+		for _, v := range f.EnvVars {
+			if !seen[v] {
+				seen[v] = true
+				vars = append(vars, v)
+			}
+		}
+	}
+	return vars
+}
+
+// runtimeStageNum returns the stage number for the runtime stage in the Dockerfile.
+func (g *Generator) runtimeStageNum() int {
+	n := 2 // gateway is always stage 1
+	if g.Bridge {
+		n++ // bridge adds a stage
+	}
+	return n
+}
+
+// writeBridgeSource writes the embedded bridge source to .build/bridge-src/.
+func (g *Generator) writeBridgeSource() error {
+	destDir := filepath.Join(g.OutDir, "bridge-src")
+
+	return fs.WalkDir(sandbox.BridgeSource, "bridge", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel("bridge", path)
+		if err != nil {
+			return err
+		}
+		destPath := filepath.Join(destDir, relPath)
+
+		if d.IsDir() {
+			return os.MkdirAll(destPath, 0755)
+		}
+
+		data, err := sandbox.BridgeSource.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destPath, data, 0644)
+	})
+}
+
+// writeBridgeConfig generates .build/bridge-config.json.
+func (g *Generator) writeBridgeConfig() error {
+	// Find the bridge channel and allowed chat IDs
+	channel := ""
+	var allowedChatIDs []string
+
+	for _, f := range g.Features {
+		if f.BridgeChannel != "" {
+			channel = f.BridgeChannel
+			break
+		}
+	}
+
+	// Extract allowed_chat_ids from config
+	if g.Config.Features != nil {
+		if tgCfg, ok := g.Config.Features["telegram"]; ok {
+			if ids, ok := tgCfg["allowed_chat_ids"]; ok {
+				if arr, ok := ids.([]any); ok {
+					for _, v := range arr {
+						if s, ok := v.(string); ok {
+							allowedChatIDs = append(allowedChatIDs, s)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Build agent command: run as the agent user via su
+	agentCmd := fmt.Sprintf("su -c '%s' %s", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User)
+
+	var b strings.Builder
+	b.WriteString("{\n")
+	b.WriteString(fmt.Sprintf("  \"channel\": %q,\n", channel))
+	b.WriteString(fmt.Sprintf("  \"agent_cmd\": [\"sh\", \"-c\", %q]", agentCmd))
+	if len(allowedChatIDs) > 0 {
+		b.WriteString(",\n  \"allowed_chat_ids\": [")
+		for i, id := range allowedChatIDs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(fmt.Sprintf("%q", id))
+		}
+		b.WriteString("]")
+	}
+	b.WriteString("\n}\n")
+
+	path := filepath.Join(g.OutDir, "bridge-config.json")
+	return os.WriteFile(path, []byte(b.String()), 0644)
 }

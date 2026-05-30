@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/donbader/agent-sandbox/gateway/internal/dns"
+	"github.com/donbader/agent-sandbox/gateway/internal/mitm"
 	"github.com/donbader/agent-sandbox/gateway/internal/proxy"
 )
 
@@ -35,6 +36,33 @@ func main() {
 
 	// Start TCP proxy
 	p := proxy.New(cfg)
+
+	// Register MITM handler if configured
+	if len(cfg.MITMDomains) > 0 && cfg.CACertPath != "" && cfg.CAKeyPath != "" {
+		caCert, err := mitm.LoadCA(cfg.CACertPath, cfg.CAKeyPath)
+		if err != nil {
+			log.Fatalf("gateway: load CA: %v", err)
+		}
+
+		// Build rewriters based on MITM domains
+		var rewriters []mitm.Rewriter
+		for _, domain := range cfg.MITMDomains {
+			if domain == "api.telegram.org" {
+				rw, err := mitm.NewTelegramRewriter()
+				if err != nil {
+					log.Printf("gateway: telegram rewriter disabled: %v", err)
+				} else {
+					rewriters = append(rewriters, rw)
+					log.Printf("gateway: telegram token rewriter enabled")
+				}
+			}
+		}
+
+		handler := mitm.NewHandler(cfg.MITMDomains, caCert, rewriters)
+		p.RegisterHandler(handler)
+		log.Printf("gateway: MITM enabled for domains: %v", cfg.MITMDomains)
+	}
+
 	go func() {
 		if err := p.ListenAndServe(); err != nil {
 			log.Fatalf("gateway: proxy: %v", err)

@@ -1,0 +1,5 @@
+name: coder
+runtime: codex
+features:
+  telegram:
+    allowed_chat_ids: ["${TELEGRAM_CHAT_ID}"]

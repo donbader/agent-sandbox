@@ -356,4 +356,107 @@ func TestGenerator_Run(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(gwCfg), "listen:")
 	})
+
+	t.Run("with gateway and bridge (telegram)", func(t *testing.T) {
+		srcDir := t.TempDir()
+		outDir := t.TempDir()
+
+		// Create minimal gateway source in the project dir
+		gwDir := filepath.Join(srcDir, "gateway")
+		require.NoError(t, os.MkdirAll(filepath.Join(gwDir, "cmd", "gateway"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(gwDir, "go.mod"), []byte("module gateway\ngo 1.24\n"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(gwDir, "cmd", "gateway", "main.go"), []byte("package main\nfunc main() {}\n"), 0644))
+
+		g := &Generator{
+			Config: &config.AgentConfig{
+				Name:    "coder",
+				Runtime: "codex",
+				Features: map[string]map[string]any{
+					"telegram": {"allowed_chat_ids": []any{"123456"}},
+				},
+			},
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "codex",
+				BaseImage: "node:22-slim",
+				Install:   []string{"npm install -g @openai/codex@latest"},
+				Cmd:       []string{"sleep", "infinity"},
+				User:      "agent",
+			},
+			Features: []*resolve.FeatureContributions{
+				{
+					MITMDomains:   []string{"api.telegram.org"},
+					BridgeChannel: "telegram",
+					EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
+				},
+			},
+			Gateway: true,
+			Bridge:  true,
+			Dir:     srcDir,
+			OutDir:  outDir,
+		}
+
+		err := g.Run()
+		require.NoError(t, err)
+
+		// Dockerfile should have bridge build stage
+		df, err := os.ReadFile(filepath.Join(outDir, "Dockerfile"))
+		require.NoError(t, err)
+		dfStr := string(df)
+		assert.Contains(t, dfStr, "FROM node:22-slim AS bridge-build")
+		assert.Contains(t, dfStr, "RUN npm install")
+		assert.Contains(t, dfStr, "RUN npm run build")
+		assert.Contains(t, dfStr, "COPY --from=bridge-build /src/dist/ /opt/bridge/dist/")
+		assert.Contains(t, dfStr, "COPY bridge-config.json /opt/bridge/config.json")
+
+		// Dockerfile should install CA cert
+		assert.Contains(t, dfStr, "COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt")
+		assert.Contains(t, dfStr, "RUN update-ca-certificates")
+
+		// Entrypoint should start bridge instead of agent directly
+		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
+		require.NoError(t, err)
+		epStr := string(ep)
+		assert.Contains(t, epStr, "exec node /opt/bridge/dist/index.js")
+		assert.NotContains(t, epStr, "exec su -c")
+
+		// Gateway config should have MITM domains
+		gwCfg, err := os.ReadFile(filepath.Join(outDir, "gateway-config.yaml"))
+		require.NoError(t, err)
+		gwCfgStr := string(gwCfg)
+		assert.Contains(t, gwCfgStr, "mitm_domains:")
+		assert.Contains(t, gwCfgStr, "api.telegram.org")
+		assert.Contains(t, gwCfgStr, "ca_cert: /etc/gateway/ca.crt")
+		assert.Contains(t, gwCfgStr, "ca_key: /etc/gateway/ca.key")
+
+		// CA cert should be generated
+		_, err = os.Stat(filepath.Join(outDir, "certs", "ca.crt"))
+		assert.NoError(t, err)
+		_, err = os.Stat(filepath.Join(outDir, "certs", "ca.key"))
+		assert.NoError(t, err)
+
+		// Bridge config should exist with correct content
+		bridgeCfg, err := os.ReadFile(filepath.Join(outDir, "bridge-config.json"))
+		require.NoError(t, err)
+		bridgeCfgStr := string(bridgeCfg)
+		assert.Contains(t, bridgeCfgStr, `"channel": "telegram"`)
+		assert.Contains(t, bridgeCfgStr, `"agent_cmd"`)
+		assert.Contains(t, bridgeCfgStr, `"allowed_chat_ids"`)
+		assert.Contains(t, bridgeCfgStr, `"123456"`)
+
+		// Bridge source should be copied
+		_, err = os.Stat(filepath.Join(outDir, "bridge-src", "package.json"))
+		assert.NoError(t, err)
+		_, err = os.Stat(filepath.Join(outDir, "bridge-src", "tsconfig.json"))
+		assert.NoError(t, err)
+
+		// docker-compose.yml should have TELEGRAM_BOT_TOKEN
+		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
+		require.NoError(t, err)
+		assert.Contains(t, string(dc), "TELEGRAM_BOT_TOKEN")
+
+		// .env.example should have TELEGRAM_BOT_TOKEN
+		env, err := os.ReadFile(filepath.Join(outDir, ".env.example"))
+		require.NoError(t, err)
+		assert.Contains(t, string(env), "TELEGRAM_BOT_TOKEN=")
+	})
 }

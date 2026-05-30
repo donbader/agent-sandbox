@@ -27,7 +27,7 @@ internal/
 ext/
   plugins/              ← external plugins (per-plugin versioning)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
-bridge/                 ← (Phase 4) Bridge TypeScript runtime (embedded in CLI)
+bridge/                 ← Bridge TypeScript runtime (grammy + agent process spawning)
 sdk/                    ← Gateway handler interface (for feature plugins)
 docs/                   ← Design documents
 templates/              ← Dockerfile.tmpl, entrypoint.sh template
