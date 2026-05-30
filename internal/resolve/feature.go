@@ -15,63 +15,20 @@ type FeatureConfig struct {
 	Description string `yaml:"description"`
 }
 
-// FeatureContributions holds what a feature adds to the build.
-type FeatureContributions struct {
-	Commands        []string // RUN commands for Dockerfile
-	EntrypointHooks []string // scripts to run on container start (source paths)
-	Volumes         []string // named volumes (e.g., "name:/path")
-	HomeOverride    string   // directory to copy into home on start
-}
-
-// ResolveFeature finds a feature plugin by name and returns its contributions
-// based on the user's config for that feature.
-// Resolution order: local ./ext/plugins/<name>/ → embedded core plugins.
+// ResolveFeature finds a feature plugin by name and returns its contributions.
+// Resolution order: registered plugin → local ext/plugins/ → embedded core.
 func ResolveFeature(projectDir string, name string, userConfig map[string]any) (*FeatureContributions, error) {
-	// Verify feature.yaml exists (local ext/plugins or embedded core)
+	// Check if plugin is registered (has implementation code)
+	if plugin, ok := registry[name]; ok {
+		return plugin.Resolve(projectDir, userConfig)
+	}
+
+	// Fallback: verify feature.yaml exists (for future external plugins without Go code)
 	if !featureExists(projectDir, name) {
-		return nil, fmt.Errorf("unknown feature %q: no feature.yaml found in ./ext/plugins/%s/ or built-in plugins", name, name)
+		return nil, fmt.Errorf("unknown feature %q: no registered plugin or feature.yaml found", name)
 	}
 
-	// Extract contributions from user config
-	contrib := &FeatureContributions{}
-
-	if cmds, ok := userConfig["commands"]; ok {
-		if arr, ok := cmds.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.Commands = append(contrib.Commands, s)
-				}
-			}
-		}
-	}
-
-	if hooks, ok := userConfig["entrypoint_hooks"]; ok {
-		if arr, ok := hooks.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.EntrypointHooks = append(contrib.EntrypointHooks, s)
-				}
-			}
-		}
-	}
-
-	if vols, ok := userConfig["runtime_volumes"]; ok {
-		if arr, ok := vols.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.Volumes = append(contrib.Volumes, s)
-				}
-			}
-		}
-	}
-
-	if ho, ok := userConfig["home_override"]; ok {
-		if s, ok := ho.(string); ok {
-			contrib.HomeOverride = s
-		}
-	}
-
-	return contrib, nil
+	return nil, fmt.Errorf("feature %q has no registered implementation", name)
 }
 
 // featureExists checks if a feature plugin exists in local ext/plugins or embedded core.

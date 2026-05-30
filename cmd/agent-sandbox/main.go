@@ -8,6 +8,7 @@ import (
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate"
+	_ "github.com/donbader/agent-sandbox/internal/plugins" // register core feature plugins
 	"github.com/donbader/agent-sandbox/internal/resolve"
 	"github.com/spf13/cobra"
 )

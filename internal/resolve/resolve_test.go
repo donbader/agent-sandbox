@@ -100,23 +100,20 @@ func TestResolveInlineRuntime(t *testing.T) {
 }
 
 func TestResolveFeature(t *testing.T) {
-	t.Run("resolves from local plugins dir", func(t *testing.T) {
-		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "ext", "plugins", "custom-runtime")
-		require.NoError(t, os.MkdirAll(pluginDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "feature.yaml"), []byte(`
-name: custom-runtime
-description: test feature
-`), 0644))
+	// Register a test plugin (since we can't import custom-runtime due to circular dep)
+	testPlugin := &testFeaturePlugin{name: "custom-runtime"}
+	registry["custom-runtime"] = testPlugin
+	t.Cleanup(func() { delete(registry, "custom-runtime") })
 
+	t.Run("resolves via registered plugin", func(t *testing.T) {
 		userConfig := map[string]any{
-			"commands":        []any{"apt-get install -y ripgrep"},
+			"commands":         []any{"apt-get install -y ripgrep"},
 			"entrypoint_hooks": []any{"scripts/setup.sh"},
-			"runtime_volumes": []any{"agent-home:/home/agent"},
-			"home_override":   "home",
+			"runtime_volumes":  []any{"agent-home:/home/agent"},
+			"home_override":    "home",
 		}
 
-		contrib, err := ResolveFeature(dir, "custom-runtime", userConfig)
+		contrib, err := ResolveFeature("/any/dir", "custom-runtime", userConfig)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"apt-get install -y ripgrep"}, contrib.Commands)
 		assert.Equal(t, []string{"scripts/setup.sh"}, contrib.EntrypointHooks)
@@ -124,25 +121,67 @@ description: test feature
 		assert.Equal(t, "home", contrib.HomeOverride)
 	})
 
-
 	t.Run("unknown feature", func(t *testing.T) {
 		_, err := ResolveFeature("/nonexistent", "unknown-feature", map[string]any{})
 		assert.ErrorContains(t, err, "unknown feature")
 	})
 
 	t.Run("empty config", func(t *testing.T) {
-		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "ext", "plugins", "minimal")
-		require.NoError(t, os.MkdirAll(pluginDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "feature.yaml"), []byte(`
-name: minimal
-`), 0644))
+		minPlugin := &testFeaturePlugin{name: "minimal"}
+		registry["minimal"] = minPlugin
+		t.Cleanup(func() { delete(registry, "minimal") })
 
-		contrib, err := ResolveFeature(dir, "minimal", map[string]any{})
+		contrib, err := ResolveFeature("/any/dir", "minimal", map[string]any{})
 		require.NoError(t, err)
 		assert.Nil(t, contrib.Commands)
 		assert.Nil(t, contrib.EntrypointHooks)
 		assert.Nil(t, contrib.Volumes)
 		assert.Equal(t, "", contrib.HomeOverride)
 	})
+}
+
+// testFeaturePlugin is a simple FeaturePlugin for testing.
+type testFeaturePlugin struct {
+	name string
+}
+
+func (p *testFeaturePlugin) Name() string { return p.name }
+
+func (p *testFeaturePlugin) Resolve(_ string, userConfig map[string]any) (*FeatureContributions, error) {
+	contrib := &FeatureContributions{}
+
+	if cmds, ok := userConfig["commands"]; ok {
+		if arr, ok := cmds.([]any); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					contrib.Commands = append(contrib.Commands, s)
+				}
+			}
+		}
+	}
+	if hooks, ok := userConfig["entrypoint_hooks"]; ok {
+		if arr, ok := hooks.([]any); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					contrib.EntrypointHooks = append(contrib.EntrypointHooks, s)
+				}
+			}
+		}
+	}
+	if vols, ok := userConfig["runtime_volumes"]; ok {
+		if arr, ok := vols.([]any); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					contrib.Volumes = append(contrib.Volumes, s)
+				}
+			}
+		}
+	}
+	if ho, ok := userConfig["home_override"]; ok {
+		if s, ok := ho.(string); ok {
+			contrib.HomeOverride = s
+		}
+	}
+
+	return contrib, nil
 }
