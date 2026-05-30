@@ -8,4 +8,4 @@ features:
       - ./scripts/hello-world.sh
     runtime_volumes:
       - "agent-home:/home/agent"
-    home_override: "./home-override"
+    home_override: "./my-home"

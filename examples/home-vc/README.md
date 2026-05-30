@@ -20,16 +20,16 @@ agent-sandbox compose up --build
 1. `generate` reads `agent.yaml` and produces `.build/` artifacts
 2. The Dockerfile installs codex + ripgrep + fd-find
 3. On container start, the entrypoint:
-   - Copies `home/.gitconfig` → `/home/agent/.gitconfig`
+   - Copies `my-home/.gitconfig` → `/home/agent/.gitconfig`
    - Runs `scripts/sync-dotfiles.sh` (syncs dotfiles from a git repo if `DOTFILES_REPO` is set)
    - Starts `sleep infinity` (waiting for bridge in Phase 4)
 4. The named volume `agent-home` persists home directory across restarts
 
 ## Configuration
 
-| Field | Description |
-|-------|-------------|
-| `commands` | Additional apt packages to install |
-| `entrypoint_hooks` | Scripts to run on every container start |
-| `runtime_volumes` | Named volumes for persistence |
-| `home_override` | Directory whose contents are copied to `/home/agent` on start |
+| Field              | Description                                                   |
+| ------------------ | ------------------------------------------------------------- |
+| `commands`         | Additional apt packages to install                            |
+| `entrypoint_hooks` | Scripts to run on every container start                       |
+| `runtime_volumes`  | Named volumes for persistence                                 |
+| `home_override`    | Directory whose contents are copied to `/home/agent` on start |
