@@ -1,4 +1,4 @@
-// Package generate produces .build/ artifacts from agent config and plugin contributions.
+// Package generate produces .build/ artifacts from agent config and runtime data.
 package generate
 
 import (
@@ -9,39 +9,28 @@ import (
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
-	"github.com/donbader/agent-sandbox/sdk"
+	"github.com/donbader/agent-sandbox/internal/resolve"
 )
 
-// Generator produces build artifacts from config and plugin contributions.
+// Generator produces build artifacts from config and resolved runtime.
 type Generator struct {
 	Config  *config.AgentConfig
-	Runtime sdk.RuntimePlugin
+	Runtime *resolve.RuntimeConfig
 	Dir     string // source directory (where agent.yaml lives)
 	OutDir  string // output directory (.build/)
 }
 
 // Run generates all build artifacts.
 func (g *Generator) Run() error {
-	ctx := sdk.ContributeContext{
-		AgentName: g.Config.Name,
-		Config:    nil,
-		FleetDir:  g.Dir,
-	}
-
-	contrib, err := g.Runtime.Contribute(ctx)
-	if err != nil {
-		return fmt.Errorf("runtime plugin %q: %w", g.Runtime.Name(), err)
-	}
-
 	if err := os.MkdirAll(g.OutDir, 0755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 
-	if err := g.writeDockerfile(contrib); err != nil {
+	if err := g.writeDockerfile(); err != nil {
 		return err
 	}
 
-	if err := g.writeCompose(contrib); err != nil {
+	if err := g.writeCompose(); err != nil {
 		return err
 	}
 
@@ -53,28 +42,28 @@ func (g *Generator) Run() error {
 }
 
 // writeDockerfile generates .build/Dockerfile.
-func (g *Generator) writeDockerfile(contrib *sdk.RuntimeContributions) error {
+func (g *Generator) writeDockerfile() error {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("FROM %s\n\n", contrib.BaseImage))
+	b.WriteString(fmt.Sprintf("FROM %s\n\n", g.Runtime.BaseImage))
 
 	// Create agent user
-	b.WriteString("RUN useradd -m -s /bin/bash agent\n\n")
+	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n\n", g.Runtime.User))
 
-	// Runtime commands (install agent CLI)
-	for _, cmd := range contrib.Commands {
+	// Runtime install commands
+	for _, cmd := range g.Runtime.Install {
 		b.WriteString(fmt.Sprintf("RUN %s\n", cmd))
 	}
 	b.WriteString("\n")
 
 	// Switch to agent user
-	b.WriteString("USER agent\n")
-	b.WriteString("WORKDIR /home/agent\n\n")
+	b.WriteString(fmt.Sprintf("USER %s\n", g.Runtime.User))
+	b.WriteString(fmt.Sprintf("WORKDIR /home/%s\n\n", g.Runtime.User))
 
 	// CMD
-	if len(contrib.Cmd) > 0 {
-		quoted := make([]string, len(contrib.Cmd))
-		for i, c := range contrib.Cmd {
+	if len(g.Runtime.Cmd) > 0 {
+		quoted := make([]string, len(g.Runtime.Cmd))
+		for i, c := range g.Runtime.Cmd {
 			quoted[i] = fmt.Sprintf("%q", c)
 		}
 		b.WriteString(fmt.Sprintf("CMD [%s]\n", strings.Join(quoted, ", ")))
@@ -85,7 +74,7 @@ func (g *Generator) writeDockerfile(contrib *sdk.RuntimeContributions) error {
 }
 
 // writeCompose generates .build/docker-compose.yml.
-func (g *Generator) writeCompose(contrib *sdk.RuntimeContributions) error {
+func (g *Generator) writeCompose() error {
 	var b strings.Builder
 
 	b.WriteString("services:\n")

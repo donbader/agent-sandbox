@@ -8,17 +8,11 @@ import (
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate"
-	"github.com/donbader/agent-sandbox/plugins/codex"
-	"github.com/donbader/agent-sandbox/sdk"
+	"github.com/donbader/agent-sandbox/internal/resolve"
 	"github.com/spf13/cobra"
 )
 
 var version = "dev"
-
-// Runtime plugin registry
-var runtimes = map[string]sdk.RuntimePlugin{
-	"codex": codex.New(),
-}
 
 func main() {
 	root := &cobra.Command{
@@ -48,9 +42,20 @@ func generateCmd() *cobra.Command {
 				return err
 			}
 
-			runtime, ok := runtimes[cfg.Runtime]
-			if !ok {
-				return fmt.Errorf("unknown runtime %q (available: codex)", cfg.Runtime)
+			// Resolve runtime
+			var runtime *resolve.RuntimeConfig
+			if name := cfg.RuntimeName(); name != "" {
+				runtime, err = resolve.ResolveRuntime(dir, name)
+				if err != nil {
+					return err
+				}
+			} else if inline := cfg.RuntimeInline(); inline != nil {
+				runtime, err = resolve.ResolveInlineRuntime(inline)
+				if err != nil {
+					return err
+				}
+			} else {
+				return fmt.Errorf("agent.yaml: runtime must be a string or inline definition")
 			}
 
 			g := &generate.Generator{
@@ -86,7 +91,6 @@ func composeCmd() *cobra.Command {
 				return fmt.Errorf(".build/docker-compose.yml not found — run 'agent-sandbox generate' first")
 			}
 
-			// Build docker compose command with injected -f flag
 			composeArgs := append([]string{"-f", composePath}, args...)
 			c := exec.Command("docker", append([]string{"compose"}, composeArgs...)...)
 			c.Stdin = os.Stdin
