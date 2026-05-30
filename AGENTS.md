@@ -88,6 +88,12 @@ Rules:
 See docs/ for architecture, plugin system, configuration, and security docs.
 Refer to docs/migration-plan.md for the phased implementation plan.
 
+### Reference Docs
+
+- `docs/reference/bridge-protocol.md` — ACP protocol (bridge ↔ agent communication)
+- `docs/reference/docker-api-proxy.md` — Docker API validation design
+- `docs/reference/adr/` — Architecture Decision Records (why transparent proxy, why Go, etc.)
+
 ## Key Principles
 
 - Every phase produces a working `agent-sandbox generate && agent-sandbox compose up --build`
@@ -96,3 +102,69 @@ Refer to docs/migration-plan.md for the phased implementation plan.
 - Gateway handles all credential injection (MITM where needed, passthrough otherwise)
 - Bridge spawns agent as child process, loads channel plugins dynamically
 - Ephemeral by default — containers start fresh every restart
+
+## History
+
+Evolved from [agent-fleet](https://github.com/donbader/agent-fleet). This repo is self-contained — all design docs and reference material are here. No need to reference agent-fleet.
+
+## Phase Implementation Guide
+
+Each phase builds on the previous. After each phase, `agent-sandbox generate && agent-sandbox compose up --build` must work.
+
+### Phase 2: home-version-control Feature
+
+Implement `plugins/home-version-control/plugin.go` as a FeaturePlugin:
+- `ImageContribution.Commands` → RUN instructions in Dockerfile
+- `EntrypointContribution.Hooks` → scripts that run on container start
+- `ComposeContribution.Volumes` → named volumes in docker-compose.yml
+- Update `internal/generate/` to merge FeatureContributions into Dockerfile/compose
+- Add entrypoint.sh that runs hooks then starts agent
+- Home override: user's `./home/` dir → COPY to `/opt/home-override/` → cp on start
+
+### Phase 3: Gateway (Network Enforcement)
+
+Implement `gateway/` as a separate Go module (compiled into container image):
+- TCP listener on port 443 (iptables redirects all outbound traffic)
+- SNI extraction from TLS ClientHello
+- Passthrough mode: pipe bytes directly to destination (no MITM)
+- DNS resolver: intercept UDP port 53, resolve via gateway
+- Entrypoint: iptables setup → start gateway → start agent
+- Multi-stage Dockerfile: compile gateway binary + runtime image
+- Gateway runs as separate user (agent cannot kill it)
+- Read `docs/reference/adr/002-transparent-proxy.md` for design rationale
+
+### Phase 4: Bridge + Telegram
+
+Implement `bridge/` as TypeScript runtime:
+- Spawns agent CLI as child process
+- Loads channel plugins from `/opt/bridge/plugins/<name>/`
+- ACP protocol: stdin/stdout JSON messages between bridge and agent
+- Read `docs/reference/bridge-protocol.md` for protocol spec
+
+Implement `plugins/telegram/plugin.go` as FeaturePlugin:
+- GatewayContribution: MITM on `api.telegram.org`, inject bot token
+- BridgeContribution: embed TypeScript channel plugin (grammy library)
+- Config: `bot_token`, `allowed_users`
+
+### Phase 5: All Remaining Features
+
+- `plugins/github/` — GatewayContribution: MITM on `api.github.com`, inject PAT as Authorization header
+- `plugins/docker/` — ComposeContribution: DinD sidecar service. GatewayContribution: DockerHandler validates API requests. Read `docs/reference/docker-api-proxy.md`
+- `plugins/mcp-oauth/` — GatewayContribution: OAuth2 dynamic client registration + token refresh
+- `plugins/static-header/` — GatewayContribution: generic header injection for any endpoint
+- Additional runtimes: `plugins/claude-code/`, `plugins/pi/`
+
+### Phase 6: CLI Polish + Multi-Agent
+
+- `init` command: interactive scaffold (detect gh auth, suggest features)
+- `validate` command: config check + helpful errors
+- `plugins` command: list/info
+- `upgrade` command: self-update (check GitHub releases, download, replace binary)
+- `fleet.yaml` support: multiple agents, shared features with per-agent overrides
+
+### Phase 7: CI + Release
+
+- GitHub Actions: lint (golangci-lint), test, build
+- GoReleaser: multi-arch binaries
+- install.sh one-liner
+- README with quickstart
