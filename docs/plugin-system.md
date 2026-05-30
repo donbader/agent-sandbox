@@ -4,158 +4,238 @@
 
 Two plugin types with clear separation:
 
-- **RuntimePlugin** — sets base image + installs agent CLI. One per agent.
-- **FeaturePlugin** — additive capabilities (credentials, channels, Docker, home). Multiple per agent.
+- **RuntimePlugin** — data-driven (YAML + optional Dockerfile template). Sets base image + installs agent CLI. One per agent.
+- **FeaturePlugin** — hybrid (YAML metadata + Go code for gateway + TypeScript for bridge). Additive capabilities. Multiple per agent.
 
-## Interfaces
+**Key principle:** Plugin updates never require CLI upgrades. CLI is a generic template engine.
 
-```go
-package sdk
+## Plugin Directory Structure
 
-type RuntimePlugin interface {
-    Name() string
-    ConfigSchema() ConfigSchema
-    Contribute(ctx ContributeContext) (*RuntimeContributions, error)
-}
-
-type RuntimeContributions struct {
-    BaseImage string     // e.g. "node:22-slim"
-    Commands  []string   // install agent CLI (RUN instructions)
-    Cmd       []string   // what bridge spawns (e.g. ["codex", "--headless"])
-}
-
-type FeaturePlugin interface {
-    Name() string
-    ConfigSchema() ConfigSchema
-    Contribute(ctx ContributeContext) (*FeatureContributions, error)
-}
-
-type FeatureContributions struct {
-    Image      *ImageContribution
-    Gateway    *GatewayContribution
-    Bridge     *BridgeContribution
-    Compose    *ComposeContribution
-    Entrypoint *EntrypointContribution
-}
-```
-
-Minimal interfaces. All runtime logic lives inside Contributions (gateway handler, bridge source, entrypoint hooks). CLI calls `Contribute()` at build time to generate artifacts. Gateway and bridge also call `Contribute()` at startup to get their runtime handlers.
-
-## Feature Contributions (Grouped by Concern)
-
-```go
-type FeatureContributions struct {
-    Image      *ImageContribution
-    Gateway    *GatewayContribution
-    Bridge     *BridgeContribution
-    Compose    *ComposeContribution
-    Entrypoint *EntrypointContribution
-}
-```
-
-Each sub-struct is nil if the plugin doesn't contribute to that concern.
-
-```go
-// What goes into the Dockerfile (additive, cannot change base image)
-type ImageContribution struct {
-    Files     []File       // COPY into image (embed.FS source + dest path)
-    Commands  []string     // RUN commands (no FROM/ENTRYPOINT allowed)
-}
-
-// What the gateway needs at runtime
-type GatewayContribution struct {
-    Hosts      []string                                    // hosts this plugin handles
-    NewHandler func(cfg map[string]any) (RequestHandler, error)  // factory for runtime handler
-}
-
-type RequestHandler interface {
-    HandleRequest(req *http.Request) error
-}
-
-// CLI uses Hosts to generate gateway-config.yaml.
-// Gateway binary calls Contribute() at startup → uses NewHandler to create runtime handlers.
-// Same pattern as bridge loading TypeScript from BridgeContribution.Source.
-
-// Channel plugin for the bridge
-type BridgeContribution struct {
-    Name   string          // plugin name ("telegram", "slack")
-    Source embed.FS        // TypeScript source to extract
-    Config map[string]any  // runtime config passed to bridge
-}
-
-// TypeScript interface that channel plugins must implement:
-//
-//   export interface ChannelPlugin {
-//       name: string;
-//       start(config: Record<string, any>): Promise<void>;
-//       stop(): Promise<void>;
-//       onMessage(handler: (msg: IncomingMessage) => void): void;
-//       send(msg: OutgoingMessage): Promise<void>;
-//   }
-//
-// Bridge dynamically imports from /opt/bridge/plugins/<name>/
-// and calls start() with the Config from BridgeContribution.
-
-// Docker Compose service definition
-type ComposeContribution struct {
-    Services map[string]Service
-    Volumes  []string
-    Ports    []string
-    Env      []EnvVar
-}
-
-type EnvVar struct {
-    Key      string
-    Value    string
-    Strategy EnvStrategy  // Override | ErrorIfConflict | Append
-}
-
-// Scripts that run in entrypoint before agent starts
-type EntrypointContribution struct {
-    Hooks []Hook
-}
-
-type Hook struct {
-    Name     string    // for logging: "[entrypoint] running: github-setup"
-    Source   embed.FS  // script content
-    Priority int       // execution order (lower = runs first)
-}
-```
-
-## Why Grouped
-
-- **Clear ownership**: each generator (Dockerfile, compose, gateway) only reads its own sub-struct
-- **Explicit conflicts**: `EnvVar.Strategy` declares how to handle duplicates
-- **Ordered execution**: `Hook.Priority` controls entrypoint hook ordering
-- **Conflict detection**: same host claimed by two plugins → error at merge time
-- **Nil = not contributed**: plugin only fills what it needs, rest is nil
-
-## Module Structure
+### Runtime Plugins (Pure Data)
 
 ```
-plugins/<name>/
-  go.mod              ← independent Go module
-  plugin.go           ← implements sdk.Plugin
-  plugin_test.go
-  hooks/              ← entrypoint scripts (optional)
-  bridge/             ← TypeScript channel code (optional)
+plugins/
+  codex/
+    runtime.yaml            ← base image, install commands, default CMD
+    Dockerfile.tmpl         ← optional: custom Dockerfile template
+  claude-code/
+    runtime.yaml
+  pi/
+    runtime.yaml
 ```
 
-## Registry (Compile-Time)
+Runtime plugins are pure data — no Go code, no compilation. The CLI reads `runtime.yaml` and generates a Dockerfile using a built-in template (or the plugin's custom `Dockerfile.tmpl`).
 
-```go
-// cmd/agent-sandbox/plugins.go
-var Runtimes = []sdk.RuntimePlugin{
-    codex.New(), claudecode.New(), pi.New(),
-}
+### Feature Plugins (Data + Code)
 
-var Features = []sdk.FeaturePlugin{
-    github.New(), mcpoauth.New(), staticheader.New(),     // credentials
-    docker.New(), telegram.New(), slack.New(),              // features/channels
-    homevc.New(),                                          // home-version-control
-}
+```
+plugins/
+  github/
+    feature.yaml            ← metadata, config schema, hosts
+    gateway/                ← Go source: compiled during Docker build (not CLI build)
+      handler.go
+      go.mod
+  telegram/
+    feature.yaml            ← metadata, config schema
+    gateway/                ← Go: MITM handler for api.telegram.org
+      handler.go
+      go.mod
+    bridge/                 ← TypeScript: channel plugin
+      src/telegram.ts
+      package.json
+  home-version-control/
+    feature.yaml            ← metadata, config schema
+                            ← no gateway/, no bridge/ — pure config-driven
+  docker/
+    feature.yaml
+    gateway/                ← Go: Docker API validator
+      handler.go
+      go.mod
 ```
 
-All plugins compiled into one CLI binary and one gateway binary. No per-agent compilation. Config determines which runtime + features are active.
+Feature plugins have:
+- `feature.yaml` — always present (metadata, config schema, hosts)
+- `gateway/` — optional Go source, compiled during Docker multi-stage build
+- `bridge/` — optional TypeScript, copied into image
 
-CLI enforces at config load time: `runtime:` must match exactly one RuntimePlugin. `features:` keys must each match a FeaturePlugin.
+## Runtime Plugin Schema (runtime.yaml)
+
+```yaml
+name: codex
+base_image: node:22-slim
+install:
+  - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates
+  - npm install -g @openai/codex
+cmd: ["sleep", "infinity"]   # default CMD (bridge replaces this when active)
+user: agent
+```
+
+Fields:
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Plugin identifier (matches `runtime:` in agent.yaml) |
+| `base_image` | yes | Docker base image |
+| `install` | yes | Shell commands to install agent CLI + dependencies |
+| `cmd` | yes | Default CMD (overridden by bridge when channels are active) |
+| `user` | no | Runtime user (default: `agent`) |
+
+## Feature Plugin Schema (feature.yaml)
+
+```yaml
+name: github
+description: "GitHub PAT injection via gateway MITM"
+
+config_schema:
+  token:
+    type: string
+    required: true
+    env: true           # value is ${ENV_VAR} reference
+
+gateway:
+  hosts:
+    - "github.com"
+    - "*.github.com"
+    - "api.github.com"
+  mode: mitm            # mitm | passthrough
+
+bridge: false           # no bridge plugin
+
+compose: {}             # no extra services
+```
+
+```yaml
+name: telegram
+description: "Telegram bot channel via bridge"
+
+config_schema:
+  bot_token:
+    type: string
+    required: true
+    env: true
+  allowed_users:
+    type: array
+    items: string
+    required: true
+
+gateway:
+  hosts:
+    - "api.telegram.org"
+  mode: mitm
+
+bridge: true            # has bridge/ directory with TypeScript
+
+compose: {}
+```
+
+```yaml
+name: home-version-control
+description: "Custom packages, startup hooks, persistent volumes"
+
+config_schema:
+  commands:
+    type: array
+    items: string
+  entrypoint_hooks:
+    type: array
+    items: string
+  runtime_volumes:
+    type: array
+    items: string
+
+gateway: false          # no gateway involvement
+bridge: false           # no bridge plugin
+
+compose:
+  volumes_from_config: runtime_volumes   # maps config field → compose volumes
+```
+
+## How CLI Uses Plugins
+
+```
+agent-sandbox generate
+  │
+  ├── Read agent.yaml
+  ├── Find runtime plugin: plugins/<runtime>/runtime.yaml
+  ├── Find feature plugins: plugins/<feature>/feature.yaml (for each)
+  │
+  ├── Generate Dockerfile:
+  │     ├── FROM <runtime.base_image>
+  │     ├── RUN <runtime.install> commands
+  │     ├── RUN <home-vc.commands> (if configured)
+  │     ├── COPY gateway source (if any feature has gateway/)
+  │     ├── COPY bridge source (if any feature has bridge/)
+  │     ├── COPY hooks, home-override, etc.
+  │     └── CMD <runtime.cmd> (or bridge entrypoint if channels active)
+  │
+  ├── Generate gateway-config.yaml (merged hosts from all features)
+  ├── Generate bridge-config.json (channel plugins + agent cmd)
+  ├── Generate docker-compose.yml
+  └── Generate .env.example
+```
+
+## Plugin Resolution
+
+CLI looks for plugins in this order:
+1. `./plugins/<name>/` — local project directory (user overrides)
+2. Built-in plugins (embedded in CLI via go:embed as YAML/templates)
+
+This means:
+- CLI ships with default plugin data (embedded)
+- User can override any plugin by placing files in `./plugins/<name>/`
+- Plugin fix = update the yaml/template locally, no CLI upgrade needed
+
+## Gateway Compilation
+
+Gateway handlers are Go code, but they're compiled **during Docker build** (not CLI build):
+
+```dockerfile
+# Stage 1: Compile gateway with active handlers
+FROM golang:1.24 AS gateway-builder
+COPY .build/gateway-src/ /src/
+RUN cd /src && CGO_ENABLED=0 go build -o /gateway ./cmd/gateway
+```
+
+The CLI extracts gateway source + active feature handlers into `.build/gateway-src/`. Docker multi-stage compiles them. User doesn't need Go installed.
+
+## Bridge Loading
+
+Bridge is TypeScript. Feature plugins with `bridge: true` have their `bridge/` directory copied into the image:
+
+```
+.build/bridge-plugins/telegram/src/telegram.ts
+.build/bridge-plugins/slack/src/slack.ts
+```
+
+Bridge dynamically imports channel plugins at runtime from `/opt/bridge/plugins/<name>/`.
+
+## Custom Runtime (Inline)
+
+For runtimes not shipped with the CLI, users can define inline in agent.yaml:
+
+```yaml
+name: my-agent
+runtime:
+  base_image: python:3.12-slim
+  install:
+    - pip install my-agent-cli
+  cmd: ["my-agent-cli", "--headless"]
+```
+
+Or create a local `plugins/my-runtime/runtime.yaml`.
+
+## Why Data-Driven
+
+| Concern | Old (compile-time) | New (data-driven) |
+|---------|-------------------|-------------------|
+| Runtime plugin fix | CLI upgrade required | Edit yaml, re-generate |
+| New runtime | CLI release | Add runtime.yaml locally |
+| Gateway handler fix | CLI upgrade + rebuild | Edit Go source, rebuild container |
+| Bridge plugin fix | CLI upgrade + rebuild | Edit TypeScript, rebuild container |
+| CLI role | Contains all plugin logic | Generic template engine |
+| Plugin updates | Coupled to CLI releases | Independent of CLI releases |
+
+## Conflict Detection
+
+- Same host claimed by two features → error at generate time
+- Two features writing same compose volume → error
+- Two features with same entrypoint hook name → error (use priority to order)

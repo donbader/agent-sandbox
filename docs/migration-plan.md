@@ -6,6 +6,8 @@ New repo (`donbader/agent-sandbox`). agent-fleet stays in maintenance mode (secu
 
 **Principle:** Every phase produces a working `agent-sandbox generate && agent-sandbox compose up --build`. Each phase adds capabilities, never breaks what's already working.
 
+**Key design:** Plugins are data-driven. Runtime plugins are pure YAML. Feature plugins are YAML + optional code (Go gateway handlers compiled during Docker build, TypeScript bridge plugins). CLI is a generic template engine — plugin updates never require CLI upgrades.
+
 ## Phases
 
 ### Phase 0: Repo Setup ✅
@@ -32,8 +34,8 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent running in a container (direct entrypoint, no proxy, no bridge)
 ```
 
-- [x] `codex` RuntimePlugin (sets base image, installs codex CLI)
-- [x] `generate` command (reads agent.yaml → writes .build/)
+- [x] `plugins/codex/runtime.yaml` (base image, install commands, CMD)
+- [x] `generate` command (reads agent.yaml + runtime.yaml → writes .build/)
 - [x] `compose` passthrough command
 - [x] Dockerfile generation (single stage, no gateway)
 - [x] docker-compose.yml generation
@@ -45,6 +47,9 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] GoReleaser release pipeline (`.github/workflows/release.yml`)
 - [x] `examples/simple/` for quick testing
 - [x] `install.sh` one-liner
+- [ ] Convert codex plugin from Go code to `runtime.yaml` (data-driven)
+- [ ] Plugin resolution (local `./plugins/` → embedded defaults)
+- [ ] Inline runtime definition support in agent.yaml
 
 **Config:**
 ```yaml
@@ -62,12 +67,12 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent with custom packages, startup hooks, persistent home
 ```
 
-- [ ] `home-version-control` FeaturePlugin (`plugins/home-version-control/plugin.go`)
-- [ ] Update `internal/generate/` to merge FeatureContributions into Dockerfile
-- [ ] ImageContribution.Commands wiring (RUN in Dockerfile)
-- [ ] EntrypointContribution.Hooks wiring (scripts in entrypoint)
-- [ ] ComposeContribution.Volumes wiring (named volumes)
-- [ ] Entrypoint script (runs hooks → starts agent)
+- [ ] `plugins/home-version-control/feature.yaml`
+- [ ] Update `internal/generate/` to read feature.yaml and merge into Dockerfile
+- [ ] Image commands wiring (RUN in Dockerfile from config)
+- [ ] Entrypoint hooks wiring (scripts run on container start)
+- [ ] Compose volumes wiring (named volumes from config)
+- [ ] Entrypoint script template (runs hooks → starts agent)
 - [ ] Home override directory (./home/ → /opt/home-override/ → cp on start)
 - [ ] `examples/home-vc/` example
 
@@ -95,7 +100,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent with transparent proxy (all traffic passthrough, iptables enforced)
 ```
 
-- [ ] Gateway Go module (`gateway/`)
+- [ ] Gateway Go module (`gateway/`) — core proxy logic
 - [ ] TCP listener + SNI extraction
 - [ ] Passthrough mode (pipe bytes to destination)
 - [ ] DNS resolver (intercept UDP port 53)
@@ -103,6 +108,8 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [ ] Multi-stage Dockerfile (compile gateway + runtime)
 - [ ] Entrypoint: iptables setup → gateway start → hooks → agent start
 - [ ] Gateway runs as `gateway` user (agent cannot kill it)
+- [ ] `RequestHandler` interface in gateway (for feature handlers)
+- [ ] Handler registry generation (active features → imports)
 - [ ] Integration test (verify traffic routes through gateway)
 
 ---
@@ -118,12 +125,12 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [ ] Bridge TypeScript runtime (`bridge/`)
 - [ ] Agent process spawning (child process management)
 - [ ] Channel plugin loader (dynamic import from /opt/bridge/plugins/)
-- [ ] `telegram` FeaturePlugin (`plugins/telegram/plugin.go`)
-- [ ] GatewayContribution: MITM on api.telegram.org, inject bot token
-- [ ] BridgeContribution: embed TypeScript channel plugin (grammy)
-- [ ] MITM logic in gateway (TLS termination, HTTP interception)
+- [ ] `plugins/telegram/feature.yaml`
+- [ ] `plugins/telegram/gateway/handler.go` — MITM on api.telegram.org
+- [ ] `plugins/telegram/bridge/src/telegram.ts` — grammy channel plugin
+- [ ] MITM logic in gateway core (TLS termination, HTTP interception)
 - [ ] Sandbox CA generation
-- [ ] BridgeContribution wiring (extract TypeScript to .build/)
+- [ ] Bridge config generation (bridge-config.json)
 - [ ] Entrypoint: gateway → bridge → agent (process tree)
 - [ ] `examples/telegram/` example
 
@@ -137,12 +144,12 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → Full-featured agent: GitHub PAT, Docker, mcp-oauth, static-header
 ```
 
-- [ ] `github` FeaturePlugin (PAT injection via gateway MITM)
-- [ ] `docker` FeaturePlugin (DinD sidecar, DockerHandler, spawned container egress)
-- [ ] `mcp-oauth` FeaturePlugin (OAuth2 dynamic client registration)
-- [ ] `static-header` FeaturePlugin (generic header injection)
-- [ ] `claude-code` RuntimePlugin
-- [ ] `pi` RuntimePlugin
+- [ ] `plugins/github/feature.yaml` + `gateway/handler.go`
+- [ ] `plugins/docker/feature.yaml` + `gateway/handler.go` + compose sidecar
+- [ ] `plugins/mcp-oauth/feature.yaml` + `gateway/handler.go`
+- [ ] `plugins/static-header/feature.yaml` + `gateway/handler.go`
+- [ ] `plugins/claude-code/runtime.yaml`
+- [ ] `plugins/pi/runtime.yaml`
 - [ ] Security hardening (cap_drop, no-new-privileges, hidepid, file permissions)
 - [ ] `examples/full/` example (all features)
 
@@ -184,21 +191,20 @@ agent-sandbox upgrade                   # self-update
 | `pkg/gateway/` (proxy, sni) | `gateway/` | 3 | 80% |
 | `pkg/gateway/mitm.go` | `gateway/mitm.go` | 4, 5 | 80% |
 | `runtimes/channels-bridge/src/` | `bridge/src/` | 4 | 70% |
-| `pkg/compose/` | `internal/compose/` | 1 | 50% |
+| `runtimes/codex/` | `plugins/codex/runtime.yaml` | 1 | 30% |
+| `runtimes/codex/entrypoint.sh` | `templates/entrypoint.sh` | 2 | 50% |
 | `pkg/selfupdate/` | `internal/selfupdate/` | 6 | 90% |
-| `cmd/agent-fleet/cmd/` | `cmd/agent-sandbox/cmd/` | 1, 6 | 40% |
-| `runtimes/codex/` | `plugins/codex/` | 1 | 30% |
-| `runtimes/codex/entrypoint.sh` | `plugins/home-vc/` | 2 | 50% |
 | `pkg/config/` | `internal/config/` | 1 | 20% |
 
 ## What Gets Dropped
 
-- `runtimes/*/render.sh` — replaced by plugin Contribute()
-- `pkg/provider/resolver.go` — no remote providers, all compiled in
-- `images/gateway/` — gateway source embedded in CLI
+- `runtimes/*/render.sh` — replaced by runtime.yaml + template engine
+- `pkg/provider/resolver.go` — no remote providers, plugins are local or embedded
+- `images/gateway/` — gateway source embedded in CLI, compiled during Docker build
 - `agent-fleet tools ctx` — no render scripts to support
-- Template injection / user_base — replaced by home-version-control
+- Template injection / user_base — replaced by home-version-control feature
 - Default-deny egress model — replaced by allow-all + MITM where needed
+- Compile-time plugin Go interfaces — replaced by data-driven YAML
 
 ## agent-fleet Disposition
 

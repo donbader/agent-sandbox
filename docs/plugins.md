@@ -2,86 +2,87 @@
 
 ## Runtime Plugins
 
-Runtime plugins set `BaseImage` and install the agent CLI. Selected by the `runtime:` field. Only one per agent.
+Runtime plugins are pure data (YAML). They define the base image, install commands, and default CMD. Selected by the `runtime:` field in agent.yaml. Only one per agent.
 
 ```yaml
-runtime: codex    # uses codex RuntimePlugin → sets BaseImage + installs @openai/codex
+runtime: codex    # reads plugins/codex/runtime.yaml
 ```
 
-| Runtime | Base Image | Packages |
-|---------|-----------|----------|
-| `codex` | node:22-slim | git, curl, @openai/codex |
-| `claude-code` | node:22-slim | git, curl, @anthropic-ai/claude-code |
-| `pi` | node:22-slim | git, curl, pi-coding-agent |
+### Built-in Runtimes
 
-For unsupported runtimes:
+| Runtime | Base Image | Packages | CMD |
+|---------|-----------|----------|-----|
+| `codex` | node:22-slim | git, curl, @openai/codex | sleep infinity |
+| `claude-code` | node:22-slim | git, curl, @anthropic-ai/claude-code | sleep infinity |
+| `pi` | node:22-slim | git, curl, pi-coding-agent | sleep infinity |
+
+Default CMD is `sleep infinity` because without a bridge, there's no way to send prompts. When a channel feature is active, bridge becomes the entrypoint and spawns the agent CLI (e.g., `codex exec`).
+
+### Custom Runtime (Inline)
+
+For runtimes not shipped with the CLI:
+
 ```yaml
-plugins:
-  custom-runtime:
-    base_image: "python:3.12-slim"
-    packages: ["git", "my-agent-cli"]
-    cmd: "my-agent-cli"
+name: my-agent
+runtime:
+  base_image: python:3.12-slim
+  install:
+    - pip install my-agent-cli
+  cmd: ["my-agent-cli", "--headless"]
+```
+
+Or create `plugins/my-runtime/runtime.yaml` in your project directory.
+
+### runtime.yaml Format
+
+```yaml
+name: codex
+base_image: node:22-slim
+install:
+  - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates
+  - npm install -g @openai/codex
+cmd: ["sleep", "infinity"]
+user: agent
 ```
 
 ## Feature Plugins
 
 Additive capabilities. Multiple per agent. Listed under `features:` in config.
 
+Feature plugins are hybrid — YAML metadata + optional Go code (gateway) + optional TypeScript (bridge).
+
 ### Credential Features
 
-Declare egress rules + implement `RequestHandler` for credential injection at the gateway.
+| Plugin | Hosts | Injection | Has gateway/ |
+|--------|-------|-----------|-------------|
+| `github` | github.com, *.github.com | Header: `Authorization: token <PAT>` | yes |
+| `mcp-oauth` | user-defined MCP server URL | OAuth2 token refresh | yes |
+| `static-header` | user-defined endpoint | Static header injection | yes |
 
-| Plugin | Hosts | Injection |
-|--------|-------|-----------|
-| `github` | github.com, *.github.com | Header: `Authorization: token <PAT>` |
-| `mcp-oauth` | user-defined MCP server URL | OAuth2 dynamic client registration + token refresh |
-| `static-header` | user-defined endpoint | Static header injection (any API key) |
-
-Note: LLM API credentials (OpenAI, Anthropic) are handled by the runtime itself (codex device flow, claude login). No dedicated plugins needed — the agent stores its own auth token in the home directory.
-
-### mcp-oauth plugin
-
-Generic OAuth2 plugin for any MCP server. User provides the MCP URL, plugin handles:
-1. Dynamic client registration (RFC 7591)
-2. Authorization flow (redirect user to auth URL)
-3. Token exchange (code → access_token + refresh_token)
-4. Auto-refresh before expiry
-5. Inject `Authorization: Bearer <token>` on matching requests
-
-```yaml
-plugins:
-  mcp-oauth:
-    servers:
-      - url: "https://mcp.notion.com"
-        name: "notion"
-      - url: "https://mcp.linear.app"
-        name: "linear"
-```
-
-The plugin auto-derives egress rules from the configured URLs. User triggers auth via channel command (`/oauth notion`).
+Note: LLM API credentials (OpenAI, Anthropic) are handled by the runtime itself (codex device flow, claude login). No dedicated plugins needed.
 
 ### Channel Features
 
-Contribute both egress rules (gateway side) AND bridge plugin code (channel side). One plugin, two contributions.
+Contribute both gateway rules AND bridge TypeScript. One plugin, two directories.
 
-| Plugin | Egress | Bridge |
-|--------|--------|--------|
-| `telegram` | api.telegram.org → URL rewrite (bot token) | grammy bot, long-poll |
-| `slack` | slack.com → OAuth token refresh | Slack socket mode |
+| Plugin | Gateway | Bridge |
+|--------|---------|--------|
+| `telegram` | MITM api.telegram.org, inject bot token | grammy bot, long-poll |
+| `slack` | MITM slack.com, OAuth token refresh | Slack socket mode |
 
 ### Infrastructure Features
 
-| Plugin | Contributes |
-|--------|-------------|
-| `docker` | DinD sidecar, docker CLI, DOCKER_HOST env, DockerHandler in gateway |
-| `home-version-control` | Custom commands, entrypoint hooks, runtime volumes |
+| Plugin | What it does | Has gateway/ | Has bridge/ |
+|--------|-------------|-------------|-------------|
+| `docker` | DinD sidecar, DOCKER_HOST env, API validation | yes | no |
+| `home-version-control` | Custom commands, hooks, volumes | no | no |
 
-### home-version-control plugin
+### home-version-control
 
-Gives users direct control over image build commands, startup hooks, and persistent volumes. Replaces top-level `packages:` and `home:` fields — everything goes through the plugin model.
+Gives users direct control over image build commands, startup hooks, and persistent volumes.
 
 ```yaml
-plugins:
+features:
   home-version-control:
     commands:
       - "apt-get install -y ripgrep fd-find"
@@ -93,27 +94,57 @@ plugins:
       - "agent-home:/home/agent"
 ```
 
-| Field | Contribution | Behavior |
-|-------|-------------|----------|
-| `commands` | Image.Commands | RUN during docker build (after base packages) |
-| `entrypoint_hooks` | Entrypoint.Hooks | Scripts run on every container start (before agent) |
-| `runtime_volumes` | Compose.Volumes | Named volumes mounted at runtime |
+| Field | Effect |
+|-------|--------|
+| `commands` | RUN during docker build (after base packages) |
+| `entrypoint_hooks` | Scripts run on every container start (before agent) |
+| `runtime_volumes` | Named volumes mounted at runtime |
 
-The `./home/` override directory (if present) is auto-staged to `/opt/home-override/` and cp'd by a built-in hook. User's `entrypoint_hooks` run after the override copy.
+The `./home/` override directory (if present) is auto-staged to `/opt/home-override/` and cp'd by a built-in entrypoint hook.
 
-```go
-func (p *HomeVersionControl) Contribute(ctx sdk.ContributeContext) (*sdk.Contributions, error) {
-    cfg := parseConfig(ctx.Config)
-    return &sdk.Contributions{
-        Image: &sdk.ImageContribution{
-            Commands: cfg.Commands,
-        },
-        Entrypoint: &sdk.EntrypointContribution{
-            Hooks: loadHooks(cfg.EntrypointHooks),
-        },
-        Compose: &sdk.ComposeContribution{
-            Volumes: cfg.RuntimeVolumes,
-        },
-    }, nil
-}
+### mcp-oauth
+
+Generic OAuth2 plugin for any MCP server:
+
+```yaml
+features:
+  mcp-oauth:
+    servers:
+      - url: "https://mcp.notion.com"
+        name: "notion"
+      - url: "https://mcp.linear.app"
+        name: "linear"
 ```
+
+Handles: dynamic client registration (RFC 7591), authorization flow, token exchange, auto-refresh. User triggers auth via channel command (`/oauth notion`).
+
+### telegram
+
+```yaml
+features:
+  telegram:
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: ["donbader"]
+```
+
+Gateway: MITM on api.telegram.org, injects bot token via URL rewrite.
+Bridge: grammy-based long-poll bot, filters by allowed_users.
+
+### github
+
+```yaml
+features:
+  github:
+    token: "${GITHUB_PAT}"
+```
+
+Gateway: MITM on github.com/api.github.com, injects `Authorization: token <PAT>` header.
+
+### docker
+
+```yaml
+features:
+  docker: true
+```
+
+Adds DinD sidecar service, installs docker CLI, sets DOCKER_HOST, validates Docker API requests via gateway.

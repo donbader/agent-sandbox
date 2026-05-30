@@ -6,20 +6,19 @@
 agent-sandbox generate
   │
   ├── Detect mode: agent.yaml (single) or fleet.yaml (multi)
-  ├── Load RuntimePlugin from runtime: field
-  ├── Load FeaturePlugins from features: map
+  ├── Read runtime plugin: plugins/<runtime>/runtime.yaml
+  ├── Read feature plugins: plugins/<feature>/feature.yaml (for each)
   ├── Merge shared features (if fleet mode)
-  ├── Call Contribute() on runtime + each feature
   │
   └── Generate .build/:
-        ├── gateway-src/        (go:embed → gateway Go source)
-        ├── bridge/             (go:embed → bridge TypeScript)
-        ├── bridge-plugins/     (from feature embed.FS)
+        ├── gateway-src/        (embedded gateway core + feature gateway/ dirs)
+        ├── bridge/             (embedded bridge runtime)
+        ├── bridge-plugins/     (from feature bridge/ dirs)
         ├── home-override/      (from user's home/ dir)
-        ├── hooks/              (from features)
+        ├── hooks/              (from feature entrypoint hooks)
         ├── Dockerfile          (multi-stage: gateway compile + runtime)
-        ├── gateway-config.yaml (merged egress rules)
-        ├── bridge-config.json  (channels + runtime cmd)
+        ├── gateway-config.yaml (merged hosts from feature.yaml files)
+        ├── bridge-config.json  (channels + agent cmd from runtime.yaml)
         └── docker-compose.yml  (services, volumes, networks)
 
 agent-sandbox compose up --build -d
@@ -27,10 +26,17 @@ agent-sandbox compose up --build -d
   └── docker compose -f .build/docker-compose.yml up --build -d
 ```
 
+## Plugin Resolution
+
+CLI resolves plugins in order:
+1. `./plugins/<name>/` — local project directory (user overrides)
+2. Inline definition in agent.yaml (for custom runtimes)
+3. Built-in plugins (embedded in CLI binary as YAML/templates)
+
 ## Generated Dockerfile (Multi-Stage)
 
 ```dockerfile
-# Stage 1: Compile gateway
+# Stage 1: Compile gateway (only if features need it)
 FROM golang:1.24 AS gateway-builder
 COPY gateway-src/ /src/
 RUN cd /src && CGO_ENABLED=0 go build -o /gateway ./cmd/gateway
@@ -38,37 +44,95 @@ RUN cd /src && CGO_ENABLED=0 go build -o /gateway ./cmd/gateway
 # Stage 2: Runtime
 FROM node:22-slim
 
+# Base packages (from runtime.yaml install commands)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates iptables gosu docker.io ripgrep \
+    git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Agent CLI (from runtime.yaml)
 RUN npm install -g @openai/codex
 
+# Feature: home-version-control commands
+RUN apt-get update && apt-get install -y ripgrep fd-find
+
+# Bridge (if channels active)
 COPY bridge/ /opt/bridge/
 RUN cd /opt/bridge && npm install --production
 COPY bridge-plugins/telegram/ /opt/bridge/plugins/telegram/
 
+# Home override
 COPY home-override/ /opt/home-override/
-COPY packages.sh /tmp/packages.sh
-RUN chmod +x /tmp/packages.sh && /tmp/packages.sh && rm /tmp/packages.sh
 
+# Gateway binary (if features need it)
 COPY --from=gateway-builder /gateway /usr/local/bin/gateway
+COPY gateway-config.yaml /etc/gateway/config.yaml
+
+# Entrypoint hooks
 COPY hooks/ /opt/entrypoint-hooks/
 
+# Users
 RUN useradd -m -s /bin/bash agent && useradd -r -s /usr/sbin/nologin gateway
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["node", "/opt/bridge/src/index.js"]
+CMD ["sleep", "infinity"]
 ```
 
-## Distribution
+### Dockerfile Without Gateway/Bridge (Phase 1-2)
 
-- **Gateway source**: embedded in CLI via `go:embed`. Extracted to `.build/gateway-src/`. Compiled in Docker multi-stage (user doesn't need Go).
-- **Bridge source**: embedded in CLI via `go:embed`. Extracted to `.build/bridge/`.
-- **Channel plugins**: embedded in each plugin's Go module via `go:embed`. Extracted to `.build/bridge-plugins/`.
+When no features need gateway or bridge, the Dockerfile is simple:
+
+```dockerfile
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @openai/codex
+
+RUN useradd -m -s /bin/bash agent
+USER agent
+WORKDIR /home/agent
+
+CMD ["sleep", "infinity"]
+```
+
+## What Gets Embedded in CLI (go:embed)
+
+| Content | Purpose | Size |
+|---------|---------|------|
+| Gateway core source | TCP proxy, SNI, MITM framework | ~15MB |
+| Bridge runtime | TypeScript: process spawning, plugin loader | ~5MB |
+| Built-in plugin YAML | runtime.yaml + feature.yaml defaults | ~10KB |
+| Entrypoint template | Shell script template | ~2KB |
+
+Gateway handlers (per-feature Go code) are NOT embedded in CLI. They live in plugin directories and are copied to `.build/gateway-src/` at generate time.
+
+## Gateway Compilation
+
+The gateway binary is compiled during Docker build, not CLI build:
+
+1. CLI extracts gateway core source to `.build/gateway-src/`
+2. CLI copies active feature `gateway/` dirs into `.build/gateway-src/handlers/`
+3. CLI generates `handlers_registry.go` (imports active handlers)
+4. Docker multi-stage compiles everything into one binary
+
+This means:
+- Gateway handler fixes = edit local `plugins/<name>/gateway/`, rebuild container
+- No CLI upgrade needed for gateway fixes
+- User doesn't need Go installed (Docker handles compilation)
+
+## Bridge Loading
+
+Bridge is TypeScript. Runs as the container entrypoint when channels are active:
+
+1. CLI extracts bridge runtime to `.build/bridge/`
+2. CLI copies active feature `bridge/` dirs to `.build/bridge-plugins/<name>/`
+3. Bridge dynamically imports plugins at runtime from `/opt/bridge/plugins/<name>/`
+4. Bridge spawns agent CLI as child process (reads cmd from bridge-config.json)
 
 ## Multi-Agent Topology
 
@@ -77,7 +141,7 @@ CMD ["node", "/opt/bridge/src/index.js"]
 │                                                              │
 │  ┌─ coder ───────────────────────────────────────────────┐  │
 │  │  Gateway (github + docker + telegram rules)            │  │
-│  │  Bridge → codex                                        │  │
+│  │  Bridge → codex exec                                   │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌─ reviewer ────────────────────────────────────────────┐  │
@@ -92,7 +156,7 @@ CMD ["node", "/opt/bridge/src/index.js"]
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Each agent has its own gateway instance (same binary, different config). Agents share the network (can communicate). DinD shared if multiple agents need Docker.
+Each agent has its own gateway instance (same core, different config + handlers). DinD shared if multiple agents need Docker.
 
 ## Project Structure
 
@@ -100,41 +164,54 @@ Each agent has its own gateway instance (same binary, different config). Agents 
 agent-sandbox/
   go.work
 
-  cmd/agent-sandbox/        ← CLI binary
-    go.mod
+  cmd/agent-sandbox/        ← CLI binary (generic template engine)
     main.go
-    cmd/                    ← cobra commands
-    plugins.go              ← registry
+    cmd/                    ← cobra commands (generate, compose)
 
-  sdk/                      ← Plugin SDK
+  sdk/                      ← Plugin SDK (interfaces for gateway handlers)
     go.mod
     plugin.go
-    contributions.go
 
-  gateway/                  ← Universal gateway binary
+  gateway/                  ← Gateway core source (embedded in CLI)
     go.mod
     cmd/gateway/main.go
-    proxy.go, sni.go, mitm.go, injector_registry.go
+    proxy.go, sni.go, mitm.go
+    handler_interface.go    ← RequestHandler interface
 
-  bridge/                   ← Bridge runtime (TypeScript)
+  bridge/                   ← Bridge runtime TypeScript (embedded in CLI)
     package.json
     src/index.ts, agent.ts, plugin-loader.ts, types.ts
 
-  plugins/
-    codex/      (go.mod, plugin.go)
-    claude-code/(go.mod, plugin.go)
-    github/     (go.mod, plugin.go, plugin_test.go)
-    mcp-oauth/  (go.mod, plugin.go)
-    static-header/ (go.mod, plugin.go)
-    docker/     (go.mod, plugin.go)
-    telegram/   (go.mod, plugin.go, bridge/src/telegram.ts)
-    slack/      (go.mod, plugin.go, bridge/src/slack.ts)
+  plugins/                  ← Plugin data + code
+    codex/
+      runtime.yaml
+    claude-code/
+      runtime.yaml
+    pi/
+      runtime.yaml
+    github/
+      feature.yaml
+      gateway/handler.go, go.mod
+    telegram/
+      feature.yaml
+      gateway/handler.go, go.mod
+      bridge/src/telegram.ts, package.json
+    docker/
+      feature.yaml
+      gateway/handler.go, go.mod
+    home-version-control/
+      feature.yaml
+    mcp-oauth/
+      feature.yaml
+      gateway/handler.go, go.mod
+    static-header/
+      feature.yaml
+      gateway/handler.go, go.mod
 
   internal/
-    compose/    ← docker-compose.yml generation
-    dockerfile/ ← Dockerfile generation
+    generate/   ← Dockerfile + compose generation (template engine)
     config/     ← agent.yaml + fleet.yaml parsing
-    merge/      ← contribution merging + conflict detection
+    resolve/    ← plugin resolution (local → embedded)
 
-  templates/    ← entrypoint.sh, etc.
+  templates/    ← entrypoint.sh template, Dockerfile.tmpl
 ```

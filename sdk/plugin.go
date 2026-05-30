@@ -1,22 +1,13 @@
 // Package sdk defines the plugin interfaces for agent-sandbox.
 //
-// Two plugin types:
-//   - RuntimePlugin: sets base image + agent CLI. One per agent.
-//   - FeaturePlugin: additive capabilities. Multiple per agent.
+// Runtime plugins are data-driven (runtime.yaml) — no Go interface needed.
+// Feature plugins use Go interfaces for gateway handlers (compiled during Docker build).
 package sdk
 
 import (
 	"embed"
 	"net/http"
 )
-
-// RuntimePlugin sets the base image and installs the agent CLI.
-// Only one RuntimePlugin is active per agent (selected by the runtime: field).
-type RuntimePlugin interface {
-	Name() string
-	ConfigSchema() ConfigSchema
-	Contribute(ctx ContributeContext) (*RuntimeContributions, error)
-}
 
 // FeaturePlugin provides additive capabilities (credentials, channels, Docker, home).
 // Multiple FeaturePlugins can be active per agent (listed under features:).
@@ -39,13 +30,6 @@ type ConfigSchema struct {
 	JSONSchema []byte
 }
 
-// RuntimeContributions is what a RuntimePlugin provides.
-type RuntimeContributions struct {
-	BaseImage string   // e.g. "node:22-slim"
-	Commands  []string // install agent CLI (RUN instructions)
-	Cmd       []string // what bridge spawns (e.g. ["codex", "--headless"])
-}
-
 // FeatureContributions is what a FeaturePlugin provides.
 type FeatureContributions struct {
 	Image      *ImageContribution
@@ -56,7 +40,6 @@ type FeatureContributions struct {
 }
 
 // ImageContribution adds files and commands to the Dockerfile.
-// Cannot change the base image (that's RuntimePlugin's job).
 type ImageContribution struct {
 	Files    []File   // COPY into image
 	Commands []string // RUN commands

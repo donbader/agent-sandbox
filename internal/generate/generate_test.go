@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/donbader/agent-sandbox/internal/config"
-	"github.com/donbader/agent-sandbox/plugins/codex"
+	"github.com/donbader/agent-sandbox/internal/resolve"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,15 +19,21 @@ func TestGenerator_Run(t *testing.T) {
 				Name:    "coder",
 				Runtime: "codex",
 			},
-			Runtime: codex.New(),
-			Dir:     t.TempDir(),
-			OutDir:  outDir,
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "codex",
+				BaseImage: "node:22-slim",
+				Install:   []string{"npm install -g @openai/codex@latest"},
+				Cmd:       []string{"sleep", "infinity"},
+				User:      "agent",
+			},
+			Dir:    t.TempDir(),
+			OutDir: outDir,
 		}
 
 		err := g.Run()
 		require.NoError(t, err)
 
-		// Check Dockerfile exists and has expected content
+		// Check Dockerfile
 		df, err := os.ReadFile(filepath.Join(outDir, "Dockerfile"))
 		require.NoError(t, err)
 		assert.Contains(t, string(df), "FROM node:22-slim")
@@ -43,6 +49,34 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, string(dc), "container_name: coder")
 	})
 
+	t.Run("inline runtime", func(t *testing.T) {
+		outDir := t.TempDir()
+		g := &Generator{
+			Config: &config.AgentConfig{
+				Name:    "my-agent",
+				Runtime: map[string]any{"base_image": "python:3.12-slim"},
+			},
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "",
+				BaseImage: "python:3.12-slim",
+				Install:   []string{"pip install my-agent-cli"},
+				Cmd:       []string{"my-agent-cli", "--headless"},
+				User:      "agent",
+			},
+			Dir:    t.TempDir(),
+			OutDir: outDir,
+		}
+
+		err := g.Run()
+		require.NoError(t, err)
+
+		df, err := os.ReadFile(filepath.Join(outDir, "Dockerfile"))
+		require.NoError(t, err)
+		assert.Contains(t, string(df), "FROM python:3.12-slim")
+		assert.Contains(t, string(df), "pip install my-agent-cli")
+		assert.Contains(t, string(df), `CMD ["my-agent-cli", "--headless"]`)
+	})
+
 	t.Run("with env vars", func(t *testing.T) {
 		outDir := t.TempDir()
 		g := &Generator{
@@ -53,9 +87,15 @@ func TestGenerator_Run(t *testing.T) {
 					"github": {"token": "${GITHUB_PAT}"},
 				},
 			},
-			Runtime: codex.New(),
-			Dir:     t.TempDir(),
-			OutDir:  outDir,
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "codex",
+				BaseImage: "node:22-slim",
+				Install:   []string{"npm install -g @openai/codex@latest"},
+				Cmd:       []string{"sleep", "infinity"},
+				User:      "agent",
+			},
+			Dir:    t.TempDir(),
+			OutDir: outDir,
 		}
 
 		err := g.Run()
@@ -79,9 +119,15 @@ func TestGenerator_Run(t *testing.T) {
 				Name:    "coder",
 				Runtime: "codex",
 			},
-			Runtime: codex.New(),
-			Dir:     t.TempDir(),
-			OutDir:  outDir,
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "codex",
+				BaseImage: "node:22-slim",
+				Install:   []string{"npm install -g @openai/codex@latest"},
+				Cmd:       []string{"sleep", "infinity"},
+				User:      "agent",
+			},
+			Dir:    t.TempDir(),
+			OutDir: outDir,
 		}
 
 		err := g.Run()
