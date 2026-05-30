@@ -4,3 +4,5 @@ install:
   - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*
   - npm install -g @openai/codex@latest
 cmd: ["sleep", "infinity"]
+ports:
+  - "1455:1455"

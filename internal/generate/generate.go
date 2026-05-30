@@ -225,6 +225,14 @@ func (g *Generator) writeCompose() error {
 		b.WriteString("      - NET_ADMIN\n")
 	}
 
+	// Ports from runtime
+	if len(g.Runtime.Ports) > 0 {
+		b.WriteString("    ports:\n")
+		for _, p := range g.Runtime.Ports {
+			b.WriteString(fmt.Sprintf("      - %q\n", p))
+		}
+	}
+
 	// Volumes from features
 	volumes := g.collectVolumes()
 	if len(volumes) > 0 {

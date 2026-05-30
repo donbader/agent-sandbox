@@ -261,6 +261,34 @@ func TestGenerator_Run(t *testing.T) {
 		assert.True(t, os.IsNotExist(err))
 	})
 
+	t.Run("with runtime ports", func(t *testing.T) {
+		outDir := t.TempDir()
+		g := &Generator{
+			Config: &config.AgentConfig{
+				Name:    "coder",
+				Runtime: "codex",
+			},
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "codex",
+				BaseImage: "node:22-slim",
+				Install:   []string{"npm install -g @openai/codex@latest"},
+				Cmd:       []string{"sleep", "infinity"},
+				User:      "agent",
+				Ports:     []string{"1455:1455"},
+			},
+			Dir:    t.TempDir(),
+			OutDir: outDir,
+		}
+
+		err := g.Run()
+		require.NoError(t, err)
+
+		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
+		require.NoError(t, err)
+		assert.Contains(t, string(dc), "ports:")
+		assert.Contains(t, string(dc), "1455:1455")
+	})
+
 	t.Run("with gateway", func(t *testing.T) {
 		srcDir := t.TempDir()
 		outDir := t.TempDir()
