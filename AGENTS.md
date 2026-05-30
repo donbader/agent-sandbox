@@ -17,21 +17,32 @@ agent-sandbox — an opinionated agent sandbox orchestrator. Deploys AI coding a
 
 ```
 sdk/                    ← Plugin interfaces (RuntimePlugin, FeaturePlugin)
-cmd/agent-sandbox/      ← CLI binary
+cmd/agent-sandbox/      ← CLI entrypoint (main.go)
 internal/
-  config/               ← agent.yaml + fleet.yaml parsing
+  config/               ← agent.yaml parsing
   generate/             ← Dockerfile + docker-compose.yml generation
-  compose/              ← compose passthrough
-gateway/                ← Transparent proxy (separate Go module, embedded in CLI)
-bridge/                 ← TypeScript bridge runtime (embedded in CLI)
 plugins/
   codex/                ← RuntimePlugin: codex
-  claude-code/          ← RuntimePlugin: claude-code
-  github/               ← FeaturePlugin: GitHub PAT injection
-  telegram/             ← FeaturePlugin: Telegram channel
-  docker/               ← FeaturePlugin: DinD + DockerHandler
-  home-version-control/ ← FeaturePlugin: packages, hooks, volumes
+gateway/                ← (Phase 3) Transparent proxy
+bridge/                 ← (Phase 4) TypeScript bridge runtime
 docs/                   ← Design documents
+```
+
+## Commands
+
+```bash
+# Build
+go build ./cmd/agent-sandbox/
+
+# Test
+go test ./...
+
+# Lint (when golangci-lint is available)
+golangci-lint run ./...
+
+# End-to-end
+agent-sandbox generate -d <dir>        # reads agent.yaml → writes .build/
+agent-sandbox compose up --build       # docker compose passthrough
 ```
 
 ## Conventions
@@ -41,15 +52,6 @@ docs/                   ← Design documents
 - golangci-lint must pass
 - Each plugin is self-contained in its own directory
 - SDK interfaces are stable — additive changes only
-
-## Commands
-
-```bash
-make build          # build CLI binary
-make test           # run all tests
-make lint           # golangci-lint
-make check          # lint + test
-```
 
 ## Design Docs
 
