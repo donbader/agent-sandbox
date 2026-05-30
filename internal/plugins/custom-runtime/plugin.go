@@ -55,5 +55,15 @@ func (p *Plugin) Resolve(projectDir string, userConfig map[string]any) (*resolve
 		}
 	}
 
+	if envs, ok := userConfig["env"]; ok {
+		if arr, ok := envs.([]any); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					contrib.EnvVars = append(contrib.EnvVars, s)
+				}
+			}
+		}
+	}
+
 	return contrib, nil
 }

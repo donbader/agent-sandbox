@@ -468,6 +468,16 @@ func (g *Generator) scanEnvVars() []string {
 		}
 	}
 
+	// Also collect EnvVars from feature plugin contributions
+	for _, f := range g.Features {
+		for _, v := range f.EnvVars {
+			if !seen[v] {
+				seen[v] = true
+				vars = append(vars, v)
+			}
+		}
+	}
+
 	return vars
 }
 

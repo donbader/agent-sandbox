@@ -21,6 +21,11 @@ config_schema:
     home_override:
       type: string
       description: Directory to copy into /home/agent on start (default "./home")
+    env:
+      type: array
+      items:
+        type: string
+      description: Environment variables to pass to the container (added to .env.example)
 
 contributions:
   image:
