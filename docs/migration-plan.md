@@ -207,16 +207,15 @@ agent-sandbox upgrade                   # self-update
 
 ---
 
-### Phase 7: CI + Release
+### Phase 7: CI + Polish
 
 **Scope:**
-- GitHub Actions (lint, test, build)
-- GoReleaser (multi-arch binaries)
+- GitHub Actions CI (lint, test, build on PR)
 - install.sh one-liner
 - README with quickstart
 - Migration guide for agent-fleet users
 
-**Port from agent-fleet:** `.github/workflows/`, `.goreleaser.yml`, `install.sh`
+**Note:** GoReleaser release pipeline was added in Phase 1 (`.github/workflows/release.yml` + `.goreleaser.yml`). Tag any commit on main to trigger a release.
 
 ---
 
