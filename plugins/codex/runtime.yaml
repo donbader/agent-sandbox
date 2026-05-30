@@ -5,4 +5,5 @@ install:
   - npm install -g @openai/codex@latest
 cmd: ["sleep", "infinity"]
 ports:
+  # codex listens on port 1455 for OAuth sign-in callback
   - "1455:1455"
