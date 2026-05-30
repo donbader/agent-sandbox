@@ -90,6 +90,8 @@ features:
       - "agent-home:/home/agent"
 ```
 
+- [ ] Plugin hybrid architecture: feature.yaml points to implementation code (plugin owns its logic)
+
 ---
 
 ### Phase 3: Gateway (Network Enforcement)
