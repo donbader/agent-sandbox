@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	sandbox "github.com/donbader/agent-sandbox"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,12 +25,11 @@ type FeatureContributions struct {
 
 // ResolveFeature finds a feature plugin by name and returns its contributions
 // based on the user's config for that feature.
-// Features are resolved from local ./plugins/feature/<name>/ only (not embedded).
+// Resolution order: local ./ext/plugins/<name>/ → embedded core plugins.
 func ResolveFeature(projectDir string, name string, userConfig map[string]any) (*FeatureContributions, error) {
-	// Verify feature.yaml exists in local plugins dir
-	localPath := filepath.Join(projectDir, "plugins", "feature", name, "feature.yaml")
-	if _, err := os.Stat(localPath); err != nil {
-		return nil, fmt.Errorf("unknown feature %q: no feature.yaml found in ./plugins/feature/%s/", name, name)
+	// Verify feature.yaml exists (local ext/plugins or embedded core)
+	if !featureExists(projectDir, name) {
+		return nil, fmt.Errorf("unknown feature %q: no feature.yaml found in ./ext/plugins/%s/ or built-in plugins", name, name)
 	}
 
 	// Extract contributions from user config
@@ -72,6 +72,23 @@ func ResolveFeature(projectDir string, name string, userConfig map[string]any) (
 	}
 
 	return contrib, nil
+}
+
+// featureExists checks if a feature plugin exists in local ext/plugins or embedded core.
+func featureExists(projectDir string, name string) bool {
+	// Check local ext/plugins
+	localPath := filepath.Join(projectDir, "ext", "plugins", name, "feature.yaml")
+	if _, err := os.Stat(localPath); err == nil {
+		return true
+	}
+
+	// Check embedded core plugins
+	embeddedPath := fmt.Sprintf("internal/plugins/%s/feature.yaml", name)
+	if _, err := sandbox.CorePlugins.ReadFile(embeddedPath); err == nil {
+		return true
+	}
+
+	return false
 }
 
 // loadFeatureYAML loads and parses a feature.yaml (for validation).

@@ -22,21 +22,21 @@ type RuntimeConfig struct {
 }
 
 // ResolveRuntime finds and parses a runtime plugin by name.
-// Resolution order: local ./plugins/runtime/<name>/runtime.yaml → embedded defaults.
+// Resolution order: local ./ext/plugins/<name>/runtime.yaml → embedded defaults.
 func ResolveRuntime(projectDir string, name string) (*RuntimeConfig, error) {
-	// 1. Try local plugins directory
-	localPath := filepath.Join(projectDir, "plugins", "runtime", name, "runtime.yaml")
+	// 1. Try local ext/plugins directory
+	localPath := filepath.Join(projectDir, "ext", "plugins", name, "runtime.yaml")
 	if data, err := os.ReadFile(localPath); err == nil {
 		return parseRuntime(data, localPath)
 	}
 
 	// 2. Try embedded defaults
-	embeddedPath := fmt.Sprintf("plugins/runtime/%s/runtime.yaml", name)
-	if data, err := sandbox.RuntimePlugins.ReadFile(embeddedPath); err == nil {
+	embeddedPath := fmt.Sprintf("internal/plugins/%s/runtime.yaml", name)
+	if data, err := sandbox.CorePlugins.ReadFile(embeddedPath); err == nil {
 		return parseRuntime(data, embeddedPath)
 	}
 
-	return nil, fmt.Errorf("unknown runtime %q: no runtime.yaml found in ./plugins/runtime/%s/ or built-in plugins", name, name)
+	return nil, fmt.Errorf("unknown runtime %q: no runtime.yaml found in ./ext/plugins/%s/ or built-in plugins", name, name)
 }
 
 // ResolveInlineRuntime parses an inline runtime definition from agent.yaml.

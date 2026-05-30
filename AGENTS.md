@@ -21,11 +21,11 @@ internal/
   config/               ← agent.yaml parsing
   generate/             ← Dockerfile + docker-compose.yml generation
   resolve/              ← plugin resolution (local → embedded)
-plugins/
-  runtime/
-    codex/                ← runtime.yaml (embedded in CLI, core)
-  feature/
-    home-version-control/ ← feature.yaml (separate release)
+  plugins/              ← core plugins (embedded in CLI)
+    codex/              ← runtime.yaml
+    home-version-control/ ← feature.yaml
+ext/
+  plugins/              ← external plugins (per-plugin versioning)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
 bridge/                 ← (Phase 4) Bridge TypeScript runtime (embedded in CLI)
 sdk/                    ← Gateway handler interface (for feature plugins)
@@ -87,12 +87,13 @@ plugins/feature/<name>/bridge/          ← optional TypeScript: copied into ima
 ### Plugin Resolution Order
 
 **Runtime plugins:**
-1. `./plugins/runtime/<name>/` — local project directory (user overrides)
-2. Built-in plugins (embedded in CLI via go:embed)
+1. `./ext/plugins/<name>/runtime.yaml` — local project directory (user overrides)
+2. Built-in core plugins (embedded in CLI via go:embed from `internal/plugins/`)
 
 **Feature plugins:**
-1. `./plugins/feature/<name>/` — local project directory only
-2. (Future: fetched from plugin registry)
+1. `./ext/plugins/<name>/feature.yaml` — local project directory
+2. Built-in core plugins (embedded in CLI)
+3. (Future: fetched from plugin registry)
 
 ## Testing Guidelines
 

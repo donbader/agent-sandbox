@@ -12,7 +12,7 @@ import (
 func TestResolveRuntime(t *testing.T) {
 	t.Run("resolves from local plugins dir", func(t *testing.T) {
 		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "plugins", "runtime", "custom")
+		pluginDir := filepath.Join(dir, "ext", "plugins", "custom")
 		require.NoError(t, os.MkdirAll(pluginDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "runtime.yaml"), []byte(`
 name: custom
@@ -42,7 +42,7 @@ cmd: ["my-cli", "run"]
 
 	t.Run("local overrides embedded", func(t *testing.T) {
 		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "plugins", "runtime", "codex")
+		pluginDir := filepath.Join(dir, "ext", "plugins", "codex")
 		require.NoError(t, os.MkdirAll(pluginDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "runtime.yaml"), []byte(`
 name: codex
@@ -102,7 +102,7 @@ func TestResolveInlineRuntime(t *testing.T) {
 func TestResolveFeature(t *testing.T) {
 	t.Run("resolves from local plugins dir", func(t *testing.T) {
 		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "plugins", "feature", "home-version-control")
+		pluginDir := filepath.Join(dir, "ext", "plugins", "home-version-control")
 		require.NoError(t, os.MkdirAll(pluginDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "feature.yaml"), []byte(`
 name: home-version-control
@@ -132,7 +132,7 @@ description: test feature
 
 	t.Run("empty config", func(t *testing.T) {
 		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "plugins", "feature", "minimal")
+		pluginDir := filepath.Join(dir, "ext", "plugins", "minimal")
 		require.NoError(t, os.MkdirAll(pluginDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "feature.yaml"), []byte(`
 name: minimal
