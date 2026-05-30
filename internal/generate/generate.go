@@ -28,6 +28,9 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 
+	// Resolve built-in variables in feature contributions
+	g.resolveFeatureBuiltins()
+
 	if g.Gateway {
 		if err := g.writeGatewaySource(); err != nil {
 			return err
@@ -452,6 +455,7 @@ var envVarPattern = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
 
 func (g *Generator) scanEnvVars() []string {
 	seen := map[string]bool{}
+	builtins := builtinNames()
 	var vars []string
 
 	for _, featureCfg := range g.Config.Features {
@@ -459,7 +463,7 @@ func (g *Generator) scanEnvVars() []string {
 			if s, ok := v.(string); ok {
 				matches := envVarPattern.FindAllStringSubmatch(s, -1)
 				for _, m := range matches {
-					if !seen[m[1]] {
+					if !seen[m[1]] && !builtins[m[1]] {
 						seen[m[1]] = true
 						vars = append(vars, m[1])
 					}
