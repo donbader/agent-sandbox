@@ -90,7 +90,7 @@ features:
       - "agent-home:/home/agent"
 ```
 
-- [ ] Plugin hybrid architecture: feature.yaml points to implementation code (plugin owns its logic)
+- [x] Plugin hybrid architecture: feature.yaml points to implementation code (plugin owns its logic)
 
 ---
 

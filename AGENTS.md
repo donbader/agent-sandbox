@@ -23,7 +23,7 @@ internal/
   resolve/              ← plugin resolution (local → embedded)
   plugins/              ← core plugins (embedded in CLI)
     codex/              ← runtime.yaml
-    custom-runtime/ ← feature.yaml
+    custom-runtime/     ← feature.yaml + plugin.go (owns its logic)
 ext/
   plugins/              ← external plugins (per-plugin versioning)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
@@ -71,18 +71,27 @@ plugins/runtime/<name>/Dockerfile.tmpl  ← optional custom template
 
 No Go code. CLI reads YAML and generates Dockerfile. Runtime plugins are core — they ship with the CLI binary.
 
-### Feature Plugins (Data + Code — separate release)
+### Feature Plugins (Hybrid — Data + Code)
+
+Core feature plugins live in `internal/plugins/<name>/` and are embedded in the CLI:
 
 ```
-plugins/feature/<name>/feature.yaml     ← metadata, config schema, hosts
-plugins/feature/<name>/gateway/         ← optional Go: compiled during Docker build
-plugins/feature/<name>/bridge/          ← optional TypeScript: copied into image
+internal/plugins/<name>/feature.yaml   ← metadata, config schema
+internal/plugins/<name>/plugin.go      ← Go: implements FeaturePlugin interface (owns its logic)
 ```
 
-- `feature.yaml` is always present (metadata)
-- `gateway/` Go code compiles during Docker build (not CLI build)
-- `bridge/` TypeScript is copied into image, loaded at runtime
-- Feature plugins are NOT embedded in CLI — they have their own release cycle
+External feature plugins live in `ext/plugins/<name>/` with optional gateway/bridge code:
+
+```
+ext/plugins/<name>/feature.yaml        ← metadata, config schema, hosts
+ext/plugins/<name>/gateway/            ← optional Go: compiled during Docker build
+ext/plugins/<name>/bridge/             ← optional TypeScript: copied into image
+```
+
+- Each plugin implements `resolve.FeaturePlugin` interface
+- Plugins register themselves via `init()` → `resolve.RegisterFeature()`
+- Plugin owns its contribution extraction logic (not hardcoded in resolve)
+- `internal/plugins/register.go` imports all core plugins for side-effect registration
 
 ### Plugin Resolution Order
 
