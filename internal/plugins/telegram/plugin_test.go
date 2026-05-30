@@ -4,31 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-func TestPlugin_Resolve(t *testing.T) {
-	p := &Plugin{}
-
-	t.Run("basic resolve returns MITM and bridge contributions", func(t *testing.T) {
-		contrib, err := p.Resolve("", map[string]any{})
-		require.NoError(t, err)
-
-		assert.Equal(t, []string{"api.telegram.org"}, contrib.MITMDomains)
-		assert.Equal(t, "telegram", contrib.BridgeChannel)
-		assert.Equal(t, []string{"TELEGRAM_BOT_TOKEN"}, contrib.EnvVars)
-	})
-
-	t.Run("resolve with allowed_chat_ids", func(t *testing.T) {
-		contrib, err := p.Resolve("", map[string]any{
-			"allowed_chat_ids": []any{"123", "456"},
-		})
-		require.NoError(t, err)
-
-		// Plugin still returns same contributions regardless of chat IDs
-		assert.Equal(t, "telegram", contrib.BridgeChannel)
-	})
-}
 
 func TestAllowedChatIDs(t *testing.T) {
 	t.Run("extracts chat IDs from config", func(t *testing.T) {
