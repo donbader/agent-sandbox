@@ -17,6 +17,7 @@ type FeatureContributions struct {
 	EntrypointHooks []string // scripts to run on container start (source paths)
 	Volumes         []string // named volumes (e.g., "name:/path")
 	HomeOverride    string   // directory to copy into home on start
+	EnvVars         []string // environment variables (added to .env.example and compose)
 }
 
 // registry holds registered feature plugins.
