@@ -75,15 +75,15 @@ Contribute both gateway rules AND bridge TypeScript. One plugin, two directories
 | Plugin | What it does | Has gateway/ | Has bridge/ |
 |--------|-------------|-------------|-------------|
 | `docker` | DinD sidecar, DOCKER_HOST env, API validation | yes | no |
-| `home-version-control` | Custom commands, hooks, volumes | no | no |
+| `custom-runtime` | Custom commands, hooks, volumes | no | no |
 
-### home-version-control
+### custom-runtime
 
 Gives users direct control over image build commands, startup hooks, and persistent volumes.
 
 ```yaml
 features:
-  home-version-control:
+  custom-runtime:
     commands:
       - "apt-get install -y ripgrep fd-find"
       - "npm install -g typescript"

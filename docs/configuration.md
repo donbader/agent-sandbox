@@ -22,7 +22,7 @@ features:
   telegram:
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     allowed_users: ["donbader"]
-  home-version-control:
+  custom-runtime:
     commands:
       - "apt-get install -y ripgrep fd-find"
     entrypoint_hooks:
@@ -49,7 +49,7 @@ Per-agent features **override** shared (same name → per-agent wins). Different
 
 ## Home & Packages
 
-Managed by the `home-version-control` plugin. See [plugins.md](plugins.md#home-version-control-plugin) for details.
+Managed by the `custom-runtime` plugin. See [plugins.md](plugins.md#custom-runtime-plugin) for details.
 
 | Strategy | Config | Behavior |
 |----------|--------|----------|
@@ -73,7 +73,7 @@ features:
   telegram:
     bot_token: "${BOT_TOKEN}"
     allowed_users: ["donbader"]
-  home-version-control:
+  custom-runtime:
     commands: ["apt-get install -y ripgrep"]
     entrypoint_hooks: [./scripts/setup.sh]
     runtime_volumes: ["agent-home:/home/agent"]

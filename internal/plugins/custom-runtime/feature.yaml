@@ -1,4 +1,4 @@
-name: home-version-control
+name: custom-runtime
 description: Custom packages, startup hooks, persistent home, and home override directory
 
 config_schema:

@@ -38,7 +38,7 @@ features:
   telegram:
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     allowed_users: ["donbader"]
-  home-version-control:
+  custom-runtime:
     commands:
       - "apt-get install -y ripgrep fd-find"
     runtime_volumes:

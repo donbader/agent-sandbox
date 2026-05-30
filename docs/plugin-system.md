@@ -43,7 +43,7 @@ plugins/
     bridge/                 ← TypeScript: channel plugin
       src/telegram.ts
       package.json
-  home-version-control/
+  custom-runtime/
     feature.yaml            ← metadata, config schema
                             ← no gateway/, no bridge/ — pure config-driven
   docker/
@@ -128,7 +128,7 @@ compose: {}
 ```
 
 ```yaml
-name: home-version-control
+name: custom-runtime
 description: "Custom packages, startup hooks, persistent volumes"
 
 config_schema:

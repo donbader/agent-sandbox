@@ -52,7 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Agent CLI (from runtime.yaml)
 RUN npm install -g @openai/codex
 
-# Feature: home-version-control commands
+# Feature: custom-runtime commands
 RUN apt-get update && apt-get install -y ripgrep fd-find
 
 # Bridge (if channels active)
@@ -199,7 +199,7 @@ agent-sandbox/
     docker/
       feature.yaml
       gateway/handler.go, go.mod
-    home-version-control/
+    custom-runtime/
       feature.yaml
     mcp-oauth/
       feature.yaml

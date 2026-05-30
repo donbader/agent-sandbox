@@ -59,7 +59,7 @@ runtime: codex
 
 ---
 
-### Phase 2: home-version-control Feature
+### Phase 2: custom-runtime Feature
 
 **What works after this phase:**
 ```bash
@@ -67,7 +67,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent with custom packages, startup hooks, persistent home
 ```
 
-- [x] `plugins/home-version-control/feature.yaml`
+- [x] `plugins/custom-runtime/feature.yaml`
 - [x] Update `internal/generate/` to read feature.yaml and merge into Dockerfile
 - [x] Image commands wiring (RUN in Dockerfile from config)
 - [x] Entrypoint hooks wiring (scripts run on container start)
@@ -81,7 +81,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 name: coder
 runtime: codex
 features:
-  home-version-control:
+  custom-runtime:
     commands:
       - "apt-get install -y ripgrep fd-find"
     entrypoint_hooks:
@@ -202,7 +202,7 @@ agent-sandbox upgrade                   # self-update
 - `pkg/provider/resolver.go` — no remote providers, plugins are local or embedded
 - `images/gateway/` — gateway source embedded in CLI, compiled during Docker build
 - `agent-fleet tools ctx` — no render scripts to support
-- Template injection / user_base — replaced by home-version-control feature
+- Template injection / user_base — replaced by custom-runtime feature
 - Default-deny egress model — replaced by allow-all + MITM where needed
 - Compile-time plugin Go interfaces — replaced by data-driven YAML
 

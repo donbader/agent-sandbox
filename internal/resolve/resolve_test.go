@@ -102,10 +102,10 @@ func TestResolveInlineRuntime(t *testing.T) {
 func TestResolveFeature(t *testing.T) {
 	t.Run("resolves from local plugins dir", func(t *testing.T) {
 		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "ext", "plugins", "home-version-control")
+		pluginDir := filepath.Join(dir, "ext", "plugins", "custom-runtime")
 		require.NoError(t, os.MkdirAll(pluginDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "feature.yaml"), []byte(`
-name: home-version-control
+name: custom-runtime
 description: test feature
 `), 0644))
 
@@ -116,7 +116,7 @@ description: test feature
 			"home_override":   "home",
 		}
 
-		contrib, err := ResolveFeature(dir, "home-version-control", userConfig)
+		contrib, err := ResolveFeature(dir, "custom-runtime", userConfig)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"apt-get install -y ripgrep"}, contrib.Commands)
 		assert.Equal(t, []string{"scripts/setup.sh"}, contrib.EntrypointHooks)

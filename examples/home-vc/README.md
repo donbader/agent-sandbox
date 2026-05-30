@@ -1,6 +1,6 @@
 # Home Version Control Example
 
-Demonstrates the `home-version-control` feature plugin:
+Demonstrates the `custom-runtime` feature plugin:
 
 - **Custom packages**: Install ripgrep and fd-find into the container
 - **Entrypoint hooks**: Run a dotfiles sync script on every container start

@@ -42,4 +42,4 @@ config_schema:
       description: API key for the service
 ```
 
-See `internal/plugins/home-version-control/feature.yaml` for a complete example.
+See `internal/plugins/custom-runtime/feature.yaml` for a complete example.

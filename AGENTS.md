@@ -23,7 +23,7 @@ internal/
   resolve/              ← plugin resolution (local → embedded)
   plugins/              ← core plugins (embedded in CLI)
     codex/              ← runtime.yaml
-    home-version-control/ ← feature.yaml
+    custom-runtime/ ← feature.yaml
 ext/
   plugins/              ← external plugins (per-plugin versioning)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
