@@ -27,6 +27,6 @@ func (p *Plugin) Contribute(ctx sdk.ContributeContext) (*sdk.RuntimeContribution
 		Commands: []string{
 			"npm install -g @openai/codex@latest",
 		},
-		Cmd: []string{"codex", "--full-auto"},
+		Cmd: []string{"sleep", "infinity"},
 	}, nil
 }

@@ -33,7 +33,7 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, string(df), "FROM node:22-slim")
 		assert.Contains(t, string(df), "npm install -g @openai/codex")
 		assert.Contains(t, string(df), "USER agent")
-		assert.Contains(t, string(df), `CMD ["codex", "--full-auto"]`)
+		assert.Contains(t, string(df), `CMD ["sleep", "infinity"]`)
 
 		// Check docker-compose.yml
 		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
