@@ -22,11 +22,10 @@ internal/
   generate/             ← Dockerfile + docker-compose.yml generation
   resolve/              ← plugin resolution (local → embedded)
 plugins/
-  codex/                ← runtime.yaml (data-driven)
-  claude-code/          ← runtime.yaml
-  github/               ← feature.yaml + gateway/handler.go
-  telegram/             ← feature.yaml + gateway/ + bridge/
-  home-version-control/ ← feature.yaml (pure config, no code)
+  runtime/
+    codex/                ← runtime.yaml (embedded in CLI, core)
+  feature/
+    home-version-control/ ← feature.yaml (separate release)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
 bridge/                 ← (Phase 4) Bridge TypeScript runtime (embedded in CLI)
 sdk/                    ← Gateway handler interface (for feature plugins)
@@ -63,32 +62,37 @@ agent-sandbox compose up --build       # docker compose passthrough
 
 **Key principle:** Plugin updates never require CLI upgrades. CLI is a generic template engine.
 
-### Runtime Plugins (Pure Data)
+### Runtime Plugins (Pure Data — embedded in CLI)
 
 ```
-plugins/<name>/runtime.yaml     ← base image, install commands, CMD
-plugins/<name>/Dockerfile.tmpl  ← optional custom template
+plugins/runtime/<name>/runtime.yaml     ← base image, install commands, CMD, ports
+plugins/runtime/<name>/Dockerfile.tmpl  ← optional custom template
 ```
 
-No Go code. CLI reads YAML and generates Dockerfile.
+No Go code. CLI reads YAML and generates Dockerfile. Runtime plugins are core — they ship with the CLI binary.
 
-### Feature Plugins (Data + Code)
+### Feature Plugins (Data + Code — separate release)
 
 ```
-plugins/<name>/feature.yaml     ← metadata, config schema, hosts
-plugins/<name>/gateway/         ← optional Go: compiled during Docker build
-plugins/<name>/bridge/          ← optional TypeScript: copied into image
+plugins/feature/<name>/feature.yaml     ← metadata, config schema, hosts
+plugins/feature/<name>/gateway/         ← optional Go: compiled during Docker build
+plugins/feature/<name>/bridge/          ← optional TypeScript: copied into image
 ```
 
 - `feature.yaml` is always present (metadata)
 - `gateway/` Go code compiles during Docker build (not CLI build)
 - `bridge/` TypeScript is copied into image, loaded at runtime
+- Feature plugins are NOT embedded in CLI — they have their own release cycle
 
 ### Plugin Resolution Order
 
-1. `./plugins/<name>/` — local project directory (user overrides)
-2. Inline definition in agent.yaml (custom runtimes only)
-3. Built-in plugins (embedded in CLI via go:embed)
+**Runtime plugins:**
+1. `./plugins/runtime/<name>/` — local project directory (user overrides)
+2. Built-in plugins (embedded in CLI via go:embed)
+
+**Feature plugins:**
+1. `./plugins/feature/<name>/` — local project directory only
+2. (Future: fetched from plugin registry)
 
 ## Testing Guidelines
 

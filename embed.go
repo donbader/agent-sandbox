@@ -9,3 +9,9 @@ import "embed"
 //
 //go:embed gateway
 var GatewaySource embed.FS
+
+// RuntimePlugins contains the built-in runtime plugin definitions.
+// Resolution order: local ./plugins/runtime/<name>/ → these embedded defaults.
+//
+//go:embed plugins/runtime
+var RuntimePlugins embed.FS
