@@ -99,6 +99,7 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	b.WriteString("FROM golang:1.24-alpine AS gateway-build\n")
 	b.WriteString("WORKDIR /src\n")
 	b.WriteString("COPY gateway-src/ .\n")
+	b.WriteString("RUN go mod download\n")
 	b.WriteString("RUN go build -o /gateway ./cmd/gateway/\n\n")
 
 	// Stage 2: runtime
