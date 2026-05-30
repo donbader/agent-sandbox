@@ -47,9 +47,9 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] GoReleaser release pipeline (`.github/workflows/release.yml`)
 - [x] `examples/simple/` for quick testing
 - [x] `install.sh` one-liner
-- [ ] Convert codex plugin from Go code to `runtime.yaml` (data-driven)
-- [ ] Plugin resolution (local `./plugins/` → embedded defaults)
-- [ ] Inline runtime definition support in agent.yaml
+- [x] Convert codex plugin from Go code to `runtime.yaml` (data-driven)
+- [x] Plugin resolution (local `./plugins/` → embedded defaults)
+- [x] Inline runtime definition support in agent.yaml
 
 **Config:**
 ```yaml
@@ -67,14 +67,14 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent with custom packages, startup hooks, persistent home
 ```
 
-- [ ] `plugins/home-version-control/feature.yaml`
-- [ ] Update `internal/generate/` to read feature.yaml and merge into Dockerfile
-- [ ] Image commands wiring (RUN in Dockerfile from config)
-- [ ] Entrypoint hooks wiring (scripts run on container start)
-- [ ] Compose volumes wiring (named volumes from config)
-- [ ] Entrypoint script template (runs hooks → starts agent)
-- [ ] Home override directory (./home/ → /opt/home-override/ → cp on start)
-- [ ] `examples/home-vc/` example
+- [x] `plugins/home-version-control/feature.yaml`
+- [x] Update `internal/generate/` to read feature.yaml and merge into Dockerfile
+- [x] Image commands wiring (RUN in Dockerfile from config)
+- [x] Entrypoint hooks wiring (scripts run on container start)
+- [x] Compose volumes wiring (named volumes from config)
+- [x] Entrypoint script template (runs hooks → starts agent)
+- [x] Home override directory (./home/ → /opt/home-override/ → cp on start)
+- [x] `examples/home-vc/` example
 
 **Config:**
 ```yaml

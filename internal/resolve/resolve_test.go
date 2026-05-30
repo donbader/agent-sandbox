@@ -98,3 +98,60 @@ func TestResolveInlineRuntime(t *testing.T) {
 		assert.Equal(t, []string{"sleep", "infinity"}, rc.Cmd)
 	})
 }
+
+func TestResolveFeature(t *testing.T) {
+	t.Run("resolves from local plugins dir", func(t *testing.T) {
+		dir := t.TempDir()
+		pluginDir := filepath.Join(dir, "plugins", "home-version-control")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "feature.yaml"), []byte(`
+name: home-version-control
+description: test feature
+`), 0644))
+
+		userConfig := map[string]any{
+			"commands":        []any{"apt-get install -y ripgrep"},
+			"entrypoint_hooks": []any{"scripts/setup.sh"},
+			"runtime_volumes": []any{"agent-home:/home/agent"},
+			"home_override":   "home",
+		}
+
+		contrib, err := ResolveFeature(dir, "home-version-control", userConfig)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"apt-get install -y ripgrep"}, contrib.Commands)
+		assert.Equal(t, []string{"scripts/setup.sh"}, contrib.EntrypointHooks)
+		assert.Equal(t, []string{"agent-home:/home/agent"}, contrib.Volumes)
+		assert.Equal(t, "home", contrib.HomeOverride)
+	})
+
+	t.Run("resolves embedded feature", func(t *testing.T) {
+		userConfig := map[string]any{
+			"commands": []any{"apt-get install -y git"},
+		}
+
+		contrib, err := ResolveFeature("/nonexistent", "home-version-control", userConfig)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"apt-get install -y git"}, contrib.Commands)
+	})
+
+	t.Run("unknown feature", func(t *testing.T) {
+		_, err := ResolveFeature("/nonexistent", "unknown-feature", map[string]any{})
+		assert.ErrorContains(t, err, "unknown feature")
+	})
+
+	t.Run("empty config", func(t *testing.T) {
+		dir := t.TempDir()
+		pluginDir := filepath.Join(dir, "plugins", "minimal")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "feature.yaml"), []byte(`
+name: minimal
+`), 0644))
+
+		contrib, err := ResolveFeature(dir, "minimal", map[string]any{})
+		require.NoError(t, err)
+		assert.Nil(t, contrib.Commands)
+		assert.Nil(t, contrib.EntrypointHooks)
+		assert.Nil(t, contrib.Volumes)
+		assert.Equal(t, "", contrib.HomeOverride)
+	})
+}

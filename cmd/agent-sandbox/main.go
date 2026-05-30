@@ -58,11 +58,22 @@ func generateCmd() *cobra.Command {
 				return fmt.Errorf("agent.yaml: runtime must be a string or inline definition")
 			}
 
+			// Resolve features
+			var features []*resolve.FeatureContributions
+			for name, featureCfg := range cfg.Features {
+				contrib, err := resolve.ResolveFeature(dir, name, featureCfg)
+				if err != nil {
+					return err
+				}
+				features = append(features, contrib)
+			}
+
 			g := &generate.Generator{
-				Config:  cfg,
-				Runtime: runtime,
-				Dir:     dir,
-				OutDir:  outDir,
+				Config:   cfg,
+				Runtime:  runtime,
+				Features: features,
+				Dir:      dir,
+				OutDir:   outDir,
 			}
 
 			if err := g.Run(); err != nil {
