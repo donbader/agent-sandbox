@@ -16,35 +16,39 @@ import (
 var version = "dev"
 
 func main() {
+	var dir string
+
 	root := &cobra.Command{
-		Use:     "agent-sandbox",
-		Short:   "Opinionated agent sandbox orchestrator",
-		Version: version,
+		Use:              "agent-sandbox",
+		Short:            "Opinionated agent sandbox orchestrator",
+		Version:          version,
+		TraverseChildren: true,
 	}
 
-	root.AddCommand(generateCmd())
-	root.AddCommand(composeCmd())
+	root.PersistentFlags().StringVarP(&dir, "dir", "C", ".", "Project directory containing agent.yaml")
+
+	root.AddCommand(generateCmd(&dir))
+	root.AddCommand(composeCmd(&dir))
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func generateCmd() *cobra.Command {
-	var dir string
-	var outDir string
-
+func generateCmd(dir *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate .build/ artifacts from agent config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(dir)
+			outDir := filepath.Join(*dir, ".build")
+
+			cfg, err := config.Load(*dir)
 			if err != nil {
 				return err
 			}
 
 			// Resolve runtime
-			runtime, err := resolve.ResolveRuntime(dir, cfg.Runtime)
+			runtime, err := resolve.ResolveRuntime(*dir, cfg.Runtime)
 			if err != nil {
 				return fmt.Errorf("resolving runtime %q: %w", cfg.Runtime, err)
 			}
@@ -53,7 +57,7 @@ func generateCmd() *cobra.Command {
 			var features []*resolve.FeatureContributions
 			hasBridge := false
 			for name, featureCfg := range cfg.Features {
-				contrib, err := resolve.ResolveFeature(dir, name, featureCfg)
+				contrib, err := resolve.ResolveFeature(*dir, name, featureCfg)
 				if err != nil {
 					return fmt.Errorf("resolving feature %q: %w", name, err)
 				}
@@ -82,7 +86,7 @@ func generateCmd() *cobra.Command {
 					DistDir:    "/src/dist",
 					EntryPoint: "node /opt/bridge/dist/index.js",
 				},
-				Dir:    dir,
+				Dir:    *dir,
 				OutDir: outDir,
 			}
 
@@ -95,27 +99,25 @@ func generateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&dir, "dir", "d", ".", "Directory containing agent.yaml")
-	cmd.Flags().StringVarP(&outDir, "output", "o", ".build", "Output directory for generated artifacts")
-
 	return cmd
 }
 
-func composeCmd() *cobra.Command {
+func composeCmd(dir *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "compose",
 		Short:              "Docker compose passthrough (auto-injects -f .build/docker-compose.yml)",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			composePath := filepath.Join(".build", "docker-compose.yml")
+			composePath := filepath.Join(*dir, ".build", "docker-compose.yml")
 			if _, err := os.Stat(composePath); os.IsNotExist(err) {
-				return fmt.Errorf(".build/docker-compose.yml not found — run 'agent-sandbox generate' first")
+				return fmt.Errorf("%s not found — run 'agent-sandbox generate' first", composePath)
 			}
 
 			composeArgs := []string{"-f", composePath}
-			// Auto-inject --env-file if .env exists in project root
-			if _, err := os.Stat(".env"); err == nil {
-				composeArgs = append(composeArgs, "--env-file", ".env")
+			// Auto-inject --env-file if .env exists in project dir
+			envPath := filepath.Join(*dir, ".env")
+			if _, err := os.Stat(envPath); err == nil {
+				composeArgs = append(composeArgs, "--env-file", envPath)
 			}
 			composeArgs = append(composeArgs, args...)
 			c := exec.Command("docker", append([]string{"compose"}, composeArgs...)...)

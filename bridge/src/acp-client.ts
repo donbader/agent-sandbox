@@ -72,51 +72,79 @@ export class AcpAgent {
       throw new Error("acp-agent: empty command");
     }
 
-    log.info({ cmd: this.config.cmd.join(" ") }, "spawning ACP agent");
+    await this.spawnAndConnect(command, args);
+  }
 
-    this.proc = spawn(command, args, { stdio: ["pipe", "pipe", "inherit"] });
+  private async spawnAndConnect(command: string, args: string[]): Promise<void> {
+    const maxRetries = 10;
+    const baseDelay = 2000;
 
-    this.proc.on("exit", (code) => {
-      log.info({ code }, "ACP agent exited");
-      // Reject any in-flight prompt
-      if (this.pendingReject) {
-        this.pendingReject(
-          new Error(`agent process exited with code ${String(code)}`)
-        );
-        this.pendingReject = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        log.info({ cmd: this.config.cmd.join(" "), attempt }, "spawning ACP agent");
+
+        this.proc = spawn(command, args, { stdio: ["pipe", "pipe", "inherit"] });
+
+        this.proc.on("exit", (code) => {
+          log.info({ code }, "ACP agent exited");
+          if (this.pendingReject) {
+            this.pendingReject(
+              new Error(`agent process exited with code ${String(code)}`)
+            );
+            this.pendingReject = null;
+          }
+          if (!this.restarting) {
+            this.restarting = true;
+            setTimeout(() => {
+              this.restarting = false;
+              this.spawnAndConnect(command, args).catch((err: unknown) => {
+                log.error({ error: err }, "failed to restart ACP agent");
+              });
+            }, baseDelay);
+          }
+        });
+
+        const input = Writable.toWeb(this.proc.stdin!);
+        const output = Readable.toWeb(
+          this.proc.stdout!
+        ) as ReadableStream<Uint8Array>;
+        const stream = acp.ndJsonStream(input, output);
+
+        const client = this.bridgeClient;
+        this.connection = new acp.ClientSideConnection((_agent) => client, stream);
+
+        await this.connection.initialize({
+          protocolVersion: acp.PROTOCOL_VERSION,
+          clientCapabilities: {},
+        });
+
+        const { sessionId } = await this.connection.newSession({
+          cwd: this.config.cwd,
+          mcpServers: [],
+        });
+        this.sessionId = sessionId;
+
+        log.info({ sessionId }, "ACP session created");
+        return;
+      } catch (err: unknown) {
+        // Kill the failed process before retrying
+        if (this.proc) {
+          this.proc.kill("SIGTERM");
+          this.proc = null;
+        }
+        this.connection = null;
+        this.sessionId = null;
+
+        if (attempt === maxRetries) {
+          log.error({ error: err, attempt }, "ACP agent failed to start after max retries");
+          throw err;
+        }
+
+        const delay = baseDelay * attempt;
+        log.warn({ error: err, attempt, retryIn: delay }, "ACP agent failed to start, retrying");
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-      if (!this.restarting) {
-        this.restarting = true;
-        setTimeout(() => {
-          this.restarting = false;
-          this.start().catch((err: unknown) => {
-            log.error({ error: err }, "failed to restart ACP agent");
-          });
-        }, 2000);
-      }
-    });
-
-    const input = Writable.toWeb(this.proc.stdin!);
-    const output = Readable.toWeb(
-      this.proc.stdout!
-    ) as ReadableStream<Uint8Array>;
-    const stream = acp.ndJsonStream(input, output);
-
-    const client = this.bridgeClient;
-    this.connection = new acp.ClientSideConnection((_agent) => client, stream);
-
-    await this.connection.initialize({
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: {},
-    });
-
-    const { sessionId } = await this.connection.newSession({
-      cwd: this.config.cwd,
-      mcpServers: [],
-    });
-    this.sessionId = sessionId;
-
-    log.info({ sessionId }, "ACP session created");
+    }
   }
 
   /**

@@ -38,6 +38,7 @@ cmd: ["my-cli", "run"]
 		assert.Equal(t, "node:22-slim", rc.BaseImage)
 		assert.Contains(t, rc.Install[len(rc.Install)-1], "codex")
 		assert.Equal(t, []string{"sleep", "infinity"}, rc.Cmd)
+		assert.Equal(t, []string{"codex-acp"}, rc.AcpCmd)
 	})
 
 	t.Run("local overrides embedded", func(t *testing.T) {

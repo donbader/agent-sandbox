@@ -4,6 +4,7 @@ install:
   - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*
   - npm install -g @openai/codex@latest @zed-industries/codex-acp@latest
 cmd: ["sleep", "infinity"]
+acp_cmd: ["codex-acp"]
 ports:
   # codex listens on port 1455 for OAuth sign-in callback
   - "1455:1455"

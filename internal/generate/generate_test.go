@@ -488,7 +488,7 @@ func TestGenerator_Run(t *testing.T) {
 		require.NoError(t, err)
 		bridgeCfgStr := string(bridgeCfg)
 		assert.Contains(t, bridgeCfgStr, `"channel": "telegram"`)
-		assert.Contains(t, bridgeCfgStr, `"agent_cmd"`)
+		assert.Contains(t, bridgeCfgStr, `"acp_command"`)
 		assert.Contains(t, bridgeCfgStr, `"access_control"`)
 		assert.Contains(t, bridgeCfgStr, `"allowed_users"`)
 

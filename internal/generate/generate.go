@@ -1007,13 +1007,13 @@ func (g *Generator) writeBridgeConfig() error {
 		}
 	}
 
-	// Build agent command: run as the agent user via su
-	agentCmd := fmt.Sprintf("su -c '%s' %s", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User)
+	// Build ACP command: run as the agent user via su
+	acpCmd := fmt.Sprintf("su -c '%s' %s", strings.Join(g.Runtime.AcpCmd, " "), g.Runtime.User)
 
 	// Build config map for JSON marshaling
 	config := map[string]any{
-		"channel":   channel,
-		"agent_cmd": []string{"sh", "-c", agentCmd},
+		"channel":     channel,
+		"acp_command": []string{"sh", "-c", acpCmd},
 	}
 
 	// Pass plugin-specific config to bridge (generic — no plugin knowledge here)

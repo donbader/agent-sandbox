@@ -17,6 +17,7 @@ type RuntimeConfig struct {
 	BaseImage string   `yaml:"base_image"`
 	Install   []string `yaml:"install"`
 	Cmd       []string `yaml:"cmd"`
+	AcpCmd    []string `yaml:"acp_cmd"`
 	Ports     []string `yaml:"ports"`
 	User      string   `yaml:"user"`
 }
