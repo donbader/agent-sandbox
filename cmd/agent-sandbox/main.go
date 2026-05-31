@@ -46,17 +46,21 @@ func generateCmd() *cobra.Command {
 			// Resolve runtime
 			runtime, err := resolve.ResolveRuntime(dir, cfg.Runtime)
 			if err != nil {
-				return err
+				return fmt.Errorf("resolving runtime %q: %w", cfg.Runtime, err)
 			}
 
 			// Resolve features
 			var features []*resolve.FeatureContributions
+			hasBridge := false
 			for name, featureCfg := range cfg.Features {
 				contrib, err := resolve.ResolveFeature(dir, name, featureCfg)
 				if err != nil {
-					return err
+					return fmt.Errorf("resolving feature %q: %w", name, err)
 				}
 				features = append(features, contrib)
+				if contrib.BridgeChannel != "" {
+					hasBridge = true
+				}
 			}
 
 			g := &generate.Generator{
@@ -64,6 +68,7 @@ func generateCmd() *cobra.Command {
 				Runtime:  runtime,
 				Features: features,
 				Gateway:  cfg.GatewayEnabled(),
+				Bridge:   hasBridge,
 				Dir:      dir,
 				OutDir:   outDir,
 			}
