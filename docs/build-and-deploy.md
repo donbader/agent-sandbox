@@ -19,7 +19,7 @@ agent-sandbox generate
         ├── Dockerfile.agent    (agent container: bridge build + runtime)
         ├── gateway-config.yaml (merged hosts from feature.yaml files)
         ├── gateway-entrypoint.sh
-        ├── entrypoint.sh       (agent: iptables DNAT + bridge/agent start)
+        ├── entrypoint.sh       (agent: default route + bridge/agent start)
         ├── bridge-config.json  (channels + agent cmd from runtime.yaml)
         ├── certs/              (CA cert + key for MITM)
         └── docker-compose.yml  (two services + internal network)
@@ -74,9 +74,9 @@ RUN npm run build
 # Stage 2: Agent runtime
 FROM node:22-slim
 
-# System packages (iptables for DNAT to gateway container)
+# System packages (iproute2 for default route setup)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    iptables ca-certificates git curl \
+    iproute2 ca-certificates git curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Agent user

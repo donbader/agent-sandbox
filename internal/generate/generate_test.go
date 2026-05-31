@@ -47,7 +47,7 @@ func TestGenerator_Run(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(dc), "coder:")
 		assert.Contains(t, string(dc), "build:")
-		assert.Contains(t, string(dc), "container_name: coder")
+		assert.Contains(t, string(dc), "coder:")
 	})
 
 	t.Run("with feature commands", func(t *testing.T) {

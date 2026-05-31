@@ -373,7 +373,6 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("    build:\n")
 	b.WriteString("      context: .\n")
 	b.WriteString("      dockerfile: Dockerfile.gateway\n")
-	b.WriteString(fmt.Sprintf("    container_name: %s-gateway\n", g.Config.Name))
 	b.WriteString("    networks:\n")
 	b.WriteString("      internal:\n")
 	b.WriteString("      default:\n")
@@ -393,7 +392,6 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("    build:\n")
 	b.WriteString("      context: .\n")
 	b.WriteString("      dockerfile: Dockerfile.agent\n")
-	b.WriteString(fmt.Sprintf("    container_name: %s\n", g.Config.Name))
 	b.WriteString("    networks:\n")
 	b.WriteString("      internal:\n")
 	b.WriteString("    cap_add:\n")
@@ -439,7 +437,6 @@ func (g *Generator) writeSingleCompose() error {
 	b.WriteString("    build:\n")
 	b.WriteString("      context: .\n")
 	b.WriteString("      dockerfile: Dockerfile\n")
-	b.WriteString(fmt.Sprintf("    container_name: %s\n", g.Config.Name))
 	b.WriteString("    restart: unless-stopped\n")
 
 	// Ports from runtime

@@ -8,14 +8,15 @@ Gateway and agent run in **separate containers** connected by a Docker internal 
 ┌─ gateway container ─────────────────┐
 │  Networks: [internal, default]      │
 │  Holds: real credentials, CA key    │──── internet
-│  Runs: gateway binary               │
+│  IP forwarding + iptables PREROUTING│
+│  Runs: gateway binary (:8443, :53)  │
 └──────────────┬──────────────────────┘
                │ Docker internal network
 ┌──────────────┴──────────────────────┐
 │  agent container                    │
 │  Networks: [internal] ONLY          │
 │  No secrets, no internet access     │
-│  iptables DNAT → gateway            │
+│  default route → gateway            │
 │  Runs: bridge + agent               │
 └─────────────────────────────────────┘
 ```
@@ -28,29 +29,35 @@ Rationale: Dev agents need `npm install`, `pip install`, `curl` arbitrary URLs. 
 
 ## Transparent Proxy
 
-Agent container resolves gateway IP via Docker DNS, then switches DNS and sets up iptables DNAT:
+Agent container uses a default route via gateway. All outbound traffic flows naturally to the gateway:
 
 ```bash
 # Resolve gateway container IP (Docker DNS, before switching resolv.conf)
 GATEWAY_IP=$(getent hosts $GATEWAY_HOST | awk '{print $1}')
 
-# Switch DNS to gateway resolver (Docker embedded DNS can't forward on internal network)
+# Switch DNS to gateway resolver
 echo "nameserver $GATEWAY_IP" > /etc/resolv.conf
 
-# HTTPS: DNAT to gateway container (kernel enforced, agent cannot bypass)
-iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:8443
-
-# Drop all non-DNS UDP (prevent tunneling)
-iptables -A OUTPUT -p udp ! --dport 53 -j DROP
+# Set default route via gateway (all outbound traffic flows to gateway)
+ip route replace default via $GATEWAY_IP
 ```
 
-Even if the agent modifies iptables (requires root), it's still on a Docker internal network with **no route to the internet**. The only reachable host is the gateway container.
+Gateway enables IP forwarding and redirects port 443 to its proxy:
+
+```bash
+# Gateway entrypoint
+echo 1 > /proc/sys/net/ipv4/ip_forward
+iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 8443
+```
+
+Agent has no iptables binary installed. Even with root, it cannot create firewall rules. Route changes are useless since the internal network only reaches the gateway.
 
 ## Credential Flow
 
 ```
 Agent → api.github.com:443
-  → iptables DNAT to gateway container:8443
+  → default route sends to gateway
+  → Gateway PREROUTING redirects :443 to proxy :8443
   → Gateway reads SNI: "api.github.com"
   → Matches github plugin rule → MITM mode
   → Terminates TLS (sandbox CA), reads HTTP request
@@ -66,7 +73,7 @@ Agent never sees real credentials. Bridge gets dummy tokens. Real creds exist on
 When `docker: true`, the docker plugin contributes a DinD sidecar. The gateway itself handles Docker API validation — no separate proxy container needed.
 
 1. Agent runs `docker run ...` → connects to `dind:2375`
-2. Gateway intercepts (iptables DNAT, like all TCP)
+2. Gateway intercepts (default route, like all TCP)
 3. Gateway's `DockerHandler` validates the request (block privileged, host binds)
 4. Injects gateway redirect into spawned container config
 5. Forwards to real DinD
@@ -75,7 +82,7 @@ Docker API is HTTP (not HTTPS), so no MITM/TLS needed — plain HTTP inspection.
 
 Spawned containers:
 - Forced onto internal network
-- iptables injected to redirect egress → gateway container
+- Default route points to gateway
 - Cannot spawn further containers (no DOCKER_HOST env)
 
 ## Hardening
@@ -87,10 +94,10 @@ Spawned containers:
 | Agent reads secrets via env/filesystem | ✓ Secrets only in gateway container. Agent container has no access. |
 | Agent reads /proc to find credentials | ✓ Gateway is a different container (different PID namespace). |
 | Agent gets root, reads secrets | ✓ Different container — root in agent cannot access gateway filesystem. |
-| Agent gets root, bypasses proxy | ✓ Docker internal network has no internet route. Modifying iptables doesn't help. |
+| Agent gets root, bypasses proxy | ✓ Docker internal network has no internet route. Changing routes doesn't help. |
 | Agent kills gateway | ✓ Different container. Agent cannot signal gateway process. |
-| Agent modifies iptables | Possible with root, but useless — no internet route exists. |
-| DNS tunneling | DNS redirected to gateway's resolver. No raw UDP allowed. |
+| Agent modifies routes | Possible with root, but useless — no internet route exists. |
+| DNS tunneling | DNS goes to gateway's resolver. No raw UDP to internet. |
 | DinD direct access | DinD uses TLS client cert auth. Cert in gateway container only. |
 | Resource exhaustion | mem_limit, cpus, pids_limit per container. |
 
@@ -100,12 +107,12 @@ Spawned containers:
 services:
   gateway:
     networks: [internal, default]
-    # Minimal attack surface — only runs gateway binary
+    cap_add: [NET_ADMIN]          # for IP forwarding + iptables PREROUTING
     read_only: true
 
   agent:
     networks: [internal]          # NO internet
-    cap_add: [NET_ADMIN]          # for iptables setup at boot
+    cap_add: [NET_ADMIN]          # for ip route setup at boot
     security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs: [/tmp, /run]
