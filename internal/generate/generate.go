@@ -540,38 +540,79 @@ func (g *Generator) collectNamedVolumes(volumes []string) []string {
 	return named
 }
 
-// scanEnvVars finds all ${VAR} references in the agent config.
+// scanEnvVars finds all ${VAR} references in the agent config (recursively).
 var envVarPattern = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
 
-func (g *Generator) scanEnvVars() []string {
-	seen := map[string]bool{}
-	var vars []string
+// envVarSource tracks where an env var was found.
+type envVarSource struct {
+	Name    string
+	Sources []string // e.g., "feature:telegram.allowed_chat_ids", "plugin:telegram"
+}
 
-	for _, featureCfg := range g.Config.Features {
-		for _, v := range featureCfg {
-			if s, ok := v.(string); ok {
-				matches := envVarPattern.FindAllStringSubmatch(s, -1)
-				for _, m := range matches {
-					if !seen[m[1]] {
-						seen[m[1]] = true
-						vars = append(vars, m[1])
-					}
-				}
-			}
+func (g *Generator) scanEnvVars() []string {
+	sources := map[string][]string{} // var name → list of sources
+	var order []string               // preserve insertion order
+
+	// Scan config for ${VAR} references
+	for featureName, featureCfg := range g.Config.Features {
+		for key, v := range featureCfg {
+			scanValueWithSource(v, envVarPattern, sources, &order,
+				fmt.Sprintf("feature:%s.%s", featureName, key))
 		}
 	}
 
-	// Also collect EnvVars from feature plugin contributions
+	// Collect EnvVars from feature plugin contributions
 	for _, f := range g.Features {
 		for _, v := range f.EnvVars {
-			if !seen[v] {
-				seen[v] = true
-				vars = append(vars, v)
+			if _, exists := sources[v]; !exists {
+				order = append(order, v)
 			}
+			sources[v] = append(sources[v], fmt.Sprintf("plugin:%s", pluginNameForFeature(f)))
 		}
 	}
 
-	return vars
+	// Warn about env vars defined in multiple places
+	for _, name := range order {
+		if len(sources[name]) > 1 {
+			fmt.Fprintf(os.Stderr, "warning: env var %s defined in multiple places: %s\n",
+				name, strings.Join(sources[name], ", "))
+		}
+	}
+
+	return order
+}
+
+// scanValueWithSource recursively walks a value and extracts ${VAR} references,
+// tracking the source location for conflict warnings.
+func scanValueWithSource(v any, pattern *regexp.Regexp, sources map[string][]string, order *[]string, source string) {
+	switch val := v.(type) {
+	case string:
+		matches := pattern.FindAllStringSubmatch(val, -1)
+		for _, m := range matches {
+			name := m[1]
+			if _, exists := sources[name]; !exists {
+				*order = append(*order, name)
+			}
+			sources[name] = append(sources[name], source)
+		}
+	case []any:
+		for _, item := range val {
+			scanValueWithSource(item, pattern, sources, order, source)
+		}
+	case map[string]any:
+		for k, item := range val {
+			scanValueWithSource(item, pattern, sources, order, source+"."+k)
+		}
+	}
+}
+
+// pluginNameForFeature returns a display name for a feature contribution.
+// Falls back to "unknown" if the contribution doesn't carry identifying info.
+func pluginNameForFeature(f *resolve.FeatureContributions) string {
+	if f.BridgeChannel != "" {
+		return f.BridgeChannel
+	}
+	return "unknown"
 }
 
 // copyDir recursively copies a directory.
