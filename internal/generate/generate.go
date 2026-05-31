@@ -401,6 +401,9 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("    environment:\n")
 	b.WriteString(fmt.Sprintf("      - LOG_LEVEL=%s\n", g.logLevel()))
 	b.WriteString(fmt.Sprintf("      - GATEWAY_HOST=%s-gateway\n", g.Config.Name))
+	for _, env := range g.collectAgentEnv() {
+		b.WriteString(fmt.Sprintf("      - %s\n", env))
+	}
 	b.WriteString(fmt.Sprintf("    depends_on:\n      - %s-gateway\n", g.Config.Name))
 
 	volumes := g.collectVolumes()
@@ -634,6 +637,16 @@ func (g *Generator) collectRewriters() []resolve.RewriterConfig {
 		rewriters = append(rewriters, f.Rewriters...)
 	}
 	return rewriters
+}
+
+// collectAgentEnv gathers agent-side environment variables from features.
+// These are dummy/non-secret values set in the agent container (e.g., GH_TOKEN=dummy).
+func (g *Generator) collectAgentEnv() []string {
+	var envs []string
+	for _, f := range g.Features {
+		envs = append(envs, f.AgentEnv...)
+	}
+	return envs
 }
 
 // copyHooks copies entrypoint hook scripts to .build/hooks/.

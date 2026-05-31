@@ -22,13 +22,14 @@ func init() {
 			Name:        "github-pat",
 			MITMDomains: domains,
 			EnvVars:     []string{"GITHUB_TOKEN"},
+			AgentEnv:    []string{"GH_TOKEN=dummy", "GITHUB_TOKEN=dummy"},
 			Rewriters: []resolve.RewriterConfig{
 				{
 					Type:        "auth-header",
 					Domains:     domains,
 					EnvVar:      "GITHUB_TOKEN",
 					Header:      "Authorization",
-					ValueFormat: "token ${value}",
+					ValueFormat: "Basic ${base64_basic}",
 				},
 			},
 		}, nil

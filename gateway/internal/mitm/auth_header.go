@@ -1,6 +1,7 @@
 package mitm
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,16 +12,17 @@ import (
 // AuthHeaderRewriter injects a header into requests destined for specific domains.
 // The header value is read from an environment variable and formatted using a template
 // string where ${value} is replaced with the env var value (e.g., "token ${value}").
+// Special placeholder ${base64_basic} is replaced with base64("x-access-token:<value>"),
+// which is the format required by git HTTP authentication.
 type AuthHeaderRewriter struct {
 	domains     []string
 	header      string
-	valueFormat string
-	value       string
+	headerValue string // pre-computed final header value
 }
 
 // NewAuthHeaderRewriter creates a rewriter that injects a header for the given domains.
 // envVar is the environment variable holding the secret value.
-// valueFormat is the header value template, e.g. "token ${value}" or "Bearer ${value}".
+// valueFormat is the header value template, e.g. "token ${value}" or "Basic ${base64_basic}".
 // If valueFormat is empty, it defaults to "${value}".
 func NewAuthHeaderRewriter(domains []string, header, valueFormat, envVar string) (*AuthHeaderRewriter, error) {
 	value := os.Getenv(envVar)
@@ -30,11 +32,16 @@ func NewAuthHeaderRewriter(domains []string, header, valueFormat, envVar string)
 	if valueFormat == "" {
 		valueFormat = "${value}"
 	}
+
+	// Compute the final header value with all substitutions
+	headerValue := valueFormat
+	headerValue = strings.ReplaceAll(headerValue, "${base64_basic}", base64.StdEncoding.EncodeToString([]byte("x-access-token:"+value)))
+	headerValue = strings.ReplaceAll(headerValue, "${value}", value)
+
 	return &AuthHeaderRewriter{
 		domains:     domains,
 		header:      header,
-		valueFormat: valueFormat,
-		value:       value,
+		headerValue: headerValue,
 	}, nil
 }
 
@@ -58,7 +65,6 @@ func (r *AuthHeaderRewriter) RewriteRequest(req *http.Request) bool {
 		return false
 	}
 
-	headerValue := strings.ReplaceAll(r.valueFormat, "${value}", r.value)
-	req.Header.Set(r.header, headerValue)
+	req.Header.Set(r.header, r.headerValue)
 	return true
 }

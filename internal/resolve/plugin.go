@@ -39,6 +39,7 @@ type FeatureContributions struct {
 	MITMDomains     []string         // domains the gateway should MITM (terminate TLS)
 	BridgeChannel   string           // bridge channel type (e.g., "telegram")
 	EnvVars         []string         // environment variables (added to .env.example and compose)
+	AgentEnv        []string         // environment variables for agent container (dummy values, not secrets)
 	BridgeConfig    map[string]any   // plugin-specific config passed to bridge-config.json
 	Rewriters       []RewriterConfig // gateway rewriters to instantiate for this feature
 }

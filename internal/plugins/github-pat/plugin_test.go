@@ -31,6 +31,16 @@ func TestGitHubPATPlugin_DefaultDomains(t *testing.T) {
 		t.Errorf("expected EnvVars=[GITHUB_TOKEN], got %v", contrib.EnvVars)
 	}
 
+	wantAgentEnv := []string{"GH_TOKEN=dummy", "GITHUB_TOKEN=dummy"}
+	if len(contrib.AgentEnv) != len(wantAgentEnv) {
+		t.Fatalf("expected AgentEnv %v, got %v", wantAgentEnv, contrib.AgentEnv)
+	}
+	for i, e := range wantAgentEnv {
+		if contrib.AgentEnv[i] != e {
+			t.Errorf("AgentEnv[%d]: expected %q, got %q", i, e, contrib.AgentEnv[i])
+		}
+	}
+
 	if len(contrib.Rewriters) != 1 {
 		t.Fatalf("expected 1 rewriter, got %d", len(contrib.Rewriters))
 	}
@@ -41,8 +51,8 @@ func TestGitHubPATPlugin_DefaultDomains(t *testing.T) {
 	if rw.Header != "Authorization" {
 		t.Errorf("expected header %q, got %q", "Authorization", rw.Header)
 	}
-	if rw.ValueFormat != "token ${value}" {
-		t.Errorf("expected value_format %q, got %q", "token ${value}", rw.ValueFormat)
+	if rw.ValueFormat != "Basic ${base64_basic}" {
+		t.Errorf("expected value_format %q, got %q", "Basic ${base64_basic}", rw.ValueFormat)
 	}
 	if rw.EnvVar != "GITHUB_TOKEN" {
 		t.Errorf("expected env_var %q, got %q", "GITHUB_TOKEN", rw.EnvVar)
