@@ -71,6 +71,10 @@ func (g *Generator) Run() error {
 		return err
 	}
 
+	if err := g.writeSchema(); err != nil {
+		return err
+	}
+
 	if err := g.writeEntrypoint(); err != nil {
 		return err
 	}

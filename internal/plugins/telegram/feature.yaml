@@ -1,2 +1,10 @@
 name: telegram
 description: Telegram bot channel — connects the agent to Telegram via the bridge.
+
+config_schema:
+  properties:
+    allowed_chat_ids:
+      type: array
+      items:
+        type: string
+      description: Telegram chat IDs allowed to interact with this agent (use ${VAR} for env var references)
