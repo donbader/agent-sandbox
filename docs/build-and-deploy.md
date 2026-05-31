@@ -12,14 +12,17 @@ agent-sandbox generate
   │
   └── Generate .build/:
         ├── gateway-src/        (embedded gateway core + feature gateway/ dirs)
-        ├── bridge/             (embedded bridge runtime)
-        ├── bridge-plugins/     (from feature bridge/ dirs)
+        ├── bridge-src/         (embedded bridge runtime + channel plugins)
         ├── home-override/      (from user's home/ dir)
         ├── hooks/              (from feature entrypoint hooks)
-        ├── Dockerfile          (multi-stage: gateway compile + runtime)
+        ├── Dockerfile.gateway  (gateway container: compile + minimal alpine)
+        ├── Dockerfile.agent    (agent container: bridge build + runtime)
         ├── gateway-config.yaml (merged hosts from feature.yaml files)
+        ├── gateway-entrypoint.sh
+        ├── entrypoint.sh       (agent: iptables DNAT + bridge/agent start)
         ├── bridge-config.json  (channels + agent cmd from runtime.yaml)
-        └── docker-compose.yml  (services, volumes, networks)
+        ├── certs/              (CA cert + key for MITM)
+        └── docker-compose.yml  (two services + internal network)
 
 agent-sandbox compose up --build -d
   │
@@ -33,50 +36,74 @@ CLI resolves plugins in order:
 2. Inline definition in agent.yaml (for custom runtimes)
 3. Built-in plugins (embedded in CLI binary as YAML/templates)
 
-## Generated Dockerfile (Multi-Stage)
+## Generated Dockerfiles (Separate Containers)
+
+When gateway is enabled, two Dockerfiles are generated for security isolation:
+
+### Dockerfile.gateway
 
 ```dockerfile
-# Stage 1: Compile gateway (only if features need it)
-FROM golang:1.24 AS gateway-builder
-COPY gateway-src/ /src/
-RUN cd /src && CGO_ENABLED=0 go build -o /gateway ./cmd/gateway
+# Compile gateway binary
+FROM golang:1.24-alpine AS builder
+WORKDIR /src
+COPY gateway-src/ .
+RUN go mod tidy && CGO_ENABLED=0 go build -o /gateway ./cmd/gateway/
 
-# Stage 2: Runtime
+# Minimal runtime
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /gateway /usr/local/bin/gateway
+COPY gateway-config.yaml /etc/gateway/config.yaml
+COPY certs/ /etc/gateway/
+COPY gateway-entrypoint.sh /opt/entrypoint.sh
+RUN chmod +x /opt/entrypoint.sh
+ENTRYPOINT ["/opt/entrypoint.sh"]
+```
+
+### Dockerfile.agent
+
+```dockerfile
+# Stage 1: Compile bridge (if channels active)
+FROM node:22-slim AS bridge-build
+WORKDIR /src
+COPY bridge-src/package.json bridge-src/tsconfig.json ./
+RUN npm install
+COPY bridge-src/src/ ./src/
+RUN npm run build
+
+# Stage 2: Agent runtime
 FROM node:22-slim
 
-# Base packages (from runtime.yaml install commands)
+# System packages (iptables for DNAT to gateway container)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates \
+    iptables ca-certificates git curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Agent CLI (from runtime.yaml)
+# Agent user
+RUN useradd -m -s /bin/bash agent
+
+# Trust sandbox CA (for MITM'd connections)
+COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt
+RUN update-ca-certificates
+
+# Bridge
+COPY --from=bridge-build /src/dist/ /opt/bridge/dist/
+COPY --from=bridge-build /src/node_modules/ /opt/bridge/node_modules/
+COPY bridge-config.json /opt/bridge/config.json
+
+# Runtime install (from runtime.yaml)
 RUN npm install -g @openai/codex
 
-# Feature: custom-runtime commands
+# Feature commands
 RUN apt-get update && apt-get install -y ripgrep fd-find
 
-# Bridge (if channels active)
-COPY bridge/ /opt/bridge/
-RUN cd /opt/bridge && npm install --production
-COPY bridge-plugins/telegram/ /opt/bridge/plugins/telegram/
-
-# Home override
+# Home override + hooks
 COPY home-override/ /opt/home-override/
+COPY hooks/ /opt/hooks/
 
-# Gateway binary (if features need it)
-COPY --from=gateway-builder /gateway /usr/local/bin/gateway
-COPY gateway-config.yaml /etc/gateway/config.yaml
-
-# Entrypoint hooks
-COPY hooks/ /opt/entrypoint-hooks/
-
-# Users
-RUN useradd -m -s /bin/bash agent && useradd -r -s /usr/sbin/nologin gateway
-
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+COPY entrypoint.sh /opt/entrypoint.sh
+RUN chmod +x /opt/entrypoint.sh
+ENTRYPOINT ["/opt/entrypoint.sh"]
 CMD ["sleep", "infinity"]
 ```
 
