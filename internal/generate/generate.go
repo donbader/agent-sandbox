@@ -195,6 +195,7 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 		b.WriteString("COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt\n")
 		b.WriteString("COPY certs/ca.crt /etc/gateway/ca.crt\n")
 		b.WriteString("COPY certs/ca.key /etc/gateway/ca.key\n")
+		b.WriteString("RUN chown gateway:gateway /etc/gateway/ca.crt /etc/gateway/ca.key\n")
 		b.WriteString("RUN update-ca-certificates\n\n")
 	}
 
