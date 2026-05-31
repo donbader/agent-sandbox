@@ -99,22 +99,7 @@ func structToJSONSchema(v any) map[string]any {
 		}
 		name := strings.Split(yamlTag, ",")[0]
 
-		prop := map[string]any{}
-		switch field.Type.Kind() {
-		case reflect.String:
-			prop["type"] = "string"
-		case reflect.Slice:
-			prop["type"] = "array"
-			if field.Type.Elem().Kind() == reflect.String {
-				prop["items"] = map[string]any{"type": "string"}
-			}
-		case reflect.Bool:
-			prop["type"] = "boolean"
-		case reflect.Int, reflect.Int64:
-			prop["type"] = "integer"
-		default:
-			prop["type"] = "object"
-		}
+		prop := typeToSchema(field.Type)
 
 		if desc := field.Tag.Get("schema"); desc != "" {
 			prop["description"] = desc
@@ -126,5 +111,50 @@ func structToJSONSchema(v any) map[string]any {
 	return map[string]any{
 		"type":       "object",
 		"properties": props,
+	}
+}
+
+// typeToSchema converts a reflect.Type to a JSON Schema property definition.
+func typeToSchema(t reflect.Type) map[string]any {
+	// Dereference pointer
+	if t.Kind() == reflect.Ptr {
+		schema := typeToSchema(t.Elem())
+		return schema
+	}
+
+	switch t.Kind() {
+	case reflect.String:
+		return map[string]any{"type": "string"}
+	case reflect.Bool:
+		return map[string]any{"type": "boolean"}
+	case reflect.Int, reflect.Int64:
+		return map[string]any{"type": "integer"}
+	case reflect.Slice:
+		prop := map[string]any{"type": "array"}
+		prop["items"] = typeToSchema(t.Elem())
+		return prop
+	case reflect.Map:
+		prop := map[string]any{"type": "object"}
+		prop["additionalProperties"] = typeToSchema(t.Elem())
+		return prop
+	case reflect.Struct:
+		// Recursively expand struct fields
+		props := map[string]any{}
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			yamlTag := field.Tag.Get("yaml")
+			if yamlTag == "" || yamlTag == "-" {
+				continue
+			}
+			name := strings.Split(yamlTag, ",")[0]
+			fieldSchema := typeToSchema(field.Type)
+			if desc := field.Tag.Get("schema"); desc != "" {
+				fieldSchema["description"] = desc
+			}
+			props[name] = fieldSchema
+		}
+		return map[string]any{"type": "object", "properties": props}
+	default:
+		return map[string]any{"type": "object"}
 	}
 }
