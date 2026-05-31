@@ -27,7 +27,7 @@ internal/
 ext/
   plugins/              ← external plugins (per-plugin versioning)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
-bridge/                 ← Bridge TypeScript runtime (grammy + agent process spawning)
+bridge/                 ← Bridge TypeScript core (agent process spawning, generic channel loader)
 sdk/                    ← Gateway handler interface (for feature plugins)
 docs/                   ← Design documents
 templates/              ← Dockerfile.tmpl, entrypoint.sh template
@@ -85,7 +85,7 @@ External feature plugins live in `ext/plugins/<name>/` with optional gateway/bri
 ```
 ext/plugins/<name>/feature.yaml        ← metadata, config schema, hosts
 ext/plugins/<name>/gateway/            ← optional Go: compiled during Docker build
-ext/plugins/<name>/bridge/             ← optional TypeScript: copied into image
+ext/plugins/<name>/bridge/             ← optional TypeScript: channel implementation (Channel Protocol)
 ```
 
 - Each plugin defines a typed Config struct with `yaml` and `schema` tags

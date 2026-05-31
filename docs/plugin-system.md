@@ -40,9 +40,8 @@ plugins/
     gateway/                ← Go: MITM handler for api.telegram.org
       handler.go
       go.mod
-    bridge/                 ← TypeScript: channel plugin
-      src/telegram.ts
-      package.json
+    bridge/                 ← TypeScript: channel implementation (Channel Protocol)
+      channel.ts            ← export default class implementing Channel
   custom-runtime/
     feature.yaml            ← metadata, config schema
                             ← no gateway/, no bridge/ — pure config-driven
@@ -197,16 +196,41 @@ RUN cd /src && CGO_ENABLED=0 go build -o /gateway ./cmd/gateway
 
 The CLI extracts gateway source + active feature handlers into `.build/gateway-src/`. Docker multi-stage compiles them. User doesn't need Go installed.
 
-## Bridge Loading
+## Bridge & Channel Protocol
 
-Bridge is TypeScript. Feature plugins with `bridge: true` have their `bridge/` directory copied into the image:
+Bridge is a generic TypeScript runtime that spawns the agent process and routes messages. Channel implementations are owned by plugins.
+
+### Protocol
+
+1. Plugin provides `bridge/channel.ts` — exports default a class implementing `Channel`
+2. Constructor signature: `constructor(config: Record<string, unknown>)` — receives the full bridge config
+3. Plugin's Go code declares `BridgeChannel: "telegram"` in FeatureContributions
+4. Plugin's Go code populates `BridgeConfig` with channel-specific config
+
+### Generator Assembly
+
+During `agent-sandbox generate`, the generator:
+
+1. Copies bridge core (`bridge/`) to `.build/bridge-src/`
+2. For each plugin with `BridgeChannel` set, copies `bridge/channel.ts` → `.build/bridge-src/src/channel/<name>.ts`
+3. Generates `.build/bridge-src/src/channel/channels.gen.ts` — import map of all channels
 
 ```
-.build/bridge-plugins/telegram/src/telegram.ts
-.build/bridge-plugins/slack/src/slack.ts
+.build/bridge-src/
+  src/
+    index.ts              ← bridge core (generic, never modified)
+    agent-process.ts      ← agent process spawning
+    channel/
+      types.ts            ← Channel interface
+      telegram.ts         ← copied from internal/plugins/telegram/bridge/channel.ts
+      channels.gen.ts     ← auto-generated registry
 ```
 
-Bridge dynamically imports channel plugins at runtime from `/opt/bridge/plugins/<name>/`.
+### Adding a New Channel
+
+1. Create `internal/plugins/<name>/bridge/channel.ts` implementing Channel
+2. In plugin.go: `BridgeChannel: "<name>"` + `BridgeConfig: map[string]any{...}`
+3. Run `agent-sandbox generate` — channel is automatically assembled
 
 ## Custom Runtime (Inline)
 
