@@ -378,6 +378,8 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("      default:\n")
 	b.WriteString("    cap_add:\n")
 	b.WriteString("      - NET_ADMIN\n")
+	b.WriteString("    sysctls:\n")
+	b.WriteString("      - net.ipv4.ip_forward=1\n")
 
 	envVars := g.mergedEnvVars()
 	b.WriteString("    environment:\n")
@@ -517,8 +519,6 @@ func (g *Generator) writeGatewayEntrypoint() error {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("set -e\n\n")
-	b.WriteString("# Enable IP forwarding (gateway acts as router for agent traffic)\n")
-	b.WriteString("echo 1 > /proc/sys/net/ipv4/ip_forward\n\n")
 	b.WriteString("# Redirect incoming port 443 to proxy (port 8443)\n")
 	b.WriteString(fmt.Sprintf("iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port %d\n\n", g.GatewaySpec.ListenPort))
 	b.WriteString("# Start gateway\n")
