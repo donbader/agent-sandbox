@@ -534,10 +534,14 @@ func (g *Generator) writeAgentEntrypoint() error {
 		b.WriteString("if [ -z \"$GATEWAY_IP\" ]; then\n  echo \"entrypoint: ERROR — cannot resolve $GATEWAY_HOST\" >&2\n  exit 1\nfi\n")
 		b.WriteString("echo \"entrypoint: gateway at $GATEWAY_IP\"\n\n")
 
+		// Switch DNS to gateway resolver (Docker embedded DNS can't forward on internal network)
+		b.WriteString("echo \"entrypoint: switching DNS to gateway...\"\n")
+		b.WriteString("echo \"nameserver $GATEWAY_IP\" > /etc/resolv.conf\n\n")
+
 		// iptables DNAT: redirect outbound traffic to the resolved gateway IP
 		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
 		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.ListenPort))
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.11 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.DNSPort))
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.DNSPort))
 		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -j DROP\n\n")
 	}
 

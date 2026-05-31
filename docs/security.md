@@ -28,17 +28,20 @@ Rationale: Dev agents need `npm install`, `pip install`, `curl` arbitrary URLs. 
 
 ## Transparent Proxy
 
-Agent container resolves gateway IP via Docker DNS, then sets up iptables DNAT:
+Agent container resolves gateway IP via Docker DNS, then switches DNS and sets up iptables DNAT:
 
 ```bash
 # Resolve gateway container IP (Docker DNS, before iptables)
 GATEWAY_IP=$(getent hosts $GATEWAY_HOST | awk '{print $1}')
 
+# Switch DNS to gateway resolver (Docker embedded DNS can't forward on internal network)
+echo "nameserver $GATEWAY_IP" > /etc/resolv.conf
+
 # HTTPS: DNAT to gateway container (kernel enforced, agent cannot bypass)
 iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:8443
 
-# DNS: redirect to gateway's resolver (exclude Docker DNS for service discovery)
-iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.11 -j DNAT --to-destination $GATEWAY_IP:5353
+# DNS: redirect to gateway's resolver
+iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination $GATEWAY_IP:5353
 
 # Drop all other UDP (prevent DNS tunneling)
 iptables -A OUTPUT -p udp ! --dport 53 -j DROP

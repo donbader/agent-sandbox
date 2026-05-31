@@ -360,6 +360,8 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, epStr, "iptables -t nat -A OUTPUT")
 		assert.Contains(t, epStr, "$GATEWAY_IP:8443")
 		assert.Contains(t, epStr, "getent hosts $GATEWAY_HOST")
+		assert.Contains(t, epStr, "nameserver $GATEWAY_IP")
+		assert.Contains(t, epStr, "/etc/resolv.conf")
 		assert.NotContains(t, epStr, "--to-port 8443")
 		assert.NotContains(t, epStr, "/usr/local/bin/gateway")
 		assert.Contains(t, epStr, "exec su -c 'sleep infinity' agent")
@@ -463,6 +465,7 @@ func TestGenerator_Run(t *testing.T) {
 		require.NoError(t, err)
 		epStr := string(ep)
 		assert.Contains(t, epStr, "$GATEWAY_IP:8443")
+		assert.Contains(t, epStr, "nameserver $GATEWAY_IP")
 		assert.Contains(t, epStr, "exec node /opt/bridge/dist/index.js")
 		assert.NotContains(t, epStr, "exec su -c")
 
