@@ -65,19 +65,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Build rewriters based on MITM domains
-		var rewriters []mitm.Rewriter
-		for _, domain := range cfg.MITMDomains {
-			if domain == "api.telegram.org" {
-				rw, err := mitm.NewTelegramRewriter()
-				if err != nil {
-					slog.Error("telegram rewriter disabled", "error", err)
-				} else {
-					rewriters = append(rewriters, rw)
-					slog.Info("telegram token rewriter enabled")
-				}
-			}
-		}
+		// Build rewriters from config
+		rewriters := buildRewriters(cfg.Rewriters)
 
 		handler := mitm.NewHandler(cfg.MITMDomains, caCert, rewriters)
 		p.RegisterHandler(handler)
@@ -97,4 +86,33 @@ func main() {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
 	slog.Info("shutting down")
+}
+
+// buildRewriters instantiates rewriters from the gateway config.
+// Each entry in cfgs maps to a specific rewriter type.
+func buildRewriters(cfgs []proxy.RewriterConfig) []mitm.Rewriter {
+	var rewriters []mitm.Rewriter
+	for _, rc := range cfgs {
+		switch rc.Type {
+		case "telegram-url":
+			rw, err := mitm.NewTelegramRewriter()
+			if err != nil {
+				slog.Error("telegram rewriter disabled", "error", err)
+				continue
+			}
+			rewriters = append(rewriters, rw)
+			slog.Info("telegram token rewriter enabled")
+		case "auth-header":
+			rw, err := mitm.NewAuthHeaderRewriter(rc.Domains, rc.Header, rc.ValueFormat, rc.EnvVar)
+			if err != nil {
+				slog.Error("auth-header rewriter disabled", "domains", rc.Domains, "header", rc.Header, "error", err)
+				continue
+			}
+			rewriters = append(rewriters, rw)
+			slog.Info("auth-header rewriter enabled", "domains", rc.Domains, "header", rc.Header)
+		default:
+			slog.Warn("unknown rewriter type", "type", rc.Type)
+		}
+	}
+	return rewriters
 }

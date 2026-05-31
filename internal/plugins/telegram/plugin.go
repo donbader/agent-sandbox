@@ -33,6 +33,13 @@ func init() {
 			BridgeChannel: "telegram",
 			EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
 			BridgeConfig:  map[string]any{"access_control": cfg.AccessControl},
+			Rewriters: []resolve.RewriterConfig{
+				{
+					Type:    "telegram-url",
+					Domains: []string{"api.telegram.org"},
+					EnvVar:  "TELEGRAM_BOT_TOKEN",
+				},
+			},
 		}, nil
 	})
 }

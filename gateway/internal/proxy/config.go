@@ -8,13 +8,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// RewriterConfig describes a rewriter to instantiate for a set of domains.
+type RewriterConfig struct {
+	Type        string   `yaml:"type"`                  // "telegram-url" or "auth-header"
+	Domains     []string `yaml:"domains"`               // domains this rewriter applies to
+	EnvVar      string   `yaml:"env_var"`               // environment variable holding the secret
+	Header      string   `yaml:"header,omitempty"`      // header name to inject (auth-header only)
+	ValueFormat string   `yaml:"value_format,omitempty"` // header value format, e.g. "token ${value}"
+}
+
 // Config holds gateway configuration.
 type Config struct {
-	Listen      string   `yaml:"listen"`       // TCP listen address (e.g., ":8443")
-	DNSListen   string   `yaml:"dns_listen"`   // DNS listen address (e.g., ":53")
-	MITMDomains []string `yaml:"mitm_domains"` // domains to MITM (terminate TLS)
-	CACertPath  string   `yaml:"ca_cert"`      // path to CA certificate for MITM
-	CAKeyPath   string   `yaml:"ca_key"`       // path to CA private key for MITM
+	Listen      string           `yaml:"listen"`       // TCP listen address (e.g., ":8443")
+	DNSListen   string           `yaml:"dns_listen"`   // DNS listen address (e.g., ":53")
+	MITMDomains []string         `yaml:"mitm_domains"` // domains to MITM (terminate TLS)
+	CACertPath  string           `yaml:"ca_cert"`      // path to CA certificate for MITM
+	CAKeyPath   string           `yaml:"ca_key"`       // path to CA private key for MITM
+	Rewriters   []RewriterConfig `yaml:"rewriters"`    // rewriters to apply to intercepted requests
 }
 
 // RequestHandler intercepts connections to specific hosts.
