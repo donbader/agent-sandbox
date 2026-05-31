@@ -23,7 +23,7 @@ internal/
   resolve/              ← plugin resolution (local → embedded)
   plugins/              ← core plugins (embedded in CLI)
     codex/              ← runtime.yaml
-    custom-runtime/     ← feature.yaml + plugin.go (owns its logic)
+    custom-runtime/     ← feature.yaml + plugin.go (typed Config struct)
 ext/
   plugins/              ← external plugins (per-plugin versioning)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
@@ -77,7 +77,7 @@ Core feature plugins live in `internal/plugins/<name>/` and are embedded in the 
 
 ```
 internal/plugins/<name>/feature.yaml   ← metadata, config schema
-internal/plugins/<name>/plugin.go      ← Go: implements FeaturePlugin interface (owns its logic)
+internal/plugins/<name>/plugin.go      ← Go: typed Config struct + Register[C]() call
 ```
 
 External feature plugins live in `ext/plugins/<name>/` with optional gateway/bridge code:
@@ -88,9 +88,10 @@ ext/plugins/<name>/gateway/            ← optional Go: compiled during Docker b
 ext/plugins/<name>/bridge/             ← optional TypeScript: copied into image
 ```
 
-- Each plugin implements `resolve.FeaturePlugin` interface
-- Plugins register themselves via `init()` → `resolve.RegisterFeature()`
-- Plugin owns its contribution extraction logic (not hardcoded in resolve)
+- Each plugin defines a typed Config struct with `yaml` and `schema` tags
+- Plugins register via `init()` → `resolve.Register[C any](name, fn)`
+- Framework handles yaml unmarshaling (map[string]any → typed struct)
+- Schema.json generated from struct tags via reflection (single source of truth)
 - `internal/plugins/register.go` imports all core plugins for side-effect registration
 
 ### Plugin Resolution Order
