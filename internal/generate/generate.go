@@ -19,8 +19,7 @@ import (
 const (
 	gatewayListenPort = 8443  // TLS interception port
 	gatewayDNSPort    = 5353  // DNS resolver port
-	gatewayInternalIP = "172.28.0.2"  // gateway container IP on internal network
-	internalSubnet    = "172.28.0.0/16" // internal network subnet
+
 )
 
 // Gateway build metadata — defines how the gateway Go binary is compiled.
@@ -381,7 +380,6 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString(fmt.Sprintf("    container_name: %s-gateway\n", g.Config.Name))
 	b.WriteString("    networks:\n")
 	b.WriteString("      internal:\n")
-	b.WriteString(fmt.Sprintf("        ipv4_address: %s\n", gatewayInternalIP))
 	b.WriteString("      default:\n")
 
 	envVars := g.mergedEnvVars()
@@ -403,7 +401,8 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("      internal:\n")
 	b.WriteString("    cap_add:\n")
 	b.WriteString("      - NET_ADMIN\n")
-	b.WriteString(fmt.Sprintf("    dns: %s\n", gatewayInternalIP))
+	b.WriteString("    environment:\n")
+	b.WriteString(fmt.Sprintf("      - GATEWAY_HOST=%s-gateway\n", g.Config.Name))
 	b.WriteString(fmt.Sprintf("    depends_on:\n      - %s-gateway\n", g.Config.Name))
 
 	volumes := g.collectVolumes()
@@ -419,9 +418,6 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("\nnetworks:\n")
 	b.WriteString("  internal:\n")
 	b.WriteString("    internal: true\n")
-	b.WriteString("    ipam:\n")
-	b.WriteString("      config:\n")
-	b.WriteString(fmt.Sprintf("        - subnet: %s\n", internalSubnet))
 
 	// Named volumes at top level
 	namedVolumes := g.collectNamedVolumes(volumes)
@@ -537,10 +533,16 @@ func (g *Generator) writeAgentEntrypoint() error {
 	b.WriteString("#!/bin/bash\nset -e\n\n")
 
 	if g.Gateway {
-		// iptables DNAT: redirect outbound traffic to the gateway container
+		// Resolve gateway IP dynamically via Docker DNS (before iptables redirects DNS)
+		b.WriteString("echo \"entrypoint: resolving gateway...\"\n")
+		b.WriteString("GATEWAY_IP=$(getent hosts $GATEWAY_HOST | awk '{print $1}')\n")
+		b.WriteString("if [ -z \"$GATEWAY_IP\" ]; then\n  echo \"entrypoint: ERROR — cannot resolve $GATEWAY_HOST\" >&2\n  exit 1\nfi\n")
+		b.WriteString("echo \"entrypoint: gateway at $GATEWAY_IP\"\n\n")
+
+		// iptables DNAT: redirect outbound traffic to the resolved gateway IP
 		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination %s:%d\n", gatewayInternalIP, gatewayListenPort))
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination %s:%d\n", gatewayInternalIP, gatewayDNSPort))
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:%d\n", gatewayListenPort))
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.11 -j DNAT --to-destination $GATEWAY_IP:%d\n", gatewayDNSPort))
 		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -j DROP\n\n")
 	}
 

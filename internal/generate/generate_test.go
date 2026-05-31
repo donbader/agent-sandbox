@@ -352,7 +352,8 @@ func TestGenerator_Run(t *testing.T) {
 		require.NoError(t, err)
 		epStr := string(ep)
 		assert.Contains(t, epStr, "iptables -t nat -A OUTPUT")
-		assert.Contains(t, epStr, "--to-destination 172.28.0.2:8443")
+		assert.Contains(t, epStr, "$GATEWAY_IP:8443")
+		assert.Contains(t, epStr, "getent hosts $GATEWAY_HOST")
 		assert.NotContains(t, epStr, "--to-port 8443")
 		assert.NotContains(t, epStr, "/usr/local/bin/gateway")
 		assert.Contains(t, epStr, "exec su -c 'sleep infinity' agent")
@@ -367,7 +368,7 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, dcStr, "Dockerfile.agent")
 		assert.Contains(t, dcStr, "NET_ADMIN")
 		assert.Contains(t, dcStr, "internal:")
-		assert.Contains(t, dcStr, "172.28.0.0/16")
+		assert.Contains(t, dcStr, "GATEWAY_HOST=coder-gateway")
 		assert.Contains(t, dcStr, "depends_on:")
 
 		// Gateway source should be copied
@@ -442,7 +443,7 @@ func TestGenerator_Run(t *testing.T) {
 		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
 		require.NoError(t, err)
 		epStr := string(ep)
-		assert.Contains(t, epStr, "--to-destination 172.28.0.2:8443")
+		assert.Contains(t, epStr, "$GATEWAY_IP:8443")
 		assert.Contains(t, epStr, "exec node /opt/bridge/dist/index.js")
 		assert.NotContains(t, epStr, "exec su -c")
 
