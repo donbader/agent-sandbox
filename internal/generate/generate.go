@@ -599,8 +599,41 @@ func (g *Generator) writeGatewayConfig() error {
 		b.WriteString("ca_key: /etc/gateway/ca.key\n")
 	}
 
+	// Rewriter configuration
+	rewriters := g.collectRewriters()
+	if len(rewriters) > 0 {
+		b.WriteString("rewriters:\n")
+		for _, rw := range rewriters {
+			b.WriteString(fmt.Sprintf("  - type: %s\n", rw.Type))
+			if len(rw.Domains) > 0 {
+				b.WriteString("    domains:\n")
+				for _, d := range rw.Domains {
+					b.WriteString(fmt.Sprintf("      - %s\n", d))
+				}
+			}
+			if rw.EnvVar != "" {
+				b.WriteString(fmt.Sprintf("    env_var: %s\n", rw.EnvVar))
+			}
+			if rw.Header != "" {
+				b.WriteString(fmt.Sprintf("    header: \"%s\"\n", rw.Header))
+			}
+			if rw.ValueFormat != "" {
+				b.WriteString(fmt.Sprintf("    value_format: \"%s\"\n", rw.ValueFormat))
+			}
+		}
+	}
+
 	path := filepath.Join(g.OutDir, "gateway-config.yaml")
 	return os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+// collectRewriters gathers all rewriter configs from features.
+func (g *Generator) collectRewriters() []resolve.RewriterConfig {
+	var rewriters []resolve.RewriterConfig
+	for _, f := range g.Features {
+		rewriters = append(rewriters, f.Rewriters...)
+	}
+	return rewriters
 }
 
 // copyHooks copies entrypoint hook scripts to .build/hooks/.

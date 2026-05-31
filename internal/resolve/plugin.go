@@ -20,17 +20,27 @@ type FeaturePlugin interface {
 	Resolve(projectDir string, rawConfig map[string]any) (*FeatureContributions, error)
 }
 
+// RewriterConfig describes a gateway rewriter to instantiate for a set of domains.
+type RewriterConfig struct {
+	Type        string   // "telegram-url" or "auth-header"
+	Domains     []string // domains this rewriter applies to
+	EnvVar      string   // environment variable holding the secret
+	Header      string   // header name to inject (auth-header type only)
+	ValueFormat string   // header value format, e.g. "token ${value}" (auth-header type only)
+}
+
 // FeatureContributions holds what a feature adds to the build.
 type FeatureContributions struct {
-	Name            string         // plugin name (for diagnostics and logging)
-	Commands        []string       // RUN commands for Dockerfile
-	EntrypointHooks []string       // scripts to run on container start (source paths)
-	Volumes         []string       // named volumes (e.g., "name:/path")
-	HomeOverride    string         // directory to copy into home on start
-	MITMDomains     []string       // domains the gateway should MITM (terminate TLS)
-	BridgeChannel   string         // bridge channel type (e.g., "telegram")
-	EnvVars         []string       // environment variables (added to .env.example and compose)
-	BridgeConfig    map[string]any // plugin-specific config passed to bridge-config.json
+	Name            string           // plugin name (for diagnostics and logging)
+	Commands        []string         // RUN commands for Dockerfile
+	EntrypointHooks []string         // scripts to run on container start (source paths)
+	Volumes         []string         // named volumes (e.g., "name:/path")
+	HomeOverride    string           // directory to copy into home on start
+	MITMDomains     []string         // domains the gateway should MITM (terminate TLS)
+	BridgeChannel   string           // bridge channel type (e.g., "telegram")
+	EnvVars         []string         // environment variables (added to .env.example and compose)
+	BridgeConfig    map[string]any   // plugin-specific config passed to bridge-config.json
+	Rewriters       []RewriterConfig // gateway rewriters to instantiate for this feature
 }
 
 // registry holds registered feature plugins.
