@@ -2,6 +2,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -722,10 +723,7 @@ func (g *Generator) writeBridgeSource() error {
 
 // writeBridgeConfig generates .build/bridge-config.json.
 func (g *Generator) writeBridgeConfig() error {
-	// Find the bridge channel and allowed chat IDs
 	channel := ""
-	var allowedChatIDs []string
-
 	for _, f := range g.Features {
 		if f.BridgeChannel != "" {
 			channel = f.BridgeChannel
@@ -733,40 +731,29 @@ func (g *Generator) writeBridgeConfig() error {
 		}
 	}
 
-	// Extract allowed_chat_ids from config
-	if g.Config.Features != nil {
-		if tgCfg, ok := g.Config.Features["telegram"]; ok {
-			if ids, ok := tgCfg["allowed_chat_ids"]; ok {
-				if arr, ok := ids.([]any); ok {
-					for _, v := range arr {
-						if s, ok := v.(string); ok {
-							allowedChatIDs = append(allowedChatIDs, s)
-						}
-					}
-				}
-			}
-		}
-	}
-
 	// Build agent command: run as the agent user via su
 	agentCmd := fmt.Sprintf("su -c '%s' %s", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User)
 
-	var b strings.Builder
-	b.WriteString("{\n")
-	b.WriteString(fmt.Sprintf("  \"channel\": %q,\n", channel))
-	b.WriteString(fmt.Sprintf("  \"agent_cmd\": [\"sh\", \"-c\", %q]", agentCmd))
-	if len(allowedChatIDs) > 0 {
-		b.WriteString(",\n  \"allowed_chat_ids\": [")
-		for i, id := range allowedChatIDs {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString(fmt.Sprintf("%q", id))
-		}
-		b.WriteString("]")
+	// Build config map for JSON marshaling
+	config := map[string]any{
+		"channel":   channel,
+		"agent_cmd": []string{"sh", "-c", agentCmd},
 	}
-	b.WriteString("\n}\n")
+
+	// Pass feature-specific config to bridge
+	if g.Config.Features != nil {
+		if tgCfg, ok := g.Config.Features["telegram"]; ok {
+			if ac, ok := tgCfg["access_control"]; ok {
+				config["access_control"] = ac
+			}
+		}
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling bridge config: %w", err)
+	}
 
 	path := filepath.Join(g.OutDir, "bridge-config.json")
-	return os.WriteFile(path, []byte(b.String()), 0644)
+	return os.WriteFile(path, append(data, '\n'), 0644)
 }
