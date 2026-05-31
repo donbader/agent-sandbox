@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=.build/schema.json
 name: coder
 runtime: codex
 features:

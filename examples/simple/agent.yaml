@@ -1,2 +1,3 @@
+# yaml-language-server: $schema=.build/schema.json
 name: simple-agent
 runtime: codex
