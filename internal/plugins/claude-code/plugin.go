@@ -23,7 +23,7 @@ func init() {
 			Name: "claude-code",
 			Commands: []string{
 				"apt-get update && apt-get install -y --no-install-recommends nodejs npm",
-				fmt.Sprintf("npm install -g @anthropic-ai/claude-code@%s", version),
+				fmt.Sprintf("npm install -g @anthropic-ai/claude-code@%s @agentclientprotocol/claude-agent-acp@latest", version),
 			},
 			MITMDomains: []string{"api.anthropic.com"},
 			EnvVars:     []string{"ANTHROPIC_API_KEY"},

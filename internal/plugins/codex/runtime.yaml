@@ -2,7 +2,7 @@ name: codex
 base_image: node:22-slim
 install:
   - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*
-  - npm install -g @openai/codex@latest
+  - npm install -g @openai/codex@latest @zed-industries/codex-acp@latest
 cmd: ["sleep", "infinity"]
 ports:
   # codex listens on port 1455 for OAuth sign-in callback

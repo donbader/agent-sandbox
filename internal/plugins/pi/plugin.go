@@ -53,7 +53,7 @@ func init() {
 			Name: "pi",
 			Commands: []string{
 				"apt-get update && apt-get install -y --no-install-recommends nodejs npm git",
-				fmt.Sprintf("npm install -g @earendil-works/pi-coding-agent@%s", version),
+				fmt.Sprintf("npm install -g @earendil-works/pi-coding-agent@%s pi-acp@latest", version),
 			},
 			MITMDomains: domains,
 			EnvVars:     envVars,
