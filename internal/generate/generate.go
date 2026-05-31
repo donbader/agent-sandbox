@@ -19,6 +19,8 @@ import (
 const (
 	gatewayListenPort = 8443  // TLS interception port
 	gatewayDNSPort    = 5353  // DNS resolver port
+	gatewayInternalIP = "172.28.0.2"  // gateway container IP on internal network
+	internalSubnet    = "172.28.0.0/16" // internal network subnet
 )
 
 // Gateway build metadata — defines how the gateway Go binary is compiled.
@@ -188,33 +190,59 @@ func (g *Generator) needsEntrypoint() bool {
 	return false
 }
 
-// writeDockerfile generates .build/Dockerfile.
+// writeDockerfile generates Dockerfile artifacts.
+// When Gateway is true, produces Dockerfile.gateway and Dockerfile.agent.
+// When Gateway is false, produces a single Dockerfile.
 func (g *Generator) writeDockerfile() error {
-	var b strings.Builder
-
 	if g.Gateway {
-		g.writeMultiStageDockerfile(&b)
-	} else {
-		g.writeSingleStageDockerfile(&b)
+		if err := g.writeGatewayDockerfile(); err != nil {
+			return err
+		}
+		return g.writeAgentDockerfile()
 	}
-
+	var b strings.Builder
+	g.writeSingleStageDockerfile(&b)
 	path := filepath.Join(g.OutDir, "Dockerfile")
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-// writeMultiStageDockerfile produces a Dockerfile with gateway compilation stage.
-func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
-	// Stage 1: compile gateway
-	b.WriteString("# Stage 1: compile gateway\n")
-	b.WriteString(fmt.Sprintf("FROM %s AS gateway-build\n", gatewayMeta.BuildImage))
+// writeGatewayDockerfile produces Dockerfile.gateway: builds the gateway binary
+// and packages it into a minimal alpine image.
+func (g *Generator) writeGatewayDockerfile() error {
+	var b strings.Builder
+
+	// Build stage: compile gateway binary
+	b.WriteString(fmt.Sprintf("FROM %s AS builder\n", gatewayMeta.BuildImage))
 	b.WriteString("WORKDIR /src\n")
 	b.WriteString("COPY gateway-src/ .\n")
-	b.WriteString("RUN go mod tidy\n")
-	b.WriteString(fmt.Sprintf("RUN go build -o %s ./cmd/gateway/\n\n", gatewayMeta.BinaryPath))
+	b.WriteString(fmt.Sprintf("RUN go mod tidy && go build -o %s ./cmd/gateway/\n\n", gatewayMeta.BinaryPath))
 
-	// Stage 2: build bridge (if enabled)
+	// Runtime stage: minimal alpine with gateway binary
+	b.WriteString("FROM alpine:3.20\n")
+	b.WriteString("RUN apk add --no-cache ca-certificates\n")
+	b.WriteString(fmt.Sprintf("COPY --from=builder %s /usr/local/bin/gateway\n", gatewayMeta.BinaryPath))
+	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n")
+
+	if g.hasMITMDomains() {
+		b.WriteString("COPY certs/ca.crt /etc/gateway/ca.crt\n")
+		b.WriteString("COPY certs/ca.key /etc/gateway/ca.key\n")
+	}
+
+	b.WriteString("COPY gateway-entrypoint.sh /opt/entrypoint.sh\n")
+	b.WriteString("RUN chmod +x /opt/entrypoint.sh\n")
+	b.WriteString("ENTRYPOINT [\"/opt/entrypoint.sh\"]\n")
+
+	path := filepath.Join(g.OutDir, "Dockerfile.gateway")
+	return os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+// writeAgentDockerfile produces Dockerfile.agent: builds the bridge (if enabled)
+// and packages the runtime with iptables for traffic redirection to the gateway container.
+func (g *Generator) writeAgentDockerfile() error {
+	var b strings.Builder
+
+	// Bridge build stage (if enabled)
 	if g.Bridge {
-		b.WriteString("# Stage 2: build bridge\n")
 		b.WriteString(fmt.Sprintf("FROM %s AS bridge-build\n", bridgeMeta.BuildImage))
 		b.WriteString("WORKDIR /src\n")
 		b.WriteString("COPY bridge-src/package.json bridge-src/tsconfig.json ./\n")
@@ -224,32 +252,15 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	}
 
 	// Runtime stage
-	b.WriteString(fmt.Sprintf("# Stage %d: runtime\n", g.runtimeStageNum()))
-	b.WriteString(fmt.Sprintf("FROM %s\n\n", g.Runtime.BaseImage))
-
-	// Install base system packages (iptables for transparent proxy, ca-certificates for MITM CA)
-	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iptables ca-certificates && rm -rf /var/lib/apt/lists/*\n\n")
-
-	// Create gateway user (runs the proxy, agent cannot kill it)
-	b.WriteString("RUN useradd -r -s /bin/false gateway\n\n")
-
-	// Create agent user
-	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n\n", g.Runtime.User))
-
-	// Copy gateway binary
-	b.WriteString(fmt.Sprintf("COPY --from=gateway-build %s /usr/local/bin/gateway\n\n", gatewayMeta.BinaryPath))
-
-	// Copy gateway config
-	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n\n")
+	b.WriteString(fmt.Sprintf("FROM %s\n", g.Runtime.BaseImage))
+	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iptables ca-certificates && rm -rf /var/lib/apt/lists/*\n")
+	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n", g.Runtime.User))
 
 	// Install CA cert if MITM is enabled
 	if g.hasMITMDomains() {
 		b.WriteString("# Install sandbox CA certificate\n")
 		b.WriteString("COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt\n")
-		b.WriteString("COPY certs/ca.crt /etc/gateway/ca.crt\n")
-		b.WriteString("COPY certs/ca.key /etc/gateway/ca.key\n")
-		b.WriteString("RUN chown gateway:gateway /etc/gateway/ca.crt /etc/gateway/ca.key\n")
-		b.WriteString("RUN update-ca-certificates\n\n")
+		b.WriteString("RUN update-ca-certificates\n")
 	}
 
 	// Copy bridge dist if enabled
@@ -258,25 +269,24 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 		b.WriteString(fmt.Sprintf("COPY --from=bridge-build %s/ /opt/bridge/dist/\n", bridgeMeta.DistDir))
 		b.WriteString("COPY --from=bridge-build /src/node_modules/ /opt/bridge/node_modules/\n")
 		b.WriteString("COPY --from=bridge-build /src/package.json /opt/bridge/package.json\n")
-		b.WriteString("COPY bridge-config.json /opt/bridge/config.json\n\n")
+		b.WriteString("COPY bridge-config.json /opt/bridge/config.json\n")
 	}
 
 	// Runtime install commands
 	for _, cmd := range g.Runtime.Install {
 		b.WriteString(fmt.Sprintf("RUN %s\n", cmd))
 	}
-	if len(g.Runtime.Install) > 0 {
-		b.WriteString("\n")
-	}
 
 	// Feature install commands
-	g.writeFeatureCommands(b)
+	g.writeFeatureCommands(&b)
 
 	// Copy home override, hooks, entrypoint
-	g.writeCopyStatements(b)
+	g.writeCopyStatements(&b)
 
-	// Entrypoint (always present with gateway)
 	b.WriteString("ENTRYPOINT [\"/opt/entrypoint.sh\"]\n")
+
+	path := filepath.Join(g.OutDir, "Dockerfile.agent")
+	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
 // writeSingleStageDockerfile produces a simple Dockerfile without gateway.
@@ -348,7 +358,86 @@ func (g *Generator) writeCopyStatements(b *strings.Builder) {
 }
 
 // writeCompose generates .build/docker-compose.yml.
+// When Gateway is true, produces a two-service compose with an internal network.
 func (g *Generator) writeCompose() error {
+	if g.Gateway {
+		return g.writeGatewayCompose()
+	}
+	return g.writeSingleCompose()
+}
+
+// writeGatewayCompose produces a docker-compose.yml with separate gateway and agent services.
+// Secrets (env vars) go only to the gateway service; the agent has no access to them.
+func (g *Generator) writeGatewayCompose() error {
+	var b strings.Builder
+
+	b.WriteString("services:\n")
+
+	// Gateway service: internet access + secrets
+	b.WriteString(fmt.Sprintf("  %s-gateway:\n", g.Config.Name))
+	b.WriteString("    build:\n")
+	b.WriteString("      context: .\n")
+	b.WriteString("      dockerfile: Dockerfile.gateway\n")
+	b.WriteString(fmt.Sprintf("    container_name: %s-gateway\n", g.Config.Name))
+	b.WriteString("    networks:\n")
+	b.WriteString("      internal:\n")
+	b.WriteString(fmt.Sprintf("        ipv4_address: %s\n", gatewayInternalIP))
+	b.WriteString("      default:\n")
+
+	envVars := g.mergedEnvVars()
+	if len(envVars) > 0 {
+		b.WriteString("    environment:\n")
+		for _, v := range envVars {
+			b.WriteString(fmt.Sprintf("      - %s=${%s}\n", v, v))
+		}
+	}
+	b.WriteString("    restart: unless-stopped\n")
+
+	// Agent service: internal network only, no secrets
+	b.WriteString(fmt.Sprintf("  %s:\n", g.Config.Name))
+	b.WriteString("    build:\n")
+	b.WriteString("      context: .\n")
+	b.WriteString("      dockerfile: Dockerfile.agent\n")
+	b.WriteString(fmt.Sprintf("    container_name: %s\n", g.Config.Name))
+	b.WriteString("    networks:\n")
+	b.WriteString("      internal:\n")
+	b.WriteString("    cap_add:\n")
+	b.WriteString("      - NET_ADMIN\n")
+	b.WriteString(fmt.Sprintf("    dns: %s\n", gatewayInternalIP))
+	b.WriteString(fmt.Sprintf("    depends_on:\n      - %s-gateway\n", g.Config.Name))
+
+	volumes := g.collectVolumes()
+	if len(volumes) > 0 {
+		b.WriteString("    volumes:\n")
+		for _, v := range volumes {
+			b.WriteString(fmt.Sprintf("      - %s\n", v))
+		}
+	}
+	b.WriteString("    restart: unless-stopped\n")
+
+	// Internal network definition
+	b.WriteString("\nnetworks:\n")
+	b.WriteString("  internal:\n")
+	b.WriteString("    internal: true\n")
+	b.WriteString("    ipam:\n")
+	b.WriteString("      config:\n")
+	b.WriteString(fmt.Sprintf("        - subnet: %s\n", internalSubnet))
+
+	// Named volumes at top level
+	namedVolumes := g.collectNamedVolumes(volumes)
+	if len(namedVolumes) > 0 {
+		b.WriteString("\nvolumes:\n")
+		for _, v := range namedVolumes {
+			b.WriteString(fmt.Sprintf("  %s:\n", v))
+		}
+	}
+
+	path := filepath.Join(g.OutDir, "docker-compose.yml")
+	return os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+// writeSingleCompose produces a docker-compose.yml with a single agent service.
+func (g *Generator) writeSingleCompose() error {
 	var b strings.Builder
 
 	b.WriteString("services:\n")
@@ -358,12 +447,6 @@ func (g *Generator) writeCompose() error {
 	b.WriteString("      dockerfile: Dockerfile\n")
 	b.WriteString(fmt.Sprintf("    container_name: %s\n", g.Config.Name))
 	b.WriteString("    restart: unless-stopped\n")
-
-	// Gateway requires NET_ADMIN for iptables
-	if g.Gateway {
-		b.WriteString("    cap_add:\n")
-		b.WriteString("      - NET_ADMIN\n")
-	}
 
 	// Ports from runtime
 	if len(g.Runtime.Ports) > 0 {
@@ -391,7 +474,7 @@ func (g *Generator) writeCompose() error {
 		}
 	}
 
-	// Declare named volumes at top level
+	// Named volumes at top level
 	namedVolumes := g.collectNamedVolumes(volumes)
 	if len(namedVolumes) > 0 {
 		b.WriteString("\nvolumes:\n")
@@ -422,27 +505,43 @@ func (g *Generator) writeEnvExample() error {
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-// writeEntrypoint generates .build/entrypoint.sh.
+// writeEntrypoint generates entrypoint scripts.
+// When Gateway is true, writes both gateway-entrypoint.sh and entrypoint.sh (agent).
+// When Gateway is false, writes only entrypoint.sh if needed.
 func (g *Generator) writeEntrypoint() error {
+	if g.Gateway {
+		if err := g.writeGatewayEntrypoint(); err != nil {
+			return err
+		}
+		return g.writeAgentEntrypoint()
+	}
 	if !g.needsEntrypoint() {
 		return nil
 	}
+	return g.writeAgentEntrypoint()
+}
 
+// writeGatewayEntrypoint generates .build/gateway-entrypoint.sh.
+func (g *Generator) writeGatewayEntrypoint() error {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	b.WriteString("exec /usr/local/bin/gateway\n")
+	path := filepath.Join(g.OutDir, "gateway-entrypoint.sh")
+	return os.WriteFile(path, []byte(b.String()), 0755)
+}
+
+// writeAgentEntrypoint generates .build/entrypoint.sh for the agent container.
+// When Gateway is true, sets up iptables DNAT rules to redirect traffic to the gateway container.
+func (g *Generator) writeAgentEntrypoint() error {
 	var b strings.Builder
 	b.WriteString("#!/bin/bash\nset -e\n\n")
 
 	if g.Gateway {
-		// iptables setup: redirect all outbound traffic through gateway
-		b.WriteString("# Setup iptables (must run as root)\n")
+		// iptables DNAT: redirect outbound traffic to the gateway container
 		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayListenPort))
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayDNSPort))
-		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -m owner ! --uid-owner gateway -j DROP\n\n")
-
-		// Start gateway as gateway user (preserve env for credential injection)
-		b.WriteString("echo \"entrypoint: starting gateway...\"\n")
-		b.WriteString("su --preserve-environment -s /bin/sh -c '/usr/local/bin/gateway &' gateway\n")
-		b.WriteString("sleep 0.5\n\n")
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination %s:%d\n", gatewayInternalIP, gatewayListenPort))
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination %s:%d\n", gatewayInternalIP, gatewayDNSPort))
+		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -j DROP\n\n")
 	}
 
 	// Home override: copy files from staging to home
@@ -751,15 +850,6 @@ func (g *Generator) collectFeatureEnvVars() []string {
 		}
 	}
 	return vars
-}
-
-// runtimeStageNum returns the stage number for the runtime stage in the Dockerfile.
-func (g *Generator) runtimeStageNum() int {
-	n := 2 // gateway is always stage 1
-	if g.Bridge {
-		n++ // bridge adds a stage
-	}
-	return n
 }
 
 // writeBridgeSource writes the embedded bridge source to .build/bridge-src/,

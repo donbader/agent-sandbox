@@ -321,32 +321,54 @@ func TestGenerator_Run(t *testing.T) {
 		err := g.Run()
 		require.NoError(t, err)
 
-		// Dockerfile should be multi-stage
-		df, err := os.ReadFile(filepath.Join(outDir, "Dockerfile"))
+		// Dockerfile.gateway should build the gateway binary
+		dfGw, err := os.ReadFile(filepath.Join(outDir, "Dockerfile.gateway"))
 		require.NoError(t, err)
-		dfStr := string(df)
-		assert.Contains(t, dfStr, "FROM golang:1.24-alpine AS gateway-build")
-		assert.Contains(t, dfStr, "COPY gateway-src/ .")
-		assert.Contains(t, dfStr, "RUN go build -o /gateway ./cmd/gateway/")
-		assert.Contains(t, dfStr, "FROM node:22-slim")
-		assert.Contains(t, dfStr, "iptables")
-		assert.Contains(t, dfStr, "useradd -r -s /bin/false gateway")
-		assert.Contains(t, dfStr, "COPY --from=gateway-build /gateway /usr/local/bin/gateway")
-		assert.Contains(t, dfStr, `ENTRYPOINT ["/opt/entrypoint.sh"]`)
+		dfGwStr := string(dfGw)
+		assert.Contains(t, dfGwStr, "FROM golang:1.24-alpine AS builder")
+		assert.Contains(t, dfGwStr, "COPY gateway-src/ .")
+		assert.Contains(t, dfGwStr, "RUN go mod tidy && go build -o /gateway ./cmd/gateway/")
+		assert.Contains(t, dfGwStr, "COPY --from=builder /gateway /usr/local/bin/gateway")
+		assert.Contains(t, dfGwStr, `ENTRYPOINT ["/opt/entrypoint.sh"]`)
 
-		// Entrypoint should have iptables + gateway start
+		// Dockerfile.agent should have runtime with iptables, no gateway binary
+		dfAgent, err := os.ReadFile(filepath.Join(outDir, "Dockerfile.agent"))
+		require.NoError(t, err)
+		dfAgentStr := string(dfAgent)
+		assert.Contains(t, dfAgentStr, "FROM node:22-slim")
+		assert.Contains(t, dfAgentStr, "iptables")
+		assert.Contains(t, dfAgentStr, "useradd -m -s /bin/bash agent")
+		assert.Contains(t, dfAgentStr, `ENTRYPOINT ["/opt/entrypoint.sh"]`)
+		assert.NotContains(t, dfAgentStr, "useradd -r -s /bin/false gateway")
+		assert.NotContains(t, dfAgentStr, "gateway-build")
+
+		// gateway-entrypoint.sh should just exec the gateway binary
+		gwEp, err := os.ReadFile(filepath.Join(outDir, "gateway-entrypoint.sh"))
+		require.NoError(t, err)
+		assert.Contains(t, string(gwEp), "exec /usr/local/bin/gateway")
+
+		// Agent entrypoint should use DNAT to redirect to gateway container, not start gateway
 		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
 		require.NoError(t, err)
 		epStr := string(ep)
 		assert.Contains(t, epStr, "iptables -t nat -A OUTPUT")
-		assert.Contains(t, epStr, "--to-port 8443")
-		assert.Contains(t, epStr, "/usr/local/bin/gateway")
+		assert.Contains(t, epStr, "--to-destination 172.28.0.2:8443")
+		assert.NotContains(t, epStr, "--to-port 8443")
+		assert.NotContains(t, epStr, "/usr/local/bin/gateway")
 		assert.Contains(t, epStr, "exec su -c 'sleep infinity' agent")
 
-		// docker-compose.yml should have NET_ADMIN
+		// docker-compose.yml should have two services with internal network
 		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
 		require.NoError(t, err)
-		assert.Contains(t, string(dc), "NET_ADMIN")
+		dcStr := string(dc)
+		assert.Contains(t, dcStr, "coder-gateway:")
+		assert.Contains(t, dcStr, "Dockerfile.gateway")
+		assert.Contains(t, dcStr, "coder:")
+		assert.Contains(t, dcStr, "Dockerfile.agent")
+		assert.Contains(t, dcStr, "NET_ADMIN")
+		assert.Contains(t, dcStr, "internal:")
+		assert.Contains(t, dcStr, "172.28.0.0/16")
+		assert.Contains(t, dcStr, "depends_on:")
 
 		// Gateway source should be copied
 		_, err = os.Stat(filepath.Join(outDir, "gateway-src", "go.mod"))
@@ -400,24 +422,27 @@ func TestGenerator_Run(t *testing.T) {
 		err := g.Run()
 		require.NoError(t, err)
 
-		// Dockerfile should have bridge build stage
-		df, err := os.ReadFile(filepath.Join(outDir, "Dockerfile"))
+		// Dockerfile.agent should have bridge build stage and CA cert
+		dfAgent, err := os.ReadFile(filepath.Join(outDir, "Dockerfile.agent"))
 		require.NoError(t, err)
-		dfStr := string(df)
-		assert.Contains(t, dfStr, "FROM node:22-slim AS bridge-build")
-		assert.Contains(t, dfStr, "RUN npm install")
-		assert.Contains(t, dfStr, "RUN npm run build")
-		assert.Contains(t, dfStr, "COPY --from=bridge-build /src/dist/ /opt/bridge/dist/")
-		assert.Contains(t, dfStr, "COPY bridge-config.json /opt/bridge/config.json")
+		dfAgentStr := string(dfAgent)
+		assert.Contains(t, dfAgentStr, "FROM node:22-slim AS bridge-build")
+		assert.Contains(t, dfAgentStr, "RUN npm install")
+		assert.Contains(t, dfAgentStr, "RUN npm run build")
+		assert.Contains(t, dfAgentStr, "COPY --from=bridge-build /src/dist/ /opt/bridge/dist/")
+		assert.Contains(t, dfAgentStr, "COPY bridge-config.json /opt/bridge/config.json")
+		assert.Contains(t, dfAgentStr, "COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt")
+		assert.Contains(t, dfAgentStr, "RUN update-ca-certificates")
 
-		// Dockerfile should install CA cert
-		assert.Contains(t, dfStr, "COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt")
-		assert.Contains(t, dfStr, "RUN update-ca-certificates")
+		// Dockerfile.gateway should exist
+		_, err = os.Stat(filepath.Join(outDir, "Dockerfile.gateway"))
+		assert.NoError(t, err)
 
-		// Entrypoint should start bridge instead of agent directly
+		// Agent entrypoint should use DNAT and start bridge
 		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
 		require.NoError(t, err)
 		epStr := string(ep)
+		assert.Contains(t, epStr, "--to-destination 172.28.0.2:8443")
 		assert.Contains(t, epStr, "exec node /opt/bridge/dist/index.js")
 		assert.NotContains(t, epStr, "exec su -c")
 
