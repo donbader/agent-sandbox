@@ -81,6 +81,8 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		return
 	}
 
+	slog.Debug("tls handshake complete", "host", serverName)
+
 	// Read HTTP request from the decrypted stream
 	reader := bufio.NewReader(tlsConn)
 	for {
@@ -93,9 +95,13 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		}
 
 		// Apply rewriters
+		rewritten := false
 		for _, rw := range h.rewriters {
-			rw.RewriteRequest(req)
+			if rw.RewriteRequest(req) {
+				rewritten = true
+			}
 		}
+		slog.Debug("request", "host", serverName, "method", req.Method, "path", req.URL.Path, "rewritten", rewritten)
 
 		// Forward to real server
 		resp, err := h.forwardRequest(req, serverName)

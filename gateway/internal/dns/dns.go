@@ -46,6 +46,8 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query []byte) {
+	slog.Debug("dns query", "client", clientAddr.String(), "size", len(query))
+
 	// Forward to upstream DNS
 	upstream, err := net.Dial("udp", upstreamDNS)
 	if err != nil {

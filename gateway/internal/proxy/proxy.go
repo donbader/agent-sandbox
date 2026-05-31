@@ -58,6 +58,8 @@ func (p *Proxy) Close() error {
 func (p *Proxy) handleConn(clientConn net.Conn) {
 	defer clientConn.Close()
 
+	slog.Debug("new connection", "remote_addr", clientConn.RemoteAddr())
+
 	// Read the TLS ClientHello to extract SNI
 	clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	buf := make([]byte, 4096)
@@ -78,12 +80,14 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	// Check if any handler wants to intercept this host
 	for _, h := range p.handlers {
 		if h.Matches(serverName) {
+			slog.Debug("connection matched handler", "sni", serverName, "mode", "mitm")
 			h.Handle(clientConn, hello, serverName)
 			return
 		}
 	}
 
 	// Default: passthrough to destination
+	slog.Debug("connection passthrough", "sni", serverName)
 	p.passthrough(clientConn, hello, serverName)
 }
 
