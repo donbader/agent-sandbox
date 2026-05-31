@@ -538,10 +538,9 @@ func (g *Generator) writeAgentEntrypoint() error {
 		b.WriteString("echo \"entrypoint: switching DNS to gateway...\"\n")
 		b.WriteString("echo \"nameserver $GATEWAY_IP\" > /etc/resolv.conf\n\n")
 
-		// iptables DNAT: redirect outbound traffic to the resolved gateway IP
+		// iptables: redirect HTTPS to gateway, block non-DNS UDP
 		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
 		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.ListenPort))
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.DNSPort))
 		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -j DROP\n\n")
 	}
 

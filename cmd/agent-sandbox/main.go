@@ -73,7 +73,7 @@ func generateCmd() *cobra.Command {
 					BuildImage: "golang:1.24-alpine",
 					BinaryPath: "/gateway",
 					ListenPort: 8443,
-					DNSPort:    5353,
+					DNSPort:    53,
 				},
 				BridgeSpec: generate.BridgeSpec{
 					BuildImage: "node:22-slim",
