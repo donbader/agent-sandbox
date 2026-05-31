@@ -144,8 +144,8 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("# Stage %d: runtime\n", g.runtimeStageNum()))
 	b.WriteString(fmt.Sprintf("FROM %s\n\n", g.Runtime.BaseImage))
 
-	// Install iptables (required for transparent proxy)
-	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iptables && rm -rf /var/lib/apt/lists/*\n\n")
+	// Install base system packages (iptables for transparent proxy, ca-certificates for MITM CA)
+	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iptables ca-certificates && rm -rf /var/lib/apt/lists/*\n\n")
 
 	// Create gateway user (runs the proxy, agent cannot kill it)
 	b.WriteString("RUN useradd -r -s /bin/false gateway\n\n")
