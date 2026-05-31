@@ -21,13 +21,28 @@ const (
 	gatewayDNSPort    = 5353  // DNS resolver port
 )
 
+// Gateway build metadata — defines how the gateway Go binary is compiled.
+var gatewayMeta = struct {
+	BuildImage string // Docker image for gateway compilation stage
+	BinaryPath string // output binary path inside build stage
+}{
+	BuildImage: "golang:1.24-alpine",
+	BinaryPath: "/gateway",
+}
+
 // Bridge build metadata — defines how the bridge TypeScript runtime is compiled.
 var bridgeMeta = struct {
-	BuildImage string // Docker image for bridge compilation stage
-	EntryPoint string // runtime entry point command
+	BuildImage   string // Docker image for bridge compilation stage
+	InstallCmd   string // dependency install command
+	BuildCmd     string // compilation command
+	DistDir      string // compiled output directory (inside build stage)
+	EntryPoint   string // runtime entry point command
 }{
-	BuildImage: "node:22-slim",
-	EntryPoint: "node /opt/bridge/dist/index.js",
+	BuildImage:   "node:22-slim",
+	InstallCmd:   "npm install",
+	BuildCmd:     "npm run build",
+	DistDir:      "/src/dist",
+	EntryPoint:   "node /opt/bridge/dist/index.js",
 }
 
 // Generator produces build artifacts from config and resolved runtime.
@@ -138,11 +153,11 @@ func (g *Generator) writeDockerfile() error {
 func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	// Stage 1: compile gateway
 	b.WriteString("# Stage 1: compile gateway\n")
-	b.WriteString("FROM golang:1.24-alpine AS gateway-build\n")
+	b.WriteString(fmt.Sprintf("FROM %s AS gateway-build\n", gatewayMeta.BuildImage))
 	b.WriteString("WORKDIR /src\n")
 	b.WriteString("COPY gateway-src/ .\n")
 	b.WriteString("RUN go mod tidy\n")
-	b.WriteString("RUN go build -o /gateway ./cmd/gateway/\n\n")
+	b.WriteString(fmt.Sprintf("RUN go build -o %s ./cmd/gateway/\n\n", gatewayMeta.BinaryPath))
 
 	// Stage 2: build bridge (if enabled)
 	if g.Bridge {
@@ -150,9 +165,9 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 		b.WriteString(fmt.Sprintf("FROM %s AS bridge-build\n", bridgeMeta.BuildImage))
 		b.WriteString("WORKDIR /src\n")
 		b.WriteString("COPY bridge-src/package.json bridge-src/tsconfig.json ./\n")
-		b.WriteString("RUN npm install\n")
+		b.WriteString(fmt.Sprintf("RUN %s\n", bridgeMeta.InstallCmd))
 		b.WriteString("COPY bridge-src/src/ ./src/\n")
-		b.WriteString("RUN npm run build\n\n")
+		b.WriteString(fmt.Sprintf("RUN %s\n\n", bridgeMeta.BuildCmd))
 	}
 
 	// Runtime stage
@@ -169,7 +184,7 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n\n", g.Runtime.User))
 
 	// Copy gateway binary
-	b.WriteString("COPY --from=gateway-build /gateway /usr/local/bin/gateway\n\n")
+	b.WriteString(fmt.Sprintf("COPY --from=gateway-build %s /usr/local/bin/gateway\n\n", gatewayMeta.BinaryPath))
 
 	// Copy gateway config
 	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n\n")
@@ -186,7 +201,7 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	// Copy bridge dist if enabled
 	if g.Bridge {
 		b.WriteString("# Install bridge\n")
-		b.WriteString("COPY --from=bridge-build /src/dist/ /opt/bridge/dist/\n")
+		b.WriteString(fmt.Sprintf("COPY --from=bridge-build %s/ /opt/bridge/dist/\n", bridgeMeta.DistDir))
 		b.WriteString("COPY --from=bridge-build /src/node_modules/ /opt/bridge/node_modules/\n")
 		b.WriteString("COPY --from=bridge-build /src/package.json /opt/bridge/package.json\n")
 		b.WriteString("COPY bridge-config.json /opt/bridge/config.json\n\n")
