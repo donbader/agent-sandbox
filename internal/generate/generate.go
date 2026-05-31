@@ -255,6 +255,7 @@ func (g *Generator) writeAgentDockerfile() error {
 		b.WriteString("# Install sandbox CA certificate\n")
 		b.WriteString("COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt\n")
 		b.WriteString("RUN update-ca-certificates\n")
+		b.WriteString("ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/sandbox-ca.crt\n")
 	}
 
 	// Copy bridge dist if enabled
