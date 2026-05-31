@@ -28,6 +28,7 @@ type GroupACL struct {
 func init() {
 	resolve.Register("telegram", func(_ string, cfg Config) (*resolve.FeatureContributions, error) {
 		return &resolve.FeatureContributions{
+			Name:          "telegram",
 			MITMDomains:   []string{"api.telegram.org"},
 			BridgeChannel: "telegram",
 			EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},

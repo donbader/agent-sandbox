@@ -15,6 +15,21 @@ import (
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
 
+// Gateway port constants — single source of truth for iptables rules and gateway config.
+const (
+	gatewayListenPort = 8443  // TLS interception port
+	gatewayDNSPort    = 5353  // DNS resolver port
+)
+
+// Bridge build metadata — defines how the bridge TypeScript runtime is compiled.
+var bridgeMeta = struct {
+	BuildImage string // Docker image for bridge compilation stage
+	EntryPoint string // runtime entry point command
+}{
+	BuildImage: "node:22-slim",
+	EntryPoint: "node /opt/bridge/dist/index.js",
+}
+
 // Generator produces build artifacts from config and resolved runtime.
 type Generator struct {
 	Config   *config.AgentConfig
@@ -132,7 +147,7 @@ func (g *Generator) writeMultiStageDockerfile(b *strings.Builder) {
 	// Stage 2: build bridge (if enabled)
 	if g.Bridge {
 		b.WriteString("# Stage 2: build bridge\n")
-		b.WriteString("FROM node:22-slim AS bridge-build\n")
+		b.WriteString(fmt.Sprintf("FROM %s AS bridge-build\n", bridgeMeta.BuildImage))
 		b.WriteString("WORKDIR /src\n")
 		b.WriteString("COPY bridge-src/package.json bridge-src/tsconfig.json ./\n")
 		b.WriteString("RUN npm install\n")
@@ -298,21 +313,8 @@ func (g *Generator) writeCompose() error {
 		}
 	}
 
-	// Scan for env vars (from config references + feature contributions)
-	envVars := g.scanEnvVars()
-	featureEnvVars := g.collectFeatureEnvVars()
-	for _, v := range featureEnvVars {
-		found := false
-		for _, existing := range envVars {
-			if existing == v {
-				found = true
-				break
-			}
-		}
-		if !found {
-			envVars = append(envVars, v)
-		}
-	}
+	// Environment variables
+	envVars := g.mergedEnvVars()
 	if len(envVars) > 0 {
 		b.WriteString("    environment:\n")
 		for _, v := range envVars {
@@ -335,20 +337,7 @@ func (g *Generator) writeCompose() error {
 
 // writeEnvExample generates .env.example at the project root (next to agent.yaml).
 func (g *Generator) writeEnvExample() error {
-	envVars := g.scanEnvVars()
-	featureEnvVars := g.collectFeatureEnvVars()
-	for _, v := range featureEnvVars {
-		found := false
-		for _, existing := range envVars {
-			if existing == v {
-				found = true
-				break
-			}
-		}
-		if !found {
-			envVars = append(envVars, v)
-		}
-	}
+	envVars := g.mergedEnvVars()
 	if len(envVars) == 0 {
 		return nil
 	}
@@ -377,9 +366,9 @@ func (g *Generator) writeEntrypoint() error {
 		// iptables setup: redirect all outbound traffic through gateway
 		b.WriteString("# Setup iptables (must run as root)\n")
 		b.WriteString("# Redirect TCP port 443 to gateway\n")
-		b.WriteString("iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner gateway -j REDIRECT --to-port 8443\n")
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayListenPort))
 		b.WriteString("# Redirect DNS (UDP 53) to gateway resolver\n")
-		b.WriteString("iptables -t nat -A OUTPUT -p udp --dport 53 -m owner ! --uid-owner gateway -j REDIRECT --to-port 5353\n")
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayDNSPort))
 		b.WriteString("# Drop all other UDP (except DNS handled above)\n")
 		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -m owner ! --uid-owner gateway -j DROP\n\n")
 
@@ -411,7 +400,7 @@ func (g *Generator) writeEntrypoint() error {
 	// Execute the runtime CMD as agent user
 	if g.Bridge {
 		b.WriteString("# Start bridge (spawns agent as child process)\n")
-		b.WriteString("exec node /opt/bridge/dist/index.js\n")
+		b.WriteString(fmt.Sprintf("exec %s\n", bridgeMeta.EntryPoint))
 	} else {
 		b.WriteString("# Start agent\n")
 		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
@@ -425,8 +414,8 @@ func (g *Generator) writeEntrypoint() error {
 func (g *Generator) writeGatewayConfig() error {
 	var b strings.Builder
 	b.WriteString("# Gateway configuration (auto-generated)\n")
-	b.WriteString("listen: \":8443\"\n")
-	b.WriteString("dns_listen: \":5353\"\n")
+	b.WriteString(fmt.Sprintf("listen: \":%d\"\n", gatewayListenPort))
+	b.WriteString(fmt.Sprintf("dns_listen: \":%d\"\n", gatewayDNSPort))
 
 	// MITM configuration
 	mitmDomains := g.collectMITMDomains()
@@ -572,7 +561,7 @@ func (g *Generator) scanEnvVars() []string {
 			if _, exists := sources[v]; !exists {
 				order = append(order, v)
 			}
-			sources[v] = append(sources[v], fmt.Sprintf("plugin:%s", pluginNameForFeature(f)))
+			sources[v] = append(sources[v], fmt.Sprintf("plugin:%s", f.Name))
 		}
 	}
 
@@ -611,14 +600,6 @@ func scanValueWithSource(v any, pattern *regexp.Regexp, sources map[string][]str
 	}
 }
 
-// pluginNameForFeature returns a display name for a feature contribution.
-// Falls back to "unknown" if the contribution doesn't carry identifying info.
-func pluginNameForFeature(f *resolve.FeatureContributions) string {
-	if f.BridgeChannel != "" {
-		return f.BridgeChannel
-	}
-	return "unknown"
-}
 
 // copyDir recursively copies a directory.
 func copyDir(src, dst string) error {
@@ -668,6 +649,26 @@ func (g *Generator) collectMITMDomains() []string {
 		}
 	}
 	return domains
+}
+
+// mergedEnvVars returns all env vars (from config ${VAR} references + feature plugin declarations),
+// deduplicated and in stable order.
+func (g *Generator) mergedEnvVars() []string {
+	envVars := g.scanEnvVars()
+	featureEnvVars := g.collectFeatureEnvVars()
+	for _, v := range featureEnvVars {
+		found := false
+		for _, existing := range envVars {
+			if existing == v {
+				found = true
+				break
+			}
+		}
+		if !found {
+			envVars = append(envVars, v)
+		}
+	}
+	return envVars
 }
 
 // collectFeatureEnvVars gathers all env vars declared by features.

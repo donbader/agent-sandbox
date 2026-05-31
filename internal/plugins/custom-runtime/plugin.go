@@ -18,6 +18,7 @@ type Config struct {
 func init() {
 	resolve.Register("custom-runtime", func(_ string, cfg Config) (*resolve.FeatureContributions, error) {
 		return &resolve.FeatureContributions{
+			Name:    "custom-runtime",
 			Commands:        cfg.Commands,
 			EntrypointHooks: cfg.EntrypointHooks,
 			Volumes:         cfg.RuntimeVolumes,

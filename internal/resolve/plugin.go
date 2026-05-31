@@ -22,10 +22,11 @@ type FeaturePlugin interface {
 
 // FeatureContributions holds what a feature adds to the build.
 type FeatureContributions struct {
-	Commands        []string // RUN commands for Dockerfile
-	EntrypointHooks []string // scripts to run on container start (source paths)
-	Volumes         []string // named volumes (e.g., "name:/path")
-	HomeOverride    string   // directory to copy into home on start
+	Name            string         // plugin name (for diagnostics and logging)
+	Commands        []string       // RUN commands for Dockerfile
+	EntrypointHooks []string       // scripts to run on container start (source paths)
+	Volumes         []string       // named volumes (e.g., "name:/path")
+	HomeOverride    string         // directory to copy into home on start
 	MITMDomains     []string       // domains the gateway should MITM (terminate TLS)
 	BridgeChannel   string         // bridge channel type (e.g., "telegram")
 	EnvVars         []string       // environment variables (added to .env.example and compose)
