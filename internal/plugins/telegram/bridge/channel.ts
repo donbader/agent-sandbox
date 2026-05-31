@@ -1,5 +1,8 @@
 import { Bot } from "grammy";
 import type { Channel } from "./types.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("telegram");
 
 // The bridge uses a dummy token. The gateway MITM rewrites it to the real token.
 const DUMMY_TOKEN = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -29,6 +32,11 @@ export default class TelegramChannel implements Channel {
     this.acl = (config?.access_control as AccessControl) ?? {};
     this.bot = new Bot(DUMMY_TOKEN);
 
+    // Catch all bot errors (DNS failures, network errors, API errors)
+    this.bot.catch((err) => {
+      log.error({ error: err.message ?? err }, "bot error");
+    });
+
     this.bot.on("message:text", (ctx) => {
       const chatId = ctx.chat.id.toString();
       const username = ctx.from?.username ? `@${ctx.from.username}` : null;
@@ -43,11 +51,11 @@ export default class TelegramChannel implements Channel {
       // Check allowed users
       if (allowedUsers?.length && username) {
         if (!allowedUsers.includes(username)) {
-          console.log(`telegram: ignoring message from unauthorized user ${username} in chat ${chatId}`);
+          log.debug({ username, chatId }, "ignoring unauthorized user");
           return;
         }
       } else if (allowedUsers?.length && !username) {
-        console.log(`telegram: ignoring message from user without username in chat ${chatId}`);
+        log.debug({ chatId }, "ignoring user without username");
         return;
       }
 
@@ -61,7 +69,7 @@ export default class TelegramChannel implements Channel {
         }
       }
 
-      console.log(`telegram: received message from ${username ?? "unknown"} in chat ${chatId}`);
+      log.info({ username: username ?? "unknown", chatId }, "received message");
 
       if (this.handler) {
         this.handler(chatId, text);
@@ -70,11 +78,11 @@ export default class TelegramChannel implements Channel {
   }
 
   async start(): Promise<void> {
-    console.log("telegram: starting bot (long polling)");
+    log.info("starting bot (long polling)");
     this.bot.start({
       onStart: (info) => {
         this.botUsername = info.username;
-        console.log(`telegram: bot started as @${info.username}`);
+        log.info({ username: info.username }, "bot connected");
       },
     });
   }
@@ -89,7 +97,7 @@ export default class TelegramChannel implements Channel {
 
   sendMessage(chatId: string, text: string): void {
     this.bot.api.sendMessage(Number(chatId), text).catch((err) => {
-      console.error(`telegram: failed to send message to ${chatId}:`, err);
+      log.error({ chatId, error: err.message ?? err }, "failed to send message");
     });
   }
 }
