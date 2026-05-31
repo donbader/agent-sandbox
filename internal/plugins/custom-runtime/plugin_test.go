@@ -3,18 +3,12 @@ package customruntime
 import (
 	"testing"
 
+	"github.com/donbader/agent-sandbox/internal/resolve"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestPlugin_Name(t *testing.T) {
-	p := &Plugin{}
-	assert.Equal(t, "custom-runtime", p.Name())
-}
-
-func TestPlugin_Resolve(t *testing.T) {
-	p := &Plugin{}
-
+func TestResolve(t *testing.T) {
 	t.Run("full config", func(t *testing.T) {
 		config := map[string]any{
 			"commands":         []any{"apt-get install -y ripgrep", "apt-get install -y jq"},
@@ -24,7 +18,7 @@ func TestPlugin_Resolve(t *testing.T) {
 			"env":              []any{"MY_API_KEY", "GITHUB_TOKEN"},
 		}
 
-		contrib, err := p.Resolve("/project", config)
+		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", config)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"apt-get install -y ripgrep", "apt-get install -y jq"}, contrib.Commands)
 		assert.Equal(t, []string{"scripts/setup.sh", "scripts/init.sh"}, contrib.EntrypointHooks)
@@ -34,7 +28,7 @@ func TestPlugin_Resolve(t *testing.T) {
 	})
 
 	t.Run("empty config", func(t *testing.T) {
-		contrib, err := p.Resolve("/project", map[string]any{})
+		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", map[string]any{})
 		require.NoError(t, err)
 		assert.Nil(t, contrib.Commands)
 		assert.Nil(t, contrib.EntrypointHooks)
@@ -48,7 +42,7 @@ func TestPlugin_Resolve(t *testing.T) {
 			"commands": []any{"npm install -g typescript"},
 		}
 
-		contrib, err := p.Resolve("/project", config)
+		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", config)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"npm install -g typescript"}, contrib.Commands)
 		assert.Nil(t, contrib.EntrypointHooks)

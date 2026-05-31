@@ -7,36 +7,19 @@ import (
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
 
-func init() {
-	resolve.RegisterFeature(&Plugin{})
+// Config defines the typed configuration for the telegram plugin.
+type Config struct {
+	AllowedChatIDs []string `yaml:"allowed_chat_ids" schema:"Telegram chat IDs allowed to interact with this agent"`
 }
 
-// Plugin implements resolve.FeaturePlugin for telegram.
-type Plugin struct{}
-
-func (p *Plugin) Name() string { return "telegram" }
-
-// Resolve extracts contributions from user config in agent.yaml.
-func (p *Plugin) Resolve(_ string, userConfig map[string]any) (*resolve.FeatureContributions, error) {
-	contrib := &resolve.FeatureContributions{
-		MITMDomains:   []string{"api.telegram.org"},
-		BridgeChannel: "telegram",
-		EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
-	}
-
-	// Extract allowed_chat_ids if configured
-	if ids, ok := userConfig["allowed_chat_ids"]; ok {
-		if arr, ok := ids.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					// These are passed through to bridge config, not as env vars
-					_ = s
-				}
-			}
-		}
-	}
-
-	return contrib, nil
+func init() {
+	resolve.Register("telegram", func(_ string, cfg Config) (*resolve.FeatureContributions, error) {
+		return &resolve.FeatureContributions{
+			MITMDomains:   []string{"api.telegram.org"},
+			BridgeChannel: "telegram",
+			EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
+		}, nil
+	})
 }
 
 // AllowedChatIDs extracts the allowed_chat_ids from user config.

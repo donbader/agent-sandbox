@@ -6,64 +6,23 @@ import (
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
 
-func init() {
-	resolve.RegisterFeature(&Plugin{})
+// Config defines the typed configuration for the custom-runtime plugin.
+type Config struct {
+	Commands        []string `yaml:"commands" schema:"Additional RUN commands for the Dockerfile"`
+	EntrypointHooks []string `yaml:"entrypoint_hooks" schema:"Scripts to run on container start (paths relative to agent.yaml)"`
+	RuntimeVolumes  []string `yaml:"runtime_volumes" schema:"Named volumes (e.g., agent-home:/home/agent)"`
+	HomeOverride    string   `yaml:"home_override" schema:"Directory to copy into home on start"`
+	Env             []string `yaml:"env" schema:"Environment variables to pass to the container"`
 }
 
-// Plugin implements resolve.FeaturePlugin for custom-runtime.
-type Plugin struct{}
-
-func (p *Plugin) Name() string { return "custom-runtime" }
-
-// Resolve extracts contributions from user config in agent.yaml.
-func (p *Plugin) Resolve(projectDir string, userConfig map[string]any) (*resolve.FeatureContributions, error) {
-	contrib := &resolve.FeatureContributions{}
-
-	if cmds, ok := userConfig["commands"]; ok {
-		if arr, ok := cmds.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.Commands = append(contrib.Commands, s)
-				}
-			}
-		}
-	}
-
-	if hooks, ok := userConfig["entrypoint_hooks"]; ok {
-		if arr, ok := hooks.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.EntrypointHooks = append(contrib.EntrypointHooks, s)
-				}
-			}
-		}
-	}
-
-	if vols, ok := userConfig["runtime_volumes"]; ok {
-		if arr, ok := vols.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.Volumes = append(contrib.Volumes, s)
-				}
-			}
-		}
-	}
-
-	if ho, ok := userConfig["home_override"]; ok {
-		if s, ok := ho.(string); ok {
-			contrib.HomeOverride = s
-		}
-	}
-
-	if envs, ok := userConfig["env"]; ok {
-		if arr, ok := envs.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.EnvVars = append(contrib.EnvVars, s)
-				}
-			}
-		}
-	}
-
-	return contrib, nil
+func init() {
+	resolve.Register("custom-runtime", func(_ string, cfg Config) (*resolve.FeatureContributions, error) {
+		return &resolve.FeatureContributions{
+			Commands:        cfg.Commands,
+			EntrypointHooks: cfg.EntrypointHooks,
+			Volumes:         cfg.RuntimeVolumes,
+			HomeOverride:    cfg.HomeOverride,
+			EnvVars:         cfg.Env,
+		}, nil
+	})
 }

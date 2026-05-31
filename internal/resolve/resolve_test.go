@@ -100,10 +100,22 @@ func TestResolveInlineRuntime(t *testing.T) {
 }
 
 func TestResolveFeature(t *testing.T) {
-	// Register a test plugin (since we can't import custom-runtime due to circular dep)
-	testPlugin := &testFeaturePlugin{name: "custom-runtime"}
-	registry["custom-runtime"] = testPlugin
-	t.Cleanup(func() { delete(registry, "custom-runtime") })
+	// Register a test plugin using the generic Register function
+	type testConfig struct {
+		Commands        []string `yaml:"commands"`
+		EntrypointHooks []string `yaml:"entrypoint_hooks"`
+		RuntimeVolumes  []string `yaml:"runtime_volumes"`
+		HomeOverride    string   `yaml:"home_override"`
+	}
+	Register("test-custom-runtime", func(_ string, cfg testConfig) (*FeatureContributions, error) {
+		return &FeatureContributions{
+			Commands:        cfg.Commands,
+			EntrypointHooks: cfg.EntrypointHooks,
+			Volumes:         cfg.RuntimeVolumes,
+			HomeOverride:    cfg.HomeOverride,
+		}, nil
+	})
+	t.Cleanup(func() { delete(registry, "test-custom-runtime") })
 
 	t.Run("resolves via registered plugin", func(t *testing.T) {
 		userConfig := map[string]any{
@@ -113,7 +125,7 @@ func TestResolveFeature(t *testing.T) {
 			"home_override":    "home",
 		}
 
-		contrib, err := ResolveFeature("/any/dir", "custom-runtime", userConfig)
+		contrib, err := ResolveFeature("/any/dir", "test-custom-runtime", userConfig)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"apt-get install -y ripgrep"}, contrib.Commands)
 		assert.Equal(t, []string{"scripts/setup.sh"}, contrib.EntrypointHooks)
@@ -127,8 +139,14 @@ func TestResolveFeature(t *testing.T) {
 	})
 
 	t.Run("empty config", func(t *testing.T) {
-		minPlugin := &testFeaturePlugin{name: "minimal"}
-		registry["minimal"] = minPlugin
+		Register("minimal", func(_ string, cfg testConfig) (*FeatureContributions, error) {
+			return &FeatureContributions{
+				Commands:        cfg.Commands,
+				EntrypointHooks: cfg.EntrypointHooks,
+				Volumes:         cfg.RuntimeVolumes,
+				HomeOverride:    cfg.HomeOverride,
+			}, nil
+		})
 		t.Cleanup(func() { delete(registry, "minimal") })
 
 		contrib, err := ResolveFeature("/any/dir", "minimal", map[string]any{})
@@ -140,48 +158,52 @@ func TestResolveFeature(t *testing.T) {
 	})
 }
 
-// testFeaturePlugin is a simple FeaturePlugin for testing.
-type testFeaturePlugin struct {
-	name string
+func TestRegister(t *testing.T) {
+	type cfg struct {
+		Name string `yaml:"name"`
+	}
+	Register("test-register", func(_ string, c cfg) (*FeatureContributions, error) {
+		return &FeatureContributions{BridgeChannel: c.Name}, nil
+	})
+	t.Cleanup(func() { delete(registry, "test-register") })
+
+	t.Run("plugin is in registry", func(t *testing.T) {
+		plugin, ok := registry["test-register"]
+		require.True(t, ok)
+		assert.Equal(t, "test-register", plugin.Name())
+	})
+
+	t.Run("ConfigType returns zero value", func(t *testing.T) {
+		plugin := registry["test-register"]
+		ct := plugin.ConfigType()
+		assert.Equal(t, cfg{}, ct)
+	})
+
+	t.Run("Resolve unmarshals config", func(t *testing.T) {
+		plugin := registry["test-register"]
+		contrib, err := plugin.Resolve("/dir", map[string]any{"name": "hello"})
+		require.NoError(t, err)
+		assert.Equal(t, "hello", contrib.BridgeChannel)
+	})
+
+	t.Run("Resolve handles invalid config gracefully", func(t *testing.T) {
+		// A map that can't unmarshal into the struct should still work
+		// (yaml is lenient — unknown fields are ignored)
+		plugin := registry["test-register"]
+		contrib, err := plugin.Resolve("/dir", map[string]any{"unknown_field": 123})
+		require.NoError(t, err)
+		assert.Equal(t, "", contrib.BridgeChannel)
+	})
 }
 
-func (p *testFeaturePlugin) Name() string { return p.name }
+func TestRegisteredPlugins(t *testing.T) {
+	type cfg struct{}
+	Register("test-listed", func(_ string, c cfg) (*FeatureContributions, error) {
+		return &FeatureContributions{}, nil
+	})
+	t.Cleanup(func() { delete(registry, "test-listed") })
 
-func (p *testFeaturePlugin) Resolve(_ string, userConfig map[string]any) (*FeatureContributions, error) {
-	contrib := &FeatureContributions{}
-
-	if cmds, ok := userConfig["commands"]; ok {
-		if arr, ok := cmds.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.Commands = append(contrib.Commands, s)
-				}
-			}
-		}
-	}
-	if hooks, ok := userConfig["entrypoint_hooks"]; ok {
-		if arr, ok := hooks.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.EntrypointHooks = append(contrib.EntrypointHooks, s)
-				}
-			}
-		}
-	}
-	if vols, ok := userConfig["runtime_volumes"]; ok {
-		if arr, ok := vols.([]any); ok {
-			for _, v := range arr {
-				if s, ok := v.(string); ok {
-					contrib.Volumes = append(contrib.Volumes, s)
-				}
-			}
-		}
-	}
-	if ho, ok := userConfig["home_override"]; ok {
-		if s, ok := ho.(string); ok {
-			contrib.HomeOverride = s
-		}
-	}
-
-	return contrib, nil
+	plugins := RegisteredPlugins()
+	_, ok := plugins["test-listed"]
+	assert.True(t, ok)
 }

@@ -1,14 +1,23 @@
 package resolve
 
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
 // FeaturePlugin defines the interface that feature plugins implement.
-// Each plugin owns its contribution extraction logic.
+// The generic Register function wraps typed plugins into this interface.
 type FeaturePlugin interface {
 	// Name returns the plugin's identifier (matches feature.yaml name field).
 	Name() string
 
+	// ConfigType returns the zero-value of the plugin's config struct (for schema generation).
+	ConfigType() any
+
 	// Resolve takes user config from agent.yaml and returns what this plugin
 	// contributes to the build (Dockerfile commands, entrypoint hooks, volumes, etc).
-	Resolve(projectDir string, userConfig map[string]any) (*FeatureContributions, error)
+	Resolve(projectDir string, rawConfig map[string]any) (*FeatureContributions, error)
 }
 
 // FeatureContributions holds what a feature adds to the build.
@@ -25,7 +34,39 @@ type FeatureContributions struct {
 // registry holds registered feature plugins.
 var registry = map[string]FeaturePlugin{}
 
-// RegisterFeature registers a feature plugin. Called by plugin init() functions.
-func RegisterFeature(p FeaturePlugin) {
-	registry[p.Name()] = p
+// Register registers a typed feature plugin using generics.
+// The framework handles unmarshaling rawConfig into the typed Config struct.
+func Register[C any](name string, fn func(projectDir string, cfg C) (*FeatureContributions, error)) {
+	registry[name] = &typedPlugin[C]{name: name, resolveFn: fn}
+}
+
+// RegisteredPlugins returns all registered plugins (for schema generation).
+func RegisteredPlugins() map[string]FeaturePlugin {
+	return registry
+}
+
+// typedPlugin wraps a generic resolve function into the FeaturePlugin interface.
+type typedPlugin[C any] struct {
+	name      string
+	resolveFn func(string, C) (*FeatureContributions, error)
+}
+
+func (p *typedPlugin[C]) Name() string { return p.name }
+
+func (p *typedPlugin[C]) ConfigType() any {
+	var zero C
+	return zero
+}
+
+func (p *typedPlugin[C]) Resolve(projectDir string, raw map[string]any) (*FeatureContributions, error) {
+	var cfg C
+	// yaml round-trip: map[string]any → yaml bytes → typed struct
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling config for %s: %w", p.name, err)
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid config for %s: %w", p.name, err)
+	}
+	return p.resolveFn(projectDir, cfg)
 }
