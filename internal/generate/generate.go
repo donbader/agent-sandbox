@@ -213,7 +213,7 @@ func (g *Generator) writeGatewayDockerfile() error {
 
 	// Runtime stage: minimal alpine with gateway binary
 	b.WriteString("FROM alpine:3.20\n")
-	b.WriteString("RUN apk add --no-cache ca-certificates\n")
+	b.WriteString("RUN apk add --no-cache ca-certificates iptables\n")
 	b.WriteString(fmt.Sprintf("COPY --from=builder %s /usr/local/bin/gateway\n", g.GatewaySpec.BinaryPath))
 	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n")
 
@@ -247,7 +247,7 @@ func (g *Generator) writeAgentDockerfile() error {
 
 	// Runtime stage
 	b.WriteString(fmt.Sprintf("FROM %s\n", g.Runtime.BaseImage))
-	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iptables ca-certificates && rm -rf /var/lib/apt/lists/*\n")
+	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iproute2 ca-certificates && rm -rf /var/lib/apt/lists/*\n")
 	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n", g.Runtime.User))
 
 	// Install CA cert if MITM is enabled
@@ -377,6 +377,8 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("    networks:\n")
 	b.WriteString("      internal:\n")
 	b.WriteString("      default:\n")
+	b.WriteString("    cap_add:\n")
+	b.WriteString("      - NET_ADMIN\n")
 
 	envVars := g.mergedEnvVars()
 	b.WriteString("    environment:\n")
@@ -513,9 +515,16 @@ func (g *Generator) writeEntrypoint() error {
 }
 
 // writeGatewayEntrypoint generates .build/gateway-entrypoint.sh.
+// Enables IP forwarding and sets up iptables PREROUTING to redirect port 443 to the proxy.
 func (g *Generator) writeGatewayEntrypoint() error {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
+	b.WriteString("set -e\n\n")
+	b.WriteString("# Enable IP forwarding (gateway acts as router for agent traffic)\n")
+	b.WriteString("echo 1 > /proc/sys/net/ipv4/ip_forward\n\n")
+	b.WriteString("# Redirect incoming port 443 to proxy (port 8443)\n")
+	b.WriteString(fmt.Sprintf("iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port %d\n\n", g.GatewaySpec.ListenPort))
+	b.WriteString("# Start gateway\n")
 	b.WriteString("exec /usr/local/bin/gateway\n")
 	path := filepath.Join(g.OutDir, "gateway-entrypoint.sh")
 	return os.WriteFile(path, []byte(b.String()), 0755)
@@ -538,10 +547,9 @@ func (g *Generator) writeAgentEntrypoint() error {
 		b.WriteString("echo \"entrypoint: switching DNS to gateway...\"\n")
 		b.WriteString("echo \"nameserver $GATEWAY_IP\" > /etc/resolv.conf\n\n")
 
-		// iptables: redirect HTTPS to gateway, block non-DNS UDP
-		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.ListenPort))
-		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -j DROP\n\n")
+		// ip route: set default route via gateway (all traffic goes through gateway)
+		b.WriteString("echo \"entrypoint: setting default route via gateway...\"\n")
+		b.WriteString("ip route replace default via $GATEWAY_IP\n\n")
 	}
 
 	// Home override: copy files from staging to home
