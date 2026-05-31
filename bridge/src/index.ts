@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import { AgentProcess } from "./agent-process.js";
 import { channels } from "./channel/channels.gen.js";
 import type { Channel } from "./channel/types.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("bridge");
 
 interface BridgeConfig {
   channel: string;
@@ -17,7 +20,7 @@ function loadConfig(): BridgeConfig {
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  console.log(`bridge: starting channel=${config.channel} cmd=${config.agent_cmd.join(" ")}`);
+  log.info({ channel: config.channel, cmd: config.agent_cmd.join(" ") }, "starting channel");
 
   // Start agent process
   const agent = new AgentProcess(config.agent_cmd);
@@ -26,8 +29,7 @@ async function main(): Promise<void> {
   // Create channel from generated registry
   const ChannelClass = channels[config.channel];
   if (!ChannelClass) {
-    console.error(`bridge: unknown channel type: ${config.channel}`);
-    console.error(`bridge: available channels: ${Object.keys(channels).join(", ")}`);
+    log.error({ channel: config.channel, available: Object.keys(channels) }, "unknown channel type");
     process.exit(1);
   }
   const channel: Channel = new ChannelClass(config);
@@ -49,7 +51,7 @@ async function main(): Promise<void> {
 
   // Handle shutdown
   process.on("SIGTERM", () => {
-    console.log("bridge: shutting down");
+    log.info("shutting down");
     channel.stop();
     agent.stop();
     process.exit(0);
@@ -57,6 +59,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("bridge: fatal:", err);
+  log.fatal({ error: err }, "fatal error");
   process.exit(1);
 });

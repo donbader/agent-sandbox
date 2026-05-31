@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("agent-process");
 
 export interface AgentMessage {
   type: string;
@@ -29,7 +32,7 @@ export class AgentProcess {
       throw new Error("agent-process: empty command");
     }
 
-    console.log(`agent-process: spawning ${this.cmd.join(" ")}`);
+    log.info({ cmd: this.cmd.join(" ") }, "spawning agent");
     this.proc = spawn(command, args, {
       stdio: ["pipe", "pipe", "inherit"],
     });
@@ -50,7 +53,7 @@ export class AgentProcess {
     }
 
     this.proc.on("exit", (code) => {
-      console.log(`agent-process: exited with code ${code}`);
+      log.info({ code }, "agent exited");
       if (!this.restarting) {
         // Auto-restart after delay
         this.restarting = true;

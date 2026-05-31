@@ -8,7 +8,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -57,7 +57,7 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 	// Generate a cert for this domain signed by our CA
 	cert, err := h.certCache.GetOrCreate(serverName, h.caCert)
 	if err != nil {
-		log.Printf("mitm: generate cert for %s: %v", serverName, err)
+		slog.Error("generate cert", "host", serverName, "error", err)
 		return
 	}
 
@@ -77,7 +77,7 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 	defer tlsConn.Close()
 
 	if err := tlsConn.Handshake(); err != nil {
-		log.Printf("mitm: tls handshake with client for %s: %v", serverName, err)
+		slog.Debug("tls handshake", "host", serverName, "error", err)
 		return
 	}
 
@@ -87,7 +87,7 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		req, err := http.ReadRequest(reader)
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("mitm: read request for %s: %v", serverName, err)
+				slog.Debug("read request", "host", serverName, "error", err)
 			}
 			return
 		}
@@ -100,7 +100,7 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		// Forward to real server
 		resp, err := h.forwardRequest(req, serverName)
 		if err != nil {
-			log.Printf("mitm: forward to %s: %v", serverName, err)
+			slog.Error("upstream connection failed", "host", serverName, "error", err)
 			// Send a 502 back to client
 			errResp := &http.Response{
 				StatusCode: http.StatusBadGateway,
@@ -115,7 +115,7 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 
 		// Write response back to client
 		if err := resp.Write(tlsConn); err != nil {
-			log.Printf("mitm: write response for %s: %v", serverName, err)
+			slog.Error("write response", "host", serverName, "error", err)
 			resp.Body.Close()
 			return
 		}

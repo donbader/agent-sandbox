@@ -4,7 +4,7 @@ package dns
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 )
 
@@ -37,7 +37,7 @@ func (s *Server) ListenAndServe() error {
 	for {
 		n, clientAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			log.Printf("dns: read: %v", err)
+			slog.Debug("read error", "error", err)
 			continue
 		}
 
@@ -49,25 +49,25 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 	// Forward to upstream DNS
 	upstream, err := net.Dial("udp", upstreamDNS)
 	if err != nil {
-		log.Printf("dns: dial upstream: %v", err)
+		slog.Error("dial upstream", "error", err)
 		return
 	}
 	defer upstream.Close()
 
 	if _, err := upstream.Write(query); err != nil {
-		log.Printf("dns: write upstream: %v", err)
+		slog.Error("write upstream", "error", err)
 		return
 	}
 
 	resp := make([]byte, 4096)
 	n, err := upstream.Read(resp)
 	if err != nil {
-		log.Printf("dns: read upstream: %v", err)
+		slog.Error("read upstream", "error", err)
 		return
 	}
 
 	// Send response back to client
 	if _, err := conn.WriteToUDP(resp[:n], clientAddr); err != nil {
-		log.Printf("dns: write client: %v", err)
+		slog.Error("write client", "error", err)
 	}
 }

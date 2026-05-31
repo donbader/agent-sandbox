@@ -4,7 +4,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +15,24 @@ import (
 )
 
 func main() {
+	// Setup structured logger
+	level := new(slog.LevelVar)
+	level.Set(slog.LevelInfo)
+	if os.Getenv("LOG_LEVEL") == "debug" {
+		level.Set(slog.LevelDebug)
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == "token" || a.Key == "authorization" || a.Key == "api_key" {
+				return slog.String(a.Key, "[redacted]")
+			}
+			return a
+		},
+	}))
+	slog.SetDefault(logger)
+
 	configPath := "/etc/gateway/config.yaml"
 	if p := os.Getenv("GATEWAY_CONFIG"); p != "" {
 		configPath = p
@@ -22,17 +40,19 @@ func main() {
 
 	cfg, err := proxy.LoadConfig(configPath)
 	if err != nil {
-		log.Fatalf("gateway: load config: %v", err)
+		slog.Error("load config", "error", err)
+		os.Exit(1)
 	}
 
 	// Start DNS resolver
 	dnsServer := dns.NewServer(cfg.DNSListen)
 	go func() {
 		if err := dnsServer.ListenAndServe(); err != nil {
-			log.Fatalf("gateway: dns: %v", err)
+			slog.Error("dns server error", "error", err)
+			os.Exit(1)
 		}
 	}()
-	log.Printf("gateway: dns listening on %s", cfg.DNSListen)
+	slog.Info("dns listening", "addr", cfg.DNSListen)
 
 	// Start TCP proxy
 	p := proxy.New(cfg)
@@ -41,7 +61,8 @@ func main() {
 	if len(cfg.MITMDomains) > 0 && cfg.CACertPath != "" && cfg.CAKeyPath != "" {
 		caCert, err := mitm.LoadCA(cfg.CACertPath, cfg.CAKeyPath)
 		if err != nil {
-			log.Fatalf("gateway: load CA: %v", err)
+			slog.Error("load CA", "error", err)
+			os.Exit(1)
 		}
 
 		// Build rewriters based on MITM domains
@@ -50,29 +71,30 @@ func main() {
 			if domain == "api.telegram.org" {
 				rw, err := mitm.NewTelegramRewriter()
 				if err != nil {
-					log.Printf("gateway: telegram rewriter disabled: %v", err)
+					slog.Error("telegram rewriter disabled", "error", err)
 				} else {
 					rewriters = append(rewriters, rw)
-					log.Printf("gateway: telegram token rewriter enabled")
+					slog.Info("telegram token rewriter enabled")
 				}
 			}
 		}
 
 		handler := mitm.NewHandler(cfg.MITMDomains, caCert, rewriters)
 		p.RegisterHandler(handler)
-		log.Printf("gateway: MITM enabled for domains: %v", cfg.MITMDomains)
+		slog.Info("mitm enabled", "domains", cfg.MITMDomains)
 	}
 
 	go func() {
 		if err := p.ListenAndServe(); err != nil {
-			log.Fatalf("gateway: proxy: %v", err)
+			slog.Error("proxy error", "error", err)
+			os.Exit(1)
 		}
 	}()
-	log.Printf("gateway: proxy listening on %s", cfg.Listen)
+	slog.Info("proxy listening", "addr", cfg.Listen)
 
 	// Wait for shutdown signal
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
-	log.Println("gateway: shutting down")
+	slog.Info("shutting down")
 }

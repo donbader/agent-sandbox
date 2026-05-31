@@ -4,7 +4,7 @@ package proxy
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -63,7 +63,7 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	buf := make([]byte, 4096)
 	n, err := clientConn.Read(buf)
 	if err != nil {
-		log.Printf("gateway: read client hello: %v", err)
+		slog.Debug("read client hello", "error", err)
 		return
 	}
 	clientConn.SetReadDeadline(time.Time{})
@@ -71,7 +71,7 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	hello := buf[:n]
 	serverName := extractSNI(hello)
 	if serverName == "" {
-		log.Printf("gateway: no SNI in connection from %s", clientConn.RemoteAddr())
+		slog.Debug("no SNI in connection", "remote_addr", clientConn.RemoteAddr())
 		return
 	}
 
@@ -92,14 +92,14 @@ func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName 
 	destAddr := net.JoinHostPort(serverName, "443")
 	serverConn, err := net.DialTimeout("tcp", destAddr, 10*time.Second)
 	if err != nil {
-		log.Printf("gateway: dial %s: %v", destAddr, err)
+		slog.Error("upstream connection failed", "host", destAddr, "error", err)
 		return
 	}
 	defer serverConn.Close()
 
 	// Send the initial ClientHello that we already read
 	if _, err := serverConn.Write(initialData); err != nil {
-		log.Printf("gateway: write initial data to %s: %v", destAddr, err)
+		slog.Error("write initial data", "host", destAddr, "error", err)
 		return
 	}
 
