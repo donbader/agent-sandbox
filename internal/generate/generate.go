@@ -28,6 +28,9 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 
+	// Resolve built-in variables in feature contributions
+	g.resolveFeatureBuiltins()
+
 	if g.Gateway {
 		if err := g.writeGatewaySource(); err != nil {
 			return err
