@@ -333,7 +333,7 @@ func (g *Generator) writeCompose() error {
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-// writeEnvExample generates .build/.env.example.
+// writeEnvExample generates .env.example at the project root (next to agent.yaml).
 func (g *Generator) writeEnvExample() error {
 	envVars := g.scanEnvVars()
 	featureEnvVars := g.collectFeatureEnvVars()
@@ -360,7 +360,7 @@ func (g *Generator) writeEnvExample() error {
 		b.WriteString(fmt.Sprintf("%s=\n", v))
 	}
 
-	path := filepath.Join(g.OutDir, ".env.example")
+	path := filepath.Join(g.Dir, ".env.example")
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 

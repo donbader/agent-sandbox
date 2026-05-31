@@ -209,6 +209,7 @@ func TestGenerator_Run(t *testing.T) {
 
 	t.Run("with env vars", func(t *testing.T) {
 		outDir := t.TempDir()
+		srcDir := t.TempDir()
 		g := &Generator{
 			Config: &config.AgentConfig{
 				Name:    "coder",
@@ -224,14 +225,14 @@ func TestGenerator_Run(t *testing.T) {
 				Cmd:       []string{"sleep", "infinity"},
 				User:      "agent",
 			},
-			Dir:    t.TempDir(),
+			Dir:    srcDir,
 			OutDir: outDir,
 		}
 
 		err := g.Run()
 		require.NoError(t, err)
 
-		env, err := os.ReadFile(filepath.Join(outDir, ".env.example"))
+		env, err := os.ReadFile(filepath.Join(srcDir, ".env.example"))
 		require.NoError(t, err)
 		assert.Contains(t, string(env), "GITHUB_PAT=")
 	})
@@ -456,7 +457,7 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, string(dc), "TELEGRAM_BOT_TOKEN")
 
 		// .env.example should have TELEGRAM_BOT_TOKEN
-		env, err := os.ReadFile(filepath.Join(outDir, ".env.example"))
+		env, err := os.ReadFile(filepath.Join(srcDir, ".env.example"))
 		require.NoError(t, err)
 		assert.Contains(t, string(env), "TELEGRAM_BOT_TOKEN=")
 	})

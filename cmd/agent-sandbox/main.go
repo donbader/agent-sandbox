@@ -94,7 +94,12 @@ func composeCmd() *cobra.Command {
 				return fmt.Errorf(".build/docker-compose.yml not found — run 'agent-sandbox generate' first")
 			}
 
-			composeArgs := append([]string{"-f", composePath}, args...)
+			composeArgs := []string{"-f", composePath}
+			// Auto-inject --env-file if .env exists in project root
+			if _, err := os.Stat(".env"); err == nil {
+				composeArgs = append(composeArgs, "--env-file", ".env")
+			}
+			composeArgs = append(composeArgs, args...)
 			c := exec.Command("docker", append([]string{"compose"}, composeArgs...)...)
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
