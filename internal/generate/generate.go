@@ -434,29 +434,27 @@ func (g *Generator) writeEntrypoint() error {
 	if g.Gateway {
 		// iptables setup: redirect all outbound traffic through gateway
 		b.WriteString("# Setup iptables (must run as root)\n")
-		b.WriteString("# Redirect TCP port 443 to gateway\n")
+		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
 		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayListenPort))
-		b.WriteString("# Redirect DNS (UDP 53) to gateway resolver\n")
 		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayDNSPort))
-		b.WriteString("# Drop all other UDP (except DNS handled above)\n")
 		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -m owner ! --uid-owner gateway -j DROP\n\n")
 
-		// Start gateway as gateway user
-		b.WriteString("# Start gateway (runs as gateway user)\n")
-		b.WriteString("su -s /bin/sh -c '/usr/local/bin/gateway &' gateway\n")
+		// Start gateway as gateway user (preserve env for credential injection)
+		b.WriteString("echo \"entrypoint: starting gateway...\"\n")
+		b.WriteString("su --preserve-environment -s /bin/sh -c '/usr/local/bin/gateway &' gateway\n")
 		b.WriteString("sleep 0.5\n\n")
 	}
 
 	// Home override: copy files from staging to home
 	if g.hasHomeOverride() {
-		b.WriteString("# Copy home override files\n")
+		b.WriteString("echo \"entrypoint: applying home override...\"\n")
 		b.WriteString(fmt.Sprintf("if [ -d /opt/home-override ]; then\n  cp -rT /opt/home-override /home/%s\n  chown -R %s:%s /home/%s\nfi\n\n",
 			g.Runtime.User, g.Runtime.User, g.Runtime.User, g.Runtime.User))
 	}
 
 	// Run entrypoint hooks
 	if g.hasHooks() {
-		b.WriteString("# Run entrypoint hooks\n")
+		b.WriteString("echo \"entrypoint: running hooks...\"\n")
 		for _, f := range g.Features {
 			for _, hook := range f.EntrypointHooks {
 				hookName := filepath.Base(hook)
@@ -468,10 +466,10 @@ func (g *Generator) writeEntrypoint() error {
 
 	// Execute the runtime CMD as agent user
 	if g.Bridge {
-		b.WriteString("# Start bridge (spawns agent as child process)\n")
+		b.WriteString("echo \"entrypoint: starting bridge...\"\n")
 		b.WriteString(fmt.Sprintf("exec %s\n", bridgeMeta.EntryPoint))
 	} else {
-		b.WriteString("# Start agent\n")
+		b.WriteString("echo \"entrypoint: starting agent...\"\n")
 		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
 	}
 
