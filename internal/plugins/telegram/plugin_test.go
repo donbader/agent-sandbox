@@ -8,31 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAllowedChatIDs(t *testing.T) {
-	t.Run("extracts chat IDs from config", func(t *testing.T) {
-		ids := AllowedChatIDs(map[string]any{
-			"allowed_chat_ids": []any{"123", "456"},
-		})
-		assert.Equal(t, []string{"123", "456"}, ids)
-	})
-
-	t.Run("returns nil when not configured", func(t *testing.T) {
-		ids := AllowedChatIDs(map[string]any{})
-		assert.Nil(t, ids)
-	})
-
-	t.Run("returns nil for wrong type", func(t *testing.T) {
-		ids := AllowedChatIDs(map[string]any{
-			"allowed_chat_ids": "not-an-array",
-		})
-		assert.Nil(t, ids)
-	})
-}
-
 func TestResolve(t *testing.T) {
 	t.Run("returns expected contributions", func(t *testing.T) {
 		config := map[string]any{
-			"allowed_chat_ids": []any{"123", "456"},
+			"access_control": map[string]any{
+				"allowed_users":   []any{"@coreyortea"},
+				"require_mention": false,
+			},
 		}
 
 		contrib, err := resolve.ResolveFeature("/project", "telegram", config)

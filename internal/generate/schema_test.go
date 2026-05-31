@@ -123,7 +123,7 @@ func TestCollectFeatureSchemas(t *testing.T) {
 		s := schema.(map[string]any)
 		assert.Equal(t, "object", s["type"])
 		props := s["properties"].(map[string]any)
-		assert.Contains(t, props, "allowed_chat_ids")
+		assert.Contains(t, props, "access_control")
 	})
 
 	t.Run("custom-runtime commands has correct type", func(t *testing.T) {

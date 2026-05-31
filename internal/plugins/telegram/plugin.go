@@ -9,7 +9,20 @@ import (
 
 // Config defines the typed configuration for the telegram plugin.
 type Config struct {
-	AllowedChatIDs []string `yaml:"allowed_chat_ids" schema:"Telegram chat IDs allowed to interact with this agent"`
+	AccessControl AccessControl `yaml:"access_control" schema:"Access control settings for the Telegram bot"`
+}
+
+// AccessControl defines who can interact with the bot.
+type AccessControl struct {
+	AllowedUsers   []string            `yaml:"allowed_users" schema:"Telegram usernames allowed to interact (e.g., @username)"`
+	RequireMention bool                `yaml:"require_mention" schema:"Whether the bot requires @mention in group chats"`
+	Groups         map[string]GroupACL `yaml:"groups" schema:"Per-group access control overrides (key: chat ID)"`
+}
+
+// GroupACL defines access control for a specific group chat.
+type GroupACL struct {
+	AllowedUsers   []string `yaml:"allowed_users" schema:"Users allowed in this group (overrides top-level)"`
+	RequireMention *bool    `yaml:"require_mention" schema:"Override require_mention for this group"`
 }
 
 func init() {
@@ -20,23 +33,4 @@ func init() {
 			EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
 		}, nil
 	})
-}
-
-// AllowedChatIDs extracts the allowed_chat_ids from user config.
-func AllowedChatIDs(userConfig map[string]any) []string {
-	ids, ok := userConfig["allowed_chat_ids"]
-	if !ok {
-		return nil
-	}
-	arr, ok := ids.([]any)
-	if !ok {
-		return nil
-	}
-	var result []string
-	for _, v := range arr {
-		if s, ok := v.(string); ok {
-			result = append(result, s)
-		}
-	}
-	return result
 }
