@@ -56,8 +56,61 @@ type Generator struct {
 	OutDir   string // output directory (.build/)
 }
 
+// validate checks for misconfigurations before generating artifacts.
+func (g *Generator) validate() error {
+	if g.Config == nil {
+		return fmt.Errorf("generator: Config is nil")
+	}
+	if g.Runtime == nil {
+		return fmt.Errorf("generator: Runtime is nil")
+	}
+	if g.Runtime.BaseImage == "" {
+		return fmt.Errorf("generator: runtime has no base_image")
+	}
+	if g.Dir == "" {
+		return fmt.Errorf("generator: Dir (source directory) is empty")
+	}
+	if g.OutDir == "" {
+		return fmt.Errorf("generator: OutDir (output directory) is empty")
+	}
+
+	// Check for features that need gateway but gateway is disabled
+	for _, f := range g.Features {
+		if len(f.MITMDomains) > 0 && !g.Gateway {
+			return fmt.Errorf("feature %q requires MITM domains %v but gateway is disabled", f.Name, f.MITMDomains)
+		}
+	}
+
+	// Check for features that need bridge but bridge is disabled
+	for _, f := range g.Features {
+		if f.BridgeChannel != "" && !g.Bridge {
+			return fmt.Errorf("feature %q declares BridgeChannel %q but bridge is disabled", f.Name, f.BridgeChannel)
+		}
+	}
+
+	// Check that bridge has at least one channel
+	if g.Bridge {
+		hasChannel := false
+		for _, f := range g.Features {
+			if f.BridgeChannel != "" {
+				hasChannel = true
+				break
+			}
+		}
+		if !hasChannel {
+			return fmt.Errorf("bridge is enabled but no feature declares a BridgeChannel")
+		}
+	}
+
+	return nil
+}
+
 // Run generates all build artifacts.
 func (g *Generator) Run() error {
+	if err := g.validate(); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(g.OutDir, 0755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
@@ -381,29 +434,27 @@ func (g *Generator) writeEntrypoint() error {
 	if g.Gateway {
 		// iptables setup: redirect all outbound traffic through gateway
 		b.WriteString("# Setup iptables (must run as root)\n")
-		b.WriteString("# Redirect TCP port 443 to gateway\n")
+		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
 		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayListenPort))
-		b.WriteString("# Redirect DNS (UDP 53) to gateway resolver\n")
 		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 -m owner ! --uid-owner gateway -j REDIRECT --to-port %d\n", gatewayDNSPort))
-		b.WriteString("# Drop all other UDP (except DNS handled above)\n")
 		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -m owner ! --uid-owner gateway -j DROP\n\n")
 
-		// Start gateway as gateway user
-		b.WriteString("# Start gateway (runs as gateway user)\n")
-		b.WriteString("su -s /bin/sh -c '/usr/local/bin/gateway &' gateway\n")
+		// Start gateway as gateway user (preserve env for credential injection)
+		b.WriteString("echo \"entrypoint: starting gateway...\"\n")
+		b.WriteString("su --preserve-environment -s /bin/sh -c '/usr/local/bin/gateway &' gateway\n")
 		b.WriteString("sleep 0.5\n\n")
 	}
 
 	// Home override: copy files from staging to home
 	if g.hasHomeOverride() {
-		b.WriteString("# Copy home override files\n")
+		b.WriteString("echo \"entrypoint: applying home override...\"\n")
 		b.WriteString(fmt.Sprintf("if [ -d /opt/home-override ]; then\n  cp -rT /opt/home-override /home/%s\n  chown -R %s:%s /home/%s\nfi\n\n",
 			g.Runtime.User, g.Runtime.User, g.Runtime.User, g.Runtime.User))
 	}
 
 	// Run entrypoint hooks
 	if g.hasHooks() {
-		b.WriteString("# Run entrypoint hooks\n")
+		b.WriteString("echo \"entrypoint: running hooks...\"\n")
 		for _, f := range g.Features {
 			for _, hook := range f.EntrypointHooks {
 				hookName := filepath.Base(hook)
@@ -415,10 +466,10 @@ func (g *Generator) writeEntrypoint() error {
 
 	// Execute the runtime CMD as agent user
 	if g.Bridge {
-		b.WriteString("# Start bridge (spawns agent as child process)\n")
+		b.WriteString("echo \"entrypoint: starting bridge...\"\n")
 		b.WriteString(fmt.Sprintf("exec %s\n", bridgeMeta.EntryPoint))
 	} else {
-		b.WriteString("# Start agent\n")
+		b.WriteString("echo \"entrypoint: starting agent...\"\n")
 		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
 	}
 
