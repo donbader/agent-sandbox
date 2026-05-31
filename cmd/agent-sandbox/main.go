@@ -69,8 +69,21 @@ func generateCmd() *cobra.Command {
 				Features: features,
 				Gateway:  cfg.GatewayEnabled(),
 				Bridge:   hasBridge,
-				Dir:      dir,
-				OutDir:   outDir,
+				GatewaySpec: generate.GatewaySpec{
+					BuildImage: "golang:1.24-alpine",
+					BinaryPath: "/gateway",
+					ListenPort: 8443,
+					DNSPort:    5353,
+				},
+				BridgeSpec: generate.BridgeSpec{
+					BuildImage: "node:22-slim",
+					InstallCmd: "npm install",
+					BuildCmd:   "npm run build",
+					DistDir:    "/src/dist",
+					EntryPoint: "node /opt/bridge/dist/index.js",
+				},
+				Dir:    dir,
+				OutDir: outDir,
 			}
 
 			if err := g.Run(); err != nil {

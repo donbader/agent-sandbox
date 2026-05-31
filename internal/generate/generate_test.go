@@ -314,8 +314,14 @@ func TestGenerator_Run(t *testing.T) {
 				User:      "agent",
 			},
 			Gateway: true,
-			Dir:     srcDir,
-			OutDir:  outDir,
+			GatewaySpec: GatewaySpec{
+				BuildImage: "golang:1.24-alpine",
+				BinaryPath: "/gateway",
+				ListenPort: 8443,
+				DNSPort:    5353,
+			},
+			Dir:    srcDir,
+			OutDir: outDir,
 		}
 
 		err := g.Run()
@@ -416,8 +422,21 @@ func TestGenerator_Run(t *testing.T) {
 			},
 			Gateway: true,
 			Bridge:  true,
-			Dir:     srcDir,
-			OutDir:  outDir,
+			GatewaySpec: GatewaySpec{
+				BuildImage: "golang:1.24-alpine",
+				BinaryPath: "/gateway",
+				ListenPort: 8443,
+				DNSPort:    5353,
+			},
+			BridgeSpec: BridgeSpec{
+				BuildImage: "node:22-slim",
+				InstallCmd: "npm install",
+				BuildCmd:   "npm run build",
+				DistDir:    "/src/dist",
+				EntryPoint: "node /opt/bridge/dist/index.js",
+			},
+			Dir:    srcDir,
+			OutDir: outDir,
 		}
 
 		err := g.Run()

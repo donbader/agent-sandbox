@@ -74,6 +74,10 @@ func TestValidate(t *testing.T) {
 	t.Run("bridge enabled but no channel", func(t *testing.T) {
 		g := validGenerator()
 		g.Bridge = true
+		g.BridgeSpec = BridgeSpec{
+			BuildImage: "node:22-slim",
+			EntryPoint: "node /opt/bridge/dist/index.js",
+		}
 		g.Features = []*resolve.FeatureContributions{
 			{Name: "custom-runtime"},
 		}
@@ -84,9 +88,53 @@ func TestValidate(t *testing.T) {
 		g := validGenerator()
 		g.Gateway = true
 		g.Bridge = true
+		g.GatewaySpec = GatewaySpec{
+			BuildImage: "golang:1.24-alpine",
+			BinaryPath: "/gateway",
+			ListenPort: 8443,
+			DNSPort:    5353,
+		}
+		g.BridgeSpec = BridgeSpec{
+			BuildImage: "node:22-slim",
+			EntryPoint: "node /opt/bridge/dist/index.js",
+		}
 		g.Features = []*resolve.FeatureContributions{
 			{Name: "telegram", MITMDomains: []string{"api.telegram.org"}, BridgeChannel: "telegram"},
 		}
 		assert.NoError(t, g.validate())
+	})
+
+	t.Run("gateway enabled but GatewaySpec.BuildImage empty", func(t *testing.T) {
+		g := validGenerator()
+		g.Gateway = true
+		g.GatewaySpec = GatewaySpec{BinaryPath: "/gateway", ListenPort: 8443, DNSPort: 5353}
+		assert.ErrorContains(t, g.validate(), "GatewaySpec.BuildImage")
+	})
+
+	t.Run("gateway enabled but GatewaySpec.ListenPort is 0", func(t *testing.T) {
+		g := validGenerator()
+		g.Gateway = true
+		g.GatewaySpec = GatewaySpec{BuildImage: "golang:1.24-alpine", BinaryPath: "/gateway", DNSPort: 5353}
+		assert.ErrorContains(t, g.validate(), "GatewaySpec.ListenPort")
+	})
+
+	t.Run("bridge enabled but BridgeSpec.BuildImage empty", func(t *testing.T) {
+		g := validGenerator()
+		g.Bridge = true
+		g.BridgeSpec = BridgeSpec{EntryPoint: "node /opt/bridge/dist/index.js"}
+		g.Features = []*resolve.FeatureContributions{
+			{Name: "telegram", BridgeChannel: "telegram"},
+		}
+		assert.ErrorContains(t, g.validate(), "BridgeSpec.BuildImage")
+	})
+
+	t.Run("bridge enabled but BridgeSpec.EntryPoint empty", func(t *testing.T) {
+		g := validGenerator()
+		g.Bridge = true
+		g.BridgeSpec = BridgeSpec{BuildImage: "node:22-slim"}
+		g.Features = []*resolve.FeatureContributions{
+			{Name: "telegram", BridgeChannel: "telegram"},
+		}
+		assert.ErrorContains(t, g.validate(), "BridgeSpec.EntryPoint")
 	})
 }

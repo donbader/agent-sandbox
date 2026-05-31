@@ -15,46 +15,17 @@ import (
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
 
-// Gateway port constants — single source of truth for iptables rules and gateway config.
-const (
-	gatewayListenPort = 8443  // TLS interception port
-	gatewayDNSPort    = 5353  // DNS resolver port
-
-)
-
-// Gateway build metadata — defines how the gateway Go binary is compiled.
-var gatewayMeta = struct {
-	BuildImage string // Docker image for gateway compilation stage
-	BinaryPath string // output binary path inside build stage
-}{
-	BuildImage: "golang:1.24-alpine",
-	BinaryPath: "/gateway",
-}
-
-// Bridge build metadata — defines how the bridge TypeScript runtime is compiled.
-var bridgeMeta = struct {
-	BuildImage   string // Docker image for bridge compilation stage
-	InstallCmd   string // dependency install command
-	BuildCmd     string // compilation command
-	DistDir      string // compiled output directory (inside build stage)
-	EntryPoint   string // runtime entry point command
-}{
-	BuildImage:   "node:22-slim",
-	InstallCmd:   "npm install",
-	BuildCmd:     "npm run build",
-	DistDir:      "/src/dist",
-	EntryPoint:   "node /opt/bridge/dist/index.js",
-}
-
 // Generator produces build artifacts from config and resolved runtime.
 type Generator struct {
-	Config   *config.AgentConfig
-	Runtime  *resolve.RuntimeConfig
-	Features []*resolve.FeatureContributions
-	Gateway  bool   // include gateway (transparent proxy)
-	Bridge   bool   // include bridge (message relay)
-	Dir      string // source directory (where agent.yaml lives)
-	OutDir   string // output directory (.build/)
+	Config      *config.AgentConfig
+	Runtime     *resolve.RuntimeConfig
+	Features    []*resolve.FeatureContributions
+	Gateway     bool        // include gateway (transparent proxy)
+	Bridge      bool        // include bridge (message relay)
+	GatewaySpec GatewaySpec // injected build spec
+	BridgeSpec  BridgeSpec  // injected build spec
+	Dir         string      // source directory (where agent.yaml lives)
+	OutDir      string      // output directory (.build/)
 }
 
 // validate checks for misconfigurations before generating artifacts.
@@ -73,6 +44,30 @@ func (g *Generator) validate() error {
 	}
 	if g.OutDir == "" {
 		return fmt.Errorf("generator: OutDir (output directory) is empty")
+	}
+
+	if g.Gateway {
+		if g.GatewaySpec.BuildImage == "" {
+			return fmt.Errorf("generator: Gateway is enabled but GatewaySpec.BuildImage is empty")
+		}
+		if g.GatewaySpec.BinaryPath == "" {
+			return fmt.Errorf("generator: Gateway is enabled but GatewaySpec.BinaryPath is empty")
+		}
+		if g.GatewaySpec.ListenPort == 0 {
+			return fmt.Errorf("generator: Gateway is enabled but GatewaySpec.ListenPort is 0")
+		}
+		if g.GatewaySpec.DNSPort == 0 {
+			return fmt.Errorf("generator: Gateway is enabled but GatewaySpec.DNSPort is 0")
+		}
+	}
+
+	if g.Bridge {
+		if g.BridgeSpec.BuildImage == "" {
+			return fmt.Errorf("generator: Bridge is enabled but BridgeSpec.BuildImage is empty")
+		}
+		if g.BridgeSpec.EntryPoint == "" {
+			return fmt.Errorf("generator: Bridge is enabled but BridgeSpec.EntryPoint is empty")
+		}
 	}
 
 	// Check for features that need gateway but gateway is disabled
@@ -211,15 +206,15 @@ func (g *Generator) writeGatewayDockerfile() error {
 	var b strings.Builder
 
 	// Build stage: compile gateway binary
-	b.WriteString(fmt.Sprintf("FROM %s AS builder\n", gatewayMeta.BuildImage))
+	b.WriteString(fmt.Sprintf("FROM %s AS builder\n", g.GatewaySpec.BuildImage))
 	b.WriteString("WORKDIR /src\n")
 	b.WriteString("COPY gateway-src/ .\n")
-	b.WriteString(fmt.Sprintf("RUN go mod tidy && go build -o %s ./cmd/gateway/\n\n", gatewayMeta.BinaryPath))
+	b.WriteString(fmt.Sprintf("RUN go mod tidy && go build -o %s ./cmd/gateway/\n\n", g.GatewaySpec.BinaryPath))
 
 	// Runtime stage: minimal alpine with gateway binary
 	b.WriteString("FROM alpine:3.20\n")
 	b.WriteString("RUN apk add --no-cache ca-certificates\n")
-	b.WriteString(fmt.Sprintf("COPY --from=builder %s /usr/local/bin/gateway\n", gatewayMeta.BinaryPath))
+	b.WriteString(fmt.Sprintf("COPY --from=builder %s /usr/local/bin/gateway\n", g.GatewaySpec.BinaryPath))
 	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n")
 
 	if g.hasMITMDomains() {
@@ -242,12 +237,12 @@ func (g *Generator) writeAgentDockerfile() error {
 
 	// Bridge build stage (if enabled)
 	if g.Bridge {
-		b.WriteString(fmt.Sprintf("FROM %s AS bridge-build\n", bridgeMeta.BuildImage))
+		b.WriteString(fmt.Sprintf("FROM %s AS bridge-build\n", g.BridgeSpec.BuildImage))
 		b.WriteString("WORKDIR /src\n")
 		b.WriteString("COPY bridge-src/package.json bridge-src/tsconfig.json ./\n")
-		b.WriteString(fmt.Sprintf("RUN %s\n", bridgeMeta.InstallCmd))
+		b.WriteString(fmt.Sprintf("RUN %s\n", g.BridgeSpec.InstallCmd))
 		b.WriteString("COPY bridge-src/src/ ./src/\n")
-		b.WriteString(fmt.Sprintf("RUN %s\n\n", bridgeMeta.BuildCmd))
+		b.WriteString(fmt.Sprintf("RUN %s\n\n", g.BridgeSpec.BuildCmd))
 	}
 
 	// Runtime stage
@@ -265,7 +260,7 @@ func (g *Generator) writeAgentDockerfile() error {
 	// Copy bridge dist if enabled
 	if g.Bridge {
 		b.WriteString("# Install bridge\n")
-		b.WriteString(fmt.Sprintf("COPY --from=bridge-build %s/ /opt/bridge/dist/\n", bridgeMeta.DistDir))
+		b.WriteString(fmt.Sprintf("COPY --from=bridge-build %s/ /opt/bridge/dist/\n", g.BridgeSpec.DistDir))
 		b.WriteString("COPY --from=bridge-build /src/node_modules/ /opt/bridge/node_modules/\n")
 		b.WriteString("COPY --from=bridge-build /src/package.json /opt/bridge/package.json\n")
 		b.WriteString("COPY bridge-config.json /opt/bridge/config.json\n")
@@ -541,8 +536,8 @@ func (g *Generator) writeAgentEntrypoint() error {
 
 		// iptables DNAT: redirect outbound traffic to the resolved gateway IP
 		b.WriteString("echo \"entrypoint: configuring iptables...\"\n")
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:%d\n", gatewayListenPort))
-		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.11 -j DNAT --to-destination $GATEWAY_IP:%d\n", gatewayDNSPort))
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.ListenPort))
+		b.WriteString(fmt.Sprintf("iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.11 -j DNAT --to-destination $GATEWAY_IP:%d\n", g.GatewaySpec.DNSPort))
 		b.WriteString("iptables -A OUTPUT -p udp ! --dport 53 -j DROP\n\n")
 	}
 
@@ -568,7 +563,7 @@ func (g *Generator) writeAgentEntrypoint() error {
 	// Execute the runtime CMD as agent user
 	if g.Bridge {
 		b.WriteString("echo \"entrypoint: starting bridge...\"\n")
-		b.WriteString(fmt.Sprintf("exec %s\n", bridgeMeta.EntryPoint))
+		b.WriteString(fmt.Sprintf("exec %s\n", g.BridgeSpec.EntryPoint))
 	} else {
 		b.WriteString("echo \"entrypoint: starting agent...\"\n")
 		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
@@ -582,8 +577,8 @@ func (g *Generator) writeAgentEntrypoint() error {
 func (g *Generator) writeGatewayConfig() error {
 	var b strings.Builder
 	b.WriteString("# Gateway configuration (auto-generated)\n")
-	b.WriteString(fmt.Sprintf("listen: \":%d\"\n", gatewayListenPort))
-	b.WriteString(fmt.Sprintf("dns_listen: \":%d\"\n", gatewayDNSPort))
+	b.WriteString(fmt.Sprintf("listen: \":%d\"\n", g.GatewaySpec.ListenPort))
+	b.WriteString(fmt.Sprintf("dns_listen: \":%d\"\n", g.GatewaySpec.DNSPort))
 
 	// MITM configuration
 	mitmDomains := g.collectMITMDomains()
