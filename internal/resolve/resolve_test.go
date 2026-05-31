@@ -63,42 +63,6 @@ cmd: ["codex", "exec", "--full-auto"]
 	})
 }
 
-func TestResolveInlineRuntime(t *testing.T) {
-	t.Run("valid inline", func(t *testing.T) {
-		inline := map[string]any{
-			"base_image": "python:3.12-slim",
-			"install":    []any{"pip install my-cli"},
-			"cmd":        []any{"my-cli", "run"},
-		}
-
-		rc, err := ResolveInlineRuntime(inline)
-		require.NoError(t, err)
-		assert.Equal(t, "python:3.12-slim", rc.BaseImage)
-		assert.Equal(t, []string{"pip install my-cli"}, rc.Install)
-		assert.Equal(t, []string{"my-cli", "run"}, rc.Cmd)
-		assert.Equal(t, "agent", rc.User)
-	})
-
-	t.Run("missing base_image", func(t *testing.T) {
-		inline := map[string]any{
-			"install": []any{"pip install my-cli"},
-		}
-
-		_, err := ResolveInlineRuntime(inline)
-		assert.ErrorContains(t, err, "base_image is required")
-	})
-
-	t.Run("defaults cmd to sleep infinity", func(t *testing.T) {
-		inline := map[string]any{
-			"base_image": "python:3.12-slim",
-		}
-
-		rc, err := ResolveInlineRuntime(inline)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"sleep", "infinity"}, rc.Cmd)
-	})
-}
-
 func TestResolveFeature(t *testing.T) {
 	// Register a test plugin using the generic Register function
 	type testConfig struct {

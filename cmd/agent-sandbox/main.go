@@ -44,19 +44,9 @@ func generateCmd() *cobra.Command {
 			}
 
 			// Resolve runtime
-			var runtime *resolve.RuntimeConfig
-			if name := cfg.RuntimeName(); name != "" {
-				runtime, err = resolve.ResolveRuntime(dir, name)
-				if err != nil {
-					return err
-				}
-			} else if inline := cfg.RuntimeInline(); inline != nil {
-				runtime, err = resolve.ResolveInlineRuntime(inline)
-				if err != nil {
-					return err
-				}
-			} else {
-				return fmt.Errorf("agent.yaml: runtime must be a string or inline definition")
+			runtime, err := resolve.ResolveRuntime(dir, cfg.Runtime)
+			if err != nil {
+				return err
 			}
 
 			// Resolve features

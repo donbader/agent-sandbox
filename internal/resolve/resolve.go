@@ -39,25 +39,6 @@ func ResolveRuntime(projectDir string, name string) (*RuntimeConfig, error) {
 	return nil, fmt.Errorf("unknown runtime %q: no runtime.yaml found in ./ext/plugins/%s/ or built-in plugins", name, name)
 }
 
-// ResolveInlineRuntime parses an inline runtime definition from agent.yaml.
-func ResolveInlineRuntime(inline map[string]any) (*RuntimeConfig, error) {
-	// Re-marshal and unmarshal to reuse YAML parsing
-	data, err := yaml.Marshal(inline)
-	if err != nil {
-		return nil, fmt.Errorf("invalid inline runtime: %w", err)
-	}
-
-	rc, err := parseRuntime(data, "inline")
-	if err != nil {
-		return nil, err
-	}
-
-	if rc.BaseImage == "" {
-		return nil, fmt.Errorf("inline runtime: base_image is required")
-	}
-
-	return rc, nil
-}
 
 func parseRuntime(data []byte, source string) (*RuntimeConfig, error) {
 	var rc RuntimeConfig

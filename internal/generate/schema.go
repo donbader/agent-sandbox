@@ -40,10 +40,9 @@ func buildAgentSchema() map[string]any {
 				"description": "Agent name",
 			},
 			"runtime": map[string]any{
-				"oneOf": []any{
-					map[string]any{"type": "string", "description": "Runtime plugin name (e.g., codex)"},
-					map[string]any{"type": "object", "description": "Inline runtime definition"},
-				},
+				"type":        "string",
+				"description": "Runtime plugin name",
+				"enum":        []any{"codex"},
 			},
 			"gateway": map[string]any{
 				"type":        "boolean",
