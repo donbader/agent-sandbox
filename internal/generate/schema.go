@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/resolve"
@@ -46,7 +47,8 @@ func buildAgentSchema() map[string]any {
 			},
 			"gateway": map[string]any{
 				"type":        "boolean",
-				"description": "Enable transparent gateway proxy (default: true)",
+				"description": "Enable transparent gateway proxy",
+				"default":     true,
 			},
 			"features": map[string]any{
 				"type":        "object",
@@ -74,6 +76,17 @@ func collectFeatureSchemas() map[string]any {
 	return schemas
 }
 
+// Supported struct tags for schema generation:
+//
+//	yaml:"field_name"       → JSON Schema property name
+//	schema:"description"    → description
+//	default:"value"         → default value (parsed by type: bool, int, string)
+//	enum:"a,b,c"            → enum constraint (comma-separated)
+//	examples:"a,b"          → examples array (comma-separated)
+//	pattern:"^@"            → regex pattern (strings only)
+//	required:"true"         → adds field to parent's required array
+//	deprecated:"true"       → marks field as deprecated
+
 // structToJSONSchema converts a struct to JSON Schema using reflection and struct tags.
 func structToJSONSchema(v any) map[string]any {
 	if v == nil {
@@ -90,7 +103,14 @@ func structToJSONSchema(v any) map[string]any {
 		return nil
 	}
 
+	return structTypeToSchema(t)
+}
+
+// structTypeToSchema converts a reflect.Type (must be struct) to a JSON Schema object.
+func structTypeToSchema(t reflect.Type) map[string]any {
 	props := map[string]any{}
+	var required []string
+
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		yamlTag := field.Tag.Get("yaml")
@@ -100,17 +120,75 @@ func structToJSONSchema(v any) map[string]any {
 		name := strings.Split(yamlTag, ",")[0]
 
 		prop := typeToSchema(field.Type)
+		enrichFromTags(prop, field)
 
-		if desc := field.Tag.Get("schema"); desc != "" {
-			prop["description"] = desc
+		if field.Tag.Get("required") == "true" {
+			required = append(required, name)
 		}
 
 		props[name] = prop
 	}
 
-	return map[string]any{
+	result := map[string]any{
 		"type":       "object",
 		"properties": props,
+	}
+	if len(required) > 0 {
+		result["required"] = required
+	}
+	return result
+}
+
+// enrichFromTags reads struct tags and adds JSON Schema annotations to the property.
+func enrichFromTags(prop map[string]any, field reflect.StructField) {
+	if desc := field.Tag.Get("schema"); desc != "" {
+		prop["description"] = desc
+	}
+
+	if def := field.Tag.Get("default"); def != "" {
+		prop["default"] = parseDefault(def, field.Type)
+	}
+
+	if enum := field.Tag.Get("enum"); enum != "" {
+		values := strings.Split(enum, ",")
+		enumAny := make([]any, len(values))
+		for i, v := range values {
+			enumAny[i] = strings.TrimSpace(v)
+		}
+		prop["enum"] = enumAny
+	}
+
+	if examples := field.Tag.Get("examples"); examples != "" {
+		values := strings.Split(examples, ",")
+		exAny := make([]any, len(values))
+		for i, v := range values {
+			exAny[i] = strings.TrimSpace(v)
+		}
+		prop["examples"] = exAny
+	}
+
+	if pattern := field.Tag.Get("pattern"); pattern != "" {
+		prop["pattern"] = pattern
+	}
+
+	if field.Tag.Get("deprecated") == "true" {
+		prop["deprecated"] = true
+	}
+}
+
+// parseDefault converts a string default value to the appropriate Go type.
+func parseDefault(val string, t reflect.Type) any {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Bool:
+		return val == "true"
+	case reflect.Int, reflect.Int64:
+		n, _ := strconv.ParseInt(val, 10, 64)
+		return n
+	default:
+		return val
 	}
 }
 
@@ -118,8 +196,7 @@ func structToJSONSchema(v any) map[string]any {
 func typeToSchema(t reflect.Type) map[string]any {
 	// Dereference pointer
 	if t.Kind() == reflect.Ptr {
-		schema := typeToSchema(t.Elem())
-		return schema
+		return typeToSchema(t.Elem())
 	}
 
 	switch t.Kind() {
@@ -138,22 +215,7 @@ func typeToSchema(t reflect.Type) map[string]any {
 		prop["additionalProperties"] = typeToSchema(t.Elem())
 		return prop
 	case reflect.Struct:
-		// Recursively expand struct fields
-		props := map[string]any{}
-		for i := 0; i < t.NumField(); i++ {
-			field := t.Field(i)
-			yamlTag := field.Tag.Get("yaml")
-			if yamlTag == "" || yamlTag == "-" {
-				continue
-			}
-			name := strings.Split(yamlTag, ",")[0]
-			fieldSchema := typeToSchema(field.Type)
-			if desc := field.Tag.Get("schema"); desc != "" {
-				fieldSchema["description"] = desc
-			}
-			props[name] = fieldSchema
-		}
-		return map[string]any{"type": "object", "properties": props}
+		return structTypeToSchema(t)
 	default:
 		return map[string]any{"type": "object"}
 	}
