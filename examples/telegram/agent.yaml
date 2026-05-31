@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=.build/schema.json
 name: coder
 runtime: codex
+log_level: debug
 features:
   telegram:
     access_control:

@@ -379,11 +379,10 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("      default:\n")
 
 	envVars := g.mergedEnvVars()
-	if len(envVars) > 0 {
-		b.WriteString("    environment:\n")
-		for _, v := range envVars {
-			b.WriteString(fmt.Sprintf("      - %s=${%s}\n", v, v))
-		}
+	b.WriteString("    environment:\n")
+	b.WriteString(fmt.Sprintf("      - LOG_LEVEL=%s\n", g.logLevel()))
+	for _, v := range envVars {
+		b.WriteString(fmt.Sprintf("      - %s=${%s}\n", v, v))
 	}
 	b.WriteString("    restart: unless-stopped\n")
 
@@ -398,6 +397,7 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("    cap_add:\n")
 	b.WriteString("      - NET_ADMIN\n")
 	b.WriteString("    environment:\n")
+	b.WriteString(fmt.Sprintf("      - LOG_LEVEL=%s\n", g.logLevel()))
 	b.WriteString(fmt.Sprintf("      - GATEWAY_HOST=%s-gateway\n", g.Config.Name))
 	b.WriteString(fmt.Sprintf("    depends_on:\n      - %s-gateway\n", g.Config.Name))
 
@@ -459,11 +459,10 @@ func (g *Generator) writeSingleCompose() error {
 
 	// Environment variables
 	envVars := g.mergedEnvVars()
-	if len(envVars) > 0 {
-		b.WriteString("    environment:\n")
-		for _, v := range envVars {
-			b.WriteString(fmt.Sprintf("      - %s=${%s}\n", v, v))
-		}
+	b.WriteString("    environment:\n")
+	b.WriteString(fmt.Sprintf("      - LOG_LEVEL=%s\n", g.logLevel()))
+	for _, v := range envVars {
+		b.WriteString(fmt.Sprintf("      - %s=${%s}\n", v, v))
 	}
 
 	// Named volumes at top level
@@ -667,6 +666,14 @@ func (g *Generator) hasHooks() bool {
 		}
 	}
 	return false
+}
+
+// logLevel returns the configured log level, defaulting to "info".
+func (g *Generator) logLevel() string {
+	if g.Config.LogLevel != "" {
+		return g.Config.LogLevel
+	}
+	return "info"
 }
 
 func (g *Generator) hasHomeOverride() bool {

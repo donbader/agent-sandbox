@@ -13,6 +13,7 @@ import (
 type AgentConfig struct {
 	Name     string                    `yaml:"name" schema:"Agent name" required:"true" examples:"my-agent"`
 	Runtime  string                    `yaml:"runtime" schema:"Runtime plugin name" required:"true" enum:"codex"`
+	LogLevel string                    `yaml:"log_level" schema:"Log verbosity level" default:"info" enum:"info,debug"`
 	Gateway  *bool                     `yaml:"gateway" schema:"Enable transparent gateway proxy" default:"true"`
 	Features map[string]map[string]any `yaml:"features" schema:"Feature plugins and their configuration"`
 }
