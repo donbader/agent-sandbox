@@ -31,6 +31,9 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 
+	// Resolve built-in variables in feature contributions
+	g.resolveFeatureBuiltins()
+
 	if g.Gateway {
 		if err := g.writeGatewaySource(); err != nil {
 			return err
@@ -554,6 +557,16 @@ func (g *Generator) scanEnvVars() []string {
 						vars = append(vars, m[1])
 					}
 				}
+			}
+		}
+	}
+
+	// Also collect EnvVars from feature plugin contributions
+	for _, f := range g.Features {
+		for _, v := range f.EnvVars {
+			if !seen[v] {
+				seen[v] = true
+				vars = append(vars, v)
 			}
 		}
 	}

@@ -5,7 +5,7 @@ features:
     commands:
       - "apt-get update && apt-get install -y --no-install-recommends ripgrep fd-find && rm -rf /var/lib/apt/lists/*"
     entrypoint_hooks:
-      - ./scripts/sync-dotfiles.sh
+      - ./scripts/hello-world.sh
     runtime_volumes:
-      - "agent-home:/home/agent"
-    home_override: "./home"
+      - "agent-home:{{ .AGENT_HOME }}"
+    home_override: "./my-home"

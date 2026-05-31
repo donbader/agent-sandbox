@@ -19,7 +19,7 @@ type FeatureContributions struct {
 	HomeOverride    string   // directory to copy into home on start
 	MITMDomains     []string // domains the gateway should MITM (terminate TLS)
 	BridgeChannel   string   // bridge channel type (e.g., "telegram")
-	EnvVars         []string // environment variables to pass to the container
+	EnvVars         []string // environment variables (added to .env.example and compose)
 }
 
 // registry holds registered feature plugins.

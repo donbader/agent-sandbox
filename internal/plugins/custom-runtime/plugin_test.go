@@ -21,6 +21,7 @@ func TestPlugin_Resolve(t *testing.T) {
 			"entrypoint_hooks": []any{"scripts/setup.sh", "scripts/init.sh"},
 			"runtime_volumes":  []any{"agent-home:/home/agent"},
 			"home_override":    "./home",
+			"env":              []any{"MY_API_KEY", "GITHUB_TOKEN"},
 		}
 
 		contrib, err := p.Resolve("/project", config)
@@ -29,6 +30,7 @@ func TestPlugin_Resolve(t *testing.T) {
 		assert.Equal(t, []string{"scripts/setup.sh", "scripts/init.sh"}, contrib.EntrypointHooks)
 		assert.Equal(t, []string{"agent-home:/home/agent"}, contrib.Volumes)
 		assert.Equal(t, "./home", contrib.HomeOverride)
+		assert.Equal(t, []string{"MY_API_KEY", "GITHUB_TOKEN"}, contrib.EnvVars)
 	})
 
 	t.Run("empty config", func(t *testing.T) {
@@ -38,6 +40,7 @@ func TestPlugin_Resolve(t *testing.T) {
 		assert.Nil(t, contrib.EntrypointHooks)
 		assert.Nil(t, contrib.Volumes)
 		assert.Equal(t, "", contrib.HomeOverride)
+		assert.Nil(t, contrib.EnvVars)
 	})
 
 	t.Run("partial config", func(t *testing.T) {
