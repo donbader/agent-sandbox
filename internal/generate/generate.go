@@ -56,8 +56,61 @@ type Generator struct {
 	OutDir   string // output directory (.build/)
 }
 
+// validate checks for misconfigurations before generating artifacts.
+func (g *Generator) validate() error {
+	if g.Config == nil {
+		return fmt.Errorf("generator: Config is nil")
+	}
+	if g.Runtime == nil {
+		return fmt.Errorf("generator: Runtime is nil")
+	}
+	if g.Runtime.BaseImage == "" {
+		return fmt.Errorf("generator: runtime has no base_image")
+	}
+	if g.Dir == "" {
+		return fmt.Errorf("generator: Dir (source directory) is empty")
+	}
+	if g.OutDir == "" {
+		return fmt.Errorf("generator: OutDir (output directory) is empty")
+	}
+
+	// Check for features that need gateway but gateway is disabled
+	for _, f := range g.Features {
+		if len(f.MITMDomains) > 0 && !g.Gateway {
+			return fmt.Errorf("feature %q requires MITM domains %v but gateway is disabled", f.Name, f.MITMDomains)
+		}
+	}
+
+	// Check for features that need bridge but bridge is disabled
+	for _, f := range g.Features {
+		if f.BridgeChannel != "" && !g.Bridge {
+			return fmt.Errorf("feature %q declares BridgeChannel %q but bridge is disabled", f.Name, f.BridgeChannel)
+		}
+	}
+
+	// Check that bridge has at least one channel
+	if g.Bridge {
+		hasChannel := false
+		for _, f := range g.Features {
+			if f.BridgeChannel != "" {
+				hasChannel = true
+				break
+			}
+		}
+		if !hasChannel {
+			return fmt.Errorf("bridge is enabled but no feature declares a BridgeChannel")
+		}
+	}
+
+	return nil
+}
+
 // Run generates all build artifacts.
 func (g *Generator) Run() error {
+	if err := g.validate(); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(g.OutDir, 0755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
