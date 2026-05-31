@@ -5,7 +5,6 @@ This example deploys a codex agent reachable via Telegram.
 ## Prerequisites
 
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
-- Your Telegram chat ID (use [@userinfobot](https://t.me/userinfobot))
 
 ## Setup
 
@@ -15,15 +14,13 @@ cd examples/telegram
 # Generate build artifacts
 agent-sandbox generate
 
-# Create .env from example
-cp .build/.env.example .build/.env
-# Edit .build/.env and fill in:
+# Create .env from the generated example
+cp .env.example .env
+# Edit .env and fill in:
 #   TELEGRAM_BOT_TOKEN=your-bot-token
-#   TELEGRAM_CHAT_ID=your-chat-id
 
 # Build and run
-cd .build
-docker compose up --build
+agent-sandbox compose up --build
 ```
 
 ## How It Works
