@@ -31,6 +31,7 @@ func init() {
 			MITMDomains:   []string{"api.telegram.org"},
 			BridgeChannel: "telegram",
 			EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
+			BridgeConfig:  map[string]any{"access_control": cfg.AccessControl},
 		}, nil
 	})
 }

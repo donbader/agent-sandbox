@@ -740,12 +740,10 @@ func (g *Generator) writeBridgeConfig() error {
 		"agent_cmd": []string{"sh", "-c", agentCmd},
 	}
 
-	// Pass feature-specific config to bridge
-	if g.Config.Features != nil {
-		if tgCfg, ok := g.Config.Features["telegram"]; ok {
-			if ac, ok := tgCfg["access_control"]; ok {
-				config["access_control"] = ac
-			}
+	// Pass plugin-specific config to bridge (generic — no plugin knowledge here)
+	for _, f := range g.Features {
+		for k, v := range f.BridgeConfig {
+			config[k] = v
 		}
 	}
 

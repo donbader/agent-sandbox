@@ -387,6 +387,7 @@ func TestGenerator_Run(t *testing.T) {
 					MITMDomains:   []string{"api.telegram.org"},
 					BridgeChannel: "telegram",
 					EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
+					BridgeConfig:  map[string]any{"access_control": map[string]any{"allowed_users": []any{"@testuser"}}},
 				},
 			},
 			Gateway: true,
