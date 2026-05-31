@@ -219,7 +219,7 @@ During `agent-sandbox generate`, the generator:
 .build/bridge-src/
   src/
     index.ts              ← bridge core (generic, never modified)
-    agent-process.ts      ← agent process spawning
+    acp-client.ts         ← ACP client (spawns agent adapter via @agentclientprotocol/sdk)
     channel/
       types.ts            ← Channel interface
       telegram.ts         ← copied from internal/plugins/telegram/bridge/channel.ts
