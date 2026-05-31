@@ -3,10 +3,12 @@ import { AgentProcess } from "./agent-process.js";
 import { TelegramChannel } from "./channel/telegram.js";
 import type { Channel } from "./channel/types.js";
 
+import type { AccessControl } from "./channel/telegram.js";
+
 interface BridgeConfig {
   channel: string;
   agent_cmd: string[];
-  allowed_chat_ids?: string[];
+  access_control?: AccessControl;
 }
 
 function loadConfig(): BridgeConfig {
@@ -26,7 +28,7 @@ async function main(): Promise<void> {
   // Create channel
   let channel: Channel;
   if (config.channel === "telegram") {
-    channel = new TelegramChannel(config.allowed_chat_ids);
+    channel = new TelegramChannel(config.access_control);
   } else {
     console.error(`bridge: unknown channel type: ${config.channel}`);
     process.exit(1);

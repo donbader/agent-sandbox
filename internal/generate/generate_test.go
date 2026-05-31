@@ -372,7 +372,7 @@ func TestGenerator_Run(t *testing.T) {
 				Name:    "coder",
 				Runtime: "codex",
 				Features: map[string]map[string]any{
-					"telegram": {"allowed_chat_ids": []any{"123456"}},
+					"telegram": {"access_control": map[string]any{"allowed_users": []any{"@testuser"}, "require_mention": false}},
 				},
 			},
 			Runtime: &resolve.RuntimeConfig{
@@ -387,6 +387,7 @@ func TestGenerator_Run(t *testing.T) {
 					MITMDomains:   []string{"api.telegram.org"},
 					BridgeChannel: "telegram",
 					EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
+					BridgeConfig:  map[string]any{"access_control": map[string]any{"allowed_users": []any{"@testuser"}}},
 				},
 			},
 			Gateway: true,
@@ -440,8 +441,8 @@ func TestGenerator_Run(t *testing.T) {
 		bridgeCfgStr := string(bridgeCfg)
 		assert.Contains(t, bridgeCfgStr, `"channel": "telegram"`)
 		assert.Contains(t, bridgeCfgStr, `"agent_cmd"`)
-		assert.Contains(t, bridgeCfgStr, `"allowed_chat_ids"`)
-		assert.Contains(t, bridgeCfgStr, `"123456"`)
+		assert.Contains(t, bridgeCfgStr, `"access_control"`)
+		assert.Contains(t, bridgeCfgStr, `"allowed_users"`)
 
 		// Bridge source should be copied
 		_, err = os.Stat(filepath.Join(outDir, "bridge-src", "package.json"))

@@ -26,9 +26,10 @@ type FeatureContributions struct {
 	EntrypointHooks []string // scripts to run on container start (source paths)
 	Volumes         []string // named volumes (e.g., "name:/path")
 	HomeOverride    string   // directory to copy into home on start
-	MITMDomains     []string // domains the gateway should MITM (terminate TLS)
-	BridgeChannel   string   // bridge channel type (e.g., "telegram")
-	EnvVars         []string // environment variables (added to .env.example and compose)
+	MITMDomains     []string       // domains the gateway should MITM (terminate TLS)
+	BridgeChannel   string         // bridge channel type (e.g., "telegram")
+	EnvVars         []string       // environment variables (added to .env.example and compose)
+	BridgeConfig    map[string]any // plugin-specific config passed to bridge-config.json
 }
 
 // registry holds registered feature plugins.
