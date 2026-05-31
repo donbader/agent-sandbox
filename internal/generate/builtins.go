@@ -34,20 +34,12 @@ var Builtins = []BuiltinVar{
 	},
 }
 
-// builtinNames returns a set of built-in variable names for quick lookup.
-func builtinNames() map[string]bool {
-	names := make(map[string]bool, len(Builtins))
-	for _, b := range Builtins {
-		names[b.Name] = true
-	}
-	return names
-}
-
-// resolveBuiltins replaces all ${BUILTIN_VAR} references in a string with their resolved values.
+// resolveBuiltins replaces all {{ .BUILTIN_VAR }} references in a string with their resolved values.
+// Uses Go template-style syntax to distinguish from runtime env vars (${VAR}).
 func resolveBuiltins(s string, runtime *resolve.RuntimeConfig) string {
 	result := s
 	for _, b := range Builtins {
-		placeholder := fmt.Sprintf("${%s}", b.Name)
+		placeholder := fmt.Sprintf("{{ .%s }}", b.Name)
 		if strings.Contains(result, placeholder) {
 			result = strings.ReplaceAll(result, placeholder, b.Resolve(runtime))
 		}
