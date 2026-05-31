@@ -4,8 +4,8 @@ import type { Channel } from "./types.js";
 // The bridge uses a dummy token. The gateway MITM rewrites it to the real token.
 const DUMMY_TOKEN = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-/** Access control configuration from bridge-config.json */
-export interface AccessControl {
+/** Access control configuration passed via BridgeConfig */
+interface AccessControl {
   allowed_users?: string[];
   require_mention?: boolean;
   groups?: Record<string, { allowed_users?: string[]; require_mention?: boolean }>;
@@ -15,15 +15,18 @@ export interface AccessControl {
  * TelegramChannel implements Channel using grammy.
  * It connects to api.telegram.org through the gateway MITM proxy,
  * which replaces the dummy token with the real bot token.
+ *
+ * Protocol: export default a class implementing Channel.
+ * Constructor receives the plugin's BridgeConfig.
  */
-export class TelegramChannel implements Channel {
+export default class TelegramChannel implements Channel {
   private bot: Bot;
   private handler: ((chatId: string, text: string) => void) | null = null;
   private acl: AccessControl;
   private botUsername: string | null = null;
 
-  constructor(accessControl?: AccessControl) {
-    this.acl = accessControl ?? {};
+  constructor(config: Record<string, unknown>) {
+    this.acl = (config?.access_control as AccessControl) ?? {};
     this.bot = new Bot(DUMMY_TOKEN);
 
     this.bot.on("message:text", (ctx) => {

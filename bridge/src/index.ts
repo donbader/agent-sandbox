@@ -1,14 +1,12 @@
 import { readFileSync } from "node:fs";
 import { AgentProcess } from "./agent-process.js";
-import { TelegramChannel } from "./channel/telegram.js";
+import { channels } from "./channel/channels.gen.js";
 import type { Channel } from "./channel/types.js";
-
-import type { AccessControl } from "./channel/telegram.js";
 
 interface BridgeConfig {
   channel: string;
   agent_cmd: string[];
-  access_control?: AccessControl;
+  [key: string]: unknown; // plugin-specific config passed to channel constructor
 }
 
 function loadConfig(): BridgeConfig {
@@ -25,14 +23,14 @@ async function main(): Promise<void> {
   const agent = new AgentProcess(config.agent_cmd);
   agent.start();
 
-  // Create channel
-  let channel: Channel;
-  if (config.channel === "telegram") {
-    channel = new TelegramChannel(config.access_control);
-  } else {
+  // Create channel from generated registry
+  const ChannelClass = channels[config.channel];
+  if (!ChannelClass) {
     console.error(`bridge: unknown channel type: ${config.channel}`);
+    console.error(`bridge: available channels: ${Object.keys(channels).join(", ")}`);
     process.exit(1);
   }
+  const channel: Channel = new ChannelClass(config);
 
   // Wire channel → agent
   channel.onMessage((chatId, text) => {
