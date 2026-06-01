@@ -1,54 +1,45 @@
 import { Bot } from "grammy";
 import type { Channel } from "./types.js";
 import { createLogger } from "../logger.js";
+import { RateLimiter } from "./delivery/rate-limiter.js";
+import { withRetry } from "./delivery/api-retry.js";
+import { formatMarkdown, splitMessage } from "./formatter/telegram.js";
 
 const log = createLogger("telegram");
-
-// The bridge uses a dummy token. The gateway MITM rewrites it to the real token.
 const DUMMY_TOKEN = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-/** Access control configuration passed via BridgeConfig */
 interface AccessControl {
   allowed_users?: string[];
   require_mention?: boolean;
   groups?: Record<string, { allowed_users?: string[]; require_mention?: boolean }>;
 }
 
-/**
- * TelegramChannel implements Channel using grammy.
- * It connects to api.telegram.org through the gateway MITM proxy,
- * which replaces the dummy token with the real bot token.
- *
- * Protocol: export default a class implementing Channel.
- * Constructor receives the plugin's BridgeConfig.
- */
 export default class TelegramChannel implements Channel {
   private bot: Bot;
   private handler: ((chatId: string, text: string) => void) | null = null;
   private acl: AccessControl;
   private botUsername: string | null = null;
+  private rateLimiter = new RateLimiter(100);
 
   constructor(config: Record<string, unknown>) {
     this.acl = (config?.access_control as AccessControl) ?? {};
     this.bot = new Bot(DUMMY_TOKEN);
 
-    // Catch all bot errors (DNS failures, network errors, API errors)
     this.bot.catch((err) => {
       log.error({ error: err.message ?? err }, "bot error");
     });
 
-    this.bot.on("message:text", (ctx) => {
+    this.bot.on("message:text", async (ctx) => {
       const chatId = ctx.chat.id.toString();
       const username = ctx.from?.username ? `@${ctx.from.username}` : null;
       const text = ctx.message.text;
       const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
 
-      // Resolve effective ACL (per-group overrides > top-level)
+      // ACL checks (same as before)
       const groupAcl = this.acl.groups?.[chatId];
       const allowedUsers = groupAcl?.allowed_users ?? this.acl.allowed_users;
       const requireMention = groupAcl?.require_mention ?? this.acl.require_mention ?? false;
 
-      // Check allowed users
       if (allowedUsers?.length && username) {
         if (!allowedUsers.includes(username)) {
           log.debug({ username, chatId }, "ignoring unauthorized user");
@@ -59,17 +50,20 @@ export default class TelegramChannel implements Channel {
         return;
       }
 
-      // Check require_mention in group chats
       if (isGroup && requireMention) {
         const mentioned = this.botUsername
           ? text.includes(`@${this.botUsername}`)
           : false;
-        if (!mentioned) {
-          return; // silently ignore non-mentioned messages in groups
-        }
+        if (!mentioned) return;
       }
 
       log.info({ username: username ?? "unknown", chatId }, "received message");
+
+      // Ack emoji — react with 👀 to show we received the message
+      this.ackMessage(chatId, ctx.message.message_id);
+
+      // Typing indicator
+      this.sendTyping(chatId);
 
       if (this.handler) {
         this.handler(chatId, text);
@@ -96,8 +90,39 @@ export default class TelegramChannel implements Channel {
   }
 
   sendMessage(chatId: string, text: string): void {
-    this.bot.api.sendMessage(Number(chatId), text).catch((err) => {
-      log.error({ chatId, error: err.message ?? err }, "failed to send message");
+    void this.sendFormatted(chatId, text);
+  }
+
+  // --- Private helpers ---
+
+  private async sendFormatted(chatId: string, text: string): Promise<void> {
+    const html = formatMarkdown(text);
+    const segments = splitMessage(html);
+
+    for (const segment of segments) {
+      await withRetry(async () => {
+        await this.rateLimiter.acquire(chatId);
+        await this.bot.api.sendMessage(Number(chatId), segment, {
+          parse_mode: "HTML",
+        });
+      });
+    }
+  }
+
+  private ackMessage(chatId: string, messageId: number): void {
+    withRetry(async () => {
+      await this.bot.api.setMessageReaction(Number(chatId), messageId, [
+        { type: "emoji", emoji: "👀" },
+      ]);
+    }).catch((err) => {
+      // Non-critical — don't fail if reaction fails (old API, permissions, etc.)
+      log.debug({ chatId, error: (err as Error).message }, "ack reaction failed");
+    });
+  }
+
+  private sendTyping(chatId: string): void {
+    void this.bot.api.sendChatAction(Number(chatId), "typing").catch(() => {
+      // Non-critical
     });
   }
 }
