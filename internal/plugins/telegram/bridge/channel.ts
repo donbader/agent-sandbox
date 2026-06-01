@@ -73,6 +73,10 @@ export default function createTelegramChannel(
   // Session mapping: chatId → ACP sessionId
   const sessions = new Map<string, string>();
 
+  // Perf tracking: last N response times (ms)
+  const perfHistory: number[] = [];
+  const PERF_MAX = 50;
+
   // Startup buffer: queue messages until agent is ready
   const buffer: BufferedMessage[] = [];
   let ready = false;
@@ -122,6 +126,13 @@ export default function createTelegramChannel(
         const sessionId = sessions.get(chatId);
         lines.push(`  Session: ${sessionId ? sessionId.slice(0, 8) + "…" : "none"}`);
         lines.push(`  Active sessions: ${sessions.size}`);
+        if (perfHistory.length > 0) {
+          const sorted = [...perfHistory].sort((a, b) => a - b);
+          const avg = Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length);
+          const p95 = sorted[Math.floor(sorted.length * 0.95)];
+          const last = perfHistory[perfHistory.length - 1];
+          lines.push(`  Perf (${sorted.length} prompts): avg ${avg}ms / p95 ${p95}ms / last ${last}ms`);
+        }
         return lines.join("\n");
       }
 
@@ -162,7 +173,11 @@ export default function createTelegramChannel(
     // Forward to agent
     try {
       const sessionId = await getOrCreateSession(chatId);
+      const t0 = Date.now();
       const response = await agent.prompt(sessionId, text);
+      const elapsed = Date.now() - t0;
+      perfHistory.push(elapsed);
+      if (perfHistory.length > PERF_MAX) perfHistory.shift();
       sendMessage(chatId, response);
     } catch (err: unknown) {
       log.error({ error: err, chatId }, "agent prompt failed");
@@ -207,7 +222,7 @@ export default function createTelegramChannel(
   function registerBotCommands(): void {
     const commands = [
       { command: "sh", description: "Execute shell command" },
-      { command: "diagnose", description: "Show diagnostics" },
+      { command: "diagnose", description: "Show diagnostics and perf stats" },
     ];
 
     // Add agent-declared commands
