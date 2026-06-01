@@ -12,6 +12,7 @@ import (
 	"github.com/donbader/agent-sandbox/gateway/internal/dns"
 	"github.com/donbader/agent-sandbox/gateway/internal/mitm"
 	"github.com/donbader/agent-sandbox/gateway/internal/proxy"
+	"github.com/donbader/agent-sandbox/gateway/internal/redact"
 )
 
 func main() {
@@ -22,17 +23,6 @@ func main() {
 		level.Set(slog.LevelDebug)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: level,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == "token" || a.Key == "authorization" || a.Key == "api_key" {
-				return slog.String(a.Key, "[redacted]")
-			}
-			return a
-		},
-	}))
-	slog.SetDefault(logger)
-
 	configPath := "/etc/gateway/config.yaml"
 	if p := os.Getenv("GATEWAY_CONFIG"); p != "" {
 		configPath = p
@@ -40,9 +30,27 @@ func main() {
 
 	cfg, err := proxy.LoadConfig(configPath)
 	if err != nil {
+		// Minimal logger for startup errors (before secrets are known).
+		slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 		slog.Error("load config", "error", err)
 		os.Exit(1)
 	}
+
+	// Collect secret values from rewriter env vars for value-based redaction.
+	secrets := collectSecrets(cfg.Rewriters)
+
+	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Key-based redaction as a first layer (catches explicitly named attrs).
+			if a.Key == "token" || a.Key == "authorization" || a.Key == "api_key" {
+				return slog.String(a.Key, "[REDACTED]")
+			}
+			return a
+		},
+	})
+	logger := slog.New(redact.NewHandler(jsonHandler, secrets))
+	slog.SetDefault(logger)
 
 	// Start DNS resolver
 	dnsServer := dns.NewServer(cfg.DNSListen)
@@ -125,4 +133,25 @@ func buildRewriters(cfgs []proxy.RewriterConfig) []mitm.Rewriter {
 		}
 	}
 	return rewriters
+}
+
+// collectSecrets reads the raw secret values from environment variables referenced
+// by rewriter configs. These values are used for value-based log redaction.
+func collectSecrets(cfgs []proxy.RewriterConfig) []string {
+	var secrets []string
+	for _, rc := range cfgs {
+		switch rc.Type {
+		case "telegram-url":
+			if v := os.Getenv("TELEGRAM_BOT_TOKEN"); v != "" {
+				secrets = append(secrets, v)
+			}
+		case "auth-header":
+			if rc.EnvVar != "" {
+				if v := os.Getenv(rc.EnvVar); v != "" {
+					secrets = append(secrets, v)
+				}
+			}
+		}
+	}
+	return secrets
 }
