@@ -214,8 +214,8 @@ func TestGenerator_Run(t *testing.T) {
 			Config: &config.AgentConfig{
 				Name:    "coder",
 				Runtime: "codex",
-				Features: map[string]map[string]any{
-					"github": {"token": "${GITHUB_PAT}"},
+				Features: []config.FeatureEntry{
+					{Plugin: "github", Config: map[string]any{"token": "${GITHUB_PAT}"}},
 				},
 			},
 			Runtime: &resolve.RuntimeConfig{
@@ -403,8 +403,8 @@ func TestGenerator_Run(t *testing.T) {
 			Config: &config.AgentConfig{
 				Name:    "coder",
 				Runtime: "codex",
-				Features: map[string]map[string]any{
-					"telegram": {"access_control": map[string]any{"allowed_users": []any{"@testuser"}, "require_mention": false}},
+				Features: []config.FeatureEntry{
+					{Plugin: "telegram", Config: map[string]any{"access_control": map[string]any{"allowed_users": []any{"@testuser"}, "require_mention": false}}},
 				},
 			},
 			Runtime: &resolve.RuntimeConfig{

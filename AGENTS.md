@@ -36,14 +36,18 @@ templates/              ← Dockerfile.tmpl, entrypoint.sh template
 ## Commands
 
 ```bash
+# Activate dev environment (provides go, golangci-lint, etc.)
+# Use `flox activate -- <command>` to run commands in the dev environment
+flox activate -- go build ./cmd/agent-sandbox/
+
 # Build
-go build ./cmd/agent-sandbox/
+flox activate -- go build ./...
 
 # Test
-go test ./...
+flox activate -- go test ./...
 
-# Lint (when golangci-lint is available)
-golangci-lint run ./...
+# Lint
+flox activate -- golangci-lint run ./...
 
 # End-to-end
 agent-sandbox generate -d <dir>        # reads agent.yaml → writes .build/

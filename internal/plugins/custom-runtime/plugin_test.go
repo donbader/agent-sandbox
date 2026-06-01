@@ -18,7 +18,7 @@ func TestResolve(t *testing.T) {
 			"env":              []any{"MY_API_KEY", "GITHUB_TOKEN"},
 		}
 
-		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", config)
+		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", "custom-runtime", config)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"apt-get install -y ripgrep", "apt-get install -y jq"}, contrib.Commands)
 		assert.Equal(t, []string{"scripts/setup.sh", "scripts/init.sh"}, contrib.EntrypointHooks)
@@ -28,7 +28,7 @@ func TestResolve(t *testing.T) {
 	})
 
 	t.Run("empty config", func(t *testing.T) {
-		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", map[string]any{})
+		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", "custom-runtime", map[string]any{})
 		require.NoError(t, err)
 		assert.Nil(t, contrib.Commands)
 		assert.Nil(t, contrib.EntrypointHooks)
@@ -42,7 +42,7 @@ func TestResolve(t *testing.T) {
 			"commands": []any{"npm install -g typescript"},
 		}
 
-		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", config)
+		contrib, err := resolve.ResolveFeature("/project", "custom-runtime", "custom-runtime", config)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"npm install -g typescript"}, contrib.Commands)
 		assert.Nil(t, contrib.EntrypointHooks)

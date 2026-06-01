@@ -52,18 +52,24 @@ runtime: codex
 
 # Add credentials:
 features:
-  github: { token: "${GITHUB_PAT}" }
+  - plugin: github
+    token: "${GITHUB_PAT}"
 
 # Add channels:
 features:
-  telegram: { bot_token: "${BOT_TOKEN}", allowed_users: ["me"] }
+  - plugin: telegram
+    bot_token: "${BOT_TOKEN}"
+    allowed_users: ["me"]
 
 # Full power:
 features:
-  github: { token: "${GITHUB_PAT}" }
-  docker: true
-  telegram: { bot_token: "${BOT_TOKEN}", allowed_users: ["me"] }
-  custom-runtime:
+  - plugin: github
+    token: "${GITHUB_PAT}"
+  - plugin: docker
+  - plugin: telegram
+    bot_token: "${BOT_TOKEN}"
+    allowed_users: ["me"]
+  - plugin: custom-runtime
     commands: ["apt-get install -y ripgrep fd-find"]
     entrypoint_hooks: [./scripts/sync-dotfiles.sh]
     runtime_volumes: ["agent-home:/home/agent"]

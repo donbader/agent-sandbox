@@ -90,7 +90,7 @@ func TestResolveFeature(t *testing.T) {
 			"home_override":    "home",
 		}
 
-		contrib, err := ResolveFeature("/any/dir", "test-custom-runtime", userConfig)
+		contrib, err := ResolveFeature("/any/dir", "test-custom-runtime", "test-custom-runtime", userConfig)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"apt-get install -y ripgrep"}, contrib.Commands)
 		assert.Equal(t, []string{"scripts/setup.sh"}, contrib.EntrypointHooks)
@@ -99,7 +99,7 @@ func TestResolveFeature(t *testing.T) {
 	})
 
 	t.Run("unknown feature", func(t *testing.T) {
-		_, err := ResolveFeature("/nonexistent", "unknown-feature", map[string]any{})
+		_, err := ResolveFeature("/nonexistent", "unknown-feature", "unknown-feature", map[string]any{})
 		assert.ErrorContains(t, err, "unknown feature")
 	})
 
@@ -114,7 +114,7 @@ func TestResolveFeature(t *testing.T) {
 		})
 		t.Cleanup(func() { delete(registry, "minimal") })
 
-		contrib, err := ResolveFeature("/any/dir", "minimal", map[string]any{})
+		contrib, err := ResolveFeature("/any/dir", "minimal", "minimal", map[string]any{})
 		require.NoError(t, err)
 		assert.Nil(t, contrib.Commands)
 		assert.Nil(t, contrib.EntrypointHooks)

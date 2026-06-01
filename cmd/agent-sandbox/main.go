@@ -56,10 +56,14 @@ func generateCmd(dir *string) *cobra.Command {
 			// Resolve features
 			var features []*resolve.FeatureContributions
 			hasBridge := false
-			for name, featureCfg := range cfg.Features {
-				contrib, err := resolve.ResolveFeature(*dir, name, featureCfg)
+			for i, entry := range cfg.Features {
+				instanceName := fmt.Sprintf("features[%d]", i)
+				if entry.Name != "" {
+					instanceName = entry.Name
+				}
+				contrib, err := resolve.ResolveFeature(*dir, entry.Plugin, instanceName, entry.Config)
 				if err != nil {
-					return fmt.Errorf("resolving feature %q: %w", name, err)
+					return fmt.Errorf("resolving feature %q (plugin %q): %w", instanceName, entry.Plugin, err)
 				}
 				features = append(features, contrib)
 				if contrib.BridgeChannel != "" {

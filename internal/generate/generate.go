@@ -804,10 +804,14 @@ func (g *Generator) scanEnvVars() []string {
 	var order []string               // preserve insertion order
 
 	// Scan config for ${VAR} references
-	for featureName, featureCfg := range g.Config.Features {
-		for key, v := range featureCfg {
+	for i, entry := range g.Config.Features {
+		source := fmt.Sprintf("features[%d]", i)
+		if entry.Name != "" {
+			source = entry.Name
+		}
+		for key, v := range entry.Config {
 			scanValueWithSource(v, envVarPattern, sources, &order,
-				fmt.Sprintf("feature:%s.%s", featureName, key))
+				fmt.Sprintf("feature:%s.%s", source, key))
 		}
 	}
 

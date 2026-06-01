@@ -83,7 +83,7 @@ Gives users direct control over image build commands, startup hooks, and persist
 
 ```yaml
 features:
-  custom-runtime:
+  - plugin: custom-runtime
     commands:
       - "apt-get install -y ripgrep fd-find"
       - "npm install -g typescript"
@@ -108,7 +108,7 @@ Generic OAuth2 plugin for any MCP server:
 
 ```yaml
 features:
-  mcp-oauth:
+  - plugin: mcp-oauth
     servers:
       - url: "https://mcp.notion.com"
         name: "notion"
@@ -122,7 +122,7 @@ Handles: dynamic client registration (RFC 7591), authorization flow, token excha
 
 ```yaml
 features:
-  telegram:
+  - plugin: telegram
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     allowed_users: ["donbader"]
 ```
@@ -134,7 +134,7 @@ Bridge: grammy-based long-poll bot, filters by allowed_users.
 
 ```yaml
 features:
-  github:
+  - plugin: github
     token: "${GITHUB_PAT}"
 ```
 
@@ -144,7 +144,7 @@ Gateway: MITM on github.com/api.github.com, injects `Authorization: token <PAT>`
 
 ```yaml
 features:
-  docker: true
+  - plugin: docker
 ```
 
 Adds DinD sidecar service, installs docker CLI, sets DOCKER_HOST, validates Docker API requests via gateway.

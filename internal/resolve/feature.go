@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	sandbox "github.com/donbader/agent-sandbox"
 	"gopkg.in/yaml.v3"
@@ -17,32 +16,24 @@ type FeatureConfig struct {
 }
 
 // ResolveFeature finds a feature plugin by name and returns its contributions.
-// Supports named instances via "plugin/instance" syntax (e.g. "static-header/kiro").
 // Resolution order: registered plugin → local ext/plugins/ → embedded core.
-func ResolveFeature(projectDir string, name string, userConfig map[string]any) (*FeatureContributions, error) {
-	// Support named instances: "static-header/kiro" → plugin "static-header", instance "kiro"
-	pluginName := name
-	if idx := strings.IndexByte(name, '/'); idx >= 0 {
-		pluginName = name[:idx]
-	}
-
+func ResolveFeature(projectDir string, plugin string, instanceName string, userConfig map[string]any) (*FeatureContributions, error) {
 	// Check if plugin is registered (has implementation code)
-	if plugin, ok := registry[pluginName]; ok {
-		contrib, err := plugin.Resolve(projectDir, userConfig)
+	if p, ok := registry[plugin]; ok {
+		contrib, err := p.Resolve(projectDir, userConfig)
 		if err != nil {
 			return nil, err
 		}
-		// Use the full name (with instance suffix) for uniqueness
-		contrib.Name = name
+		contrib.Name = instanceName
 		return contrib, nil
 	}
 
 	// Fallback: verify feature.yaml exists (for future external plugins without Go code)
-	if !featureExists(projectDir, pluginName) {
-		return nil, fmt.Errorf("unknown feature %q: no registered plugin or feature.yaml found", pluginName)
+	if !featureExists(projectDir, plugin) {
+		return nil, fmt.Errorf("unknown feature %q: no registered plugin or feature.yaml found", plugin)
 	}
 
-	return nil, fmt.Errorf("feature %q has no registered implementation", pluginName)
+	return nil, fmt.Errorf("feature %q has no registered implementation", plugin)
 }
 
 // featureExists checks if a feature plugin exists in local ext/plugins or embedded core.

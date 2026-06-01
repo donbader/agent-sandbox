@@ -11,14 +11,14 @@ import (
 
 func TestResolve(t *testing.T) {
 	t.Run("defaults version to latest", func(t *testing.T) {
-		contrib, err := resolve.ResolveFeature("/project", "claude-code", map[string]any{})
+		contrib, err := resolve.ResolveFeature("/project", "claude-code", "claude-code", map[string]any{})
 		require.NoError(t, err)
 		assert.True(t, containsInstallCmd(contrib.Commands, "@anthropic-ai/claude-code@latest"),
 			"expected install command with @latest, got: %v", contrib.Commands)
 	})
 
 	t.Run("uses specified version", func(t *testing.T) {
-		contrib, err := resolve.ResolveFeature("/project", "claude-code", map[string]any{
+		contrib, err := resolve.ResolveFeature("/project", "claude-code", "claude-code", map[string]any{
 			"version": "0.2.0",
 		})
 		require.NoError(t, err)
@@ -27,7 +27,7 @@ func TestResolve(t *testing.T) {
 	})
 
 	t.Run("sets MITM domain and env var", func(t *testing.T) {
-		contrib, err := resolve.ResolveFeature("/project", "claude-code", map[string]any{})
+		contrib, err := resolve.ResolveFeature("/project", "claude-code", "claude-code", map[string]any{})
 		require.NoError(t, err)
 		assert.Equal(t, []string{"api.anthropic.com"}, contrib.MITMDomains)
 		assert.Equal(t, []string{"ANTHROPIC_API_KEY"}, contrib.EnvVars)

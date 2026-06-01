@@ -17,7 +17,7 @@ func TestResolve(t *testing.T) {
 			},
 		}
 
-		contrib, err := resolve.ResolveFeature("/project", "telegram", config)
+		contrib, err := resolve.ResolveFeature("/project", "telegram", "telegram", config)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"api.telegram.org"}, contrib.MITMDomains)
 		assert.Equal(t, "telegram", contrib.BridgeChannel)
@@ -25,7 +25,7 @@ func TestResolve(t *testing.T) {
 	})
 
 	t.Run("works with empty config", func(t *testing.T) {
-		contrib, err := resolve.ResolveFeature("/project", "telegram", map[string]any{})
+		contrib, err := resolve.ResolveFeature("/project", "telegram", "telegram", map[string]any{})
 		require.NoError(t, err)
 		assert.Equal(t, []string{"api.telegram.org"}, contrib.MITMDomains)
 		assert.Equal(t, "telegram", contrib.BridgeChannel)

@@ -16,13 +16,13 @@ name: coder
 runtime: codex
 
 features:
-  github:
+  - plugin: github
     token: "${GITHUB_PAT}"
-  docker: true
-  telegram:
+  - plugin: docker
+  - plugin: telegram
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     allowed_users: ["donbader"]
-  custom-runtime:
+  - plugin: custom-runtime
     commands:
       - "apt-get install -y ripgrep fd-find"
     entrypoint_hooks:
@@ -41,7 +41,7 @@ agents:
 
 shared:
   features:
-    github:
+    - plugin: github
       token: "${GITHUB_PAT}"
 ```
 
@@ -63,20 +63,26 @@ Override mechanism uses `/opt/home-override/` staging (not in volume path). Entr
 
 ## Feature Config
 
-Features accept config via the `features:` map:
+Features are an array of plugin entries. Each entry requires a `plugin` field and optionally a `name` for logging:
 
 ```yaml
 features:
-  github:
-    token: "${GITHUB_PAT}"       # secret reference
-  docker: true                    # shorthand for {} (all defaults)
-  telegram:
+  - plugin: github
+    token: "${GITHUB_PAT}"               # secret reference
+  - plugin: docker                        # no extra config needed
+  - plugin: telegram
     bot_token: "${BOT_TOKEN}"
     allowed_users: ["donbader"]
-  custom-runtime:
+  - plugin: custom-runtime
     commands: ["apt-get install -y ripgrep"]
     entrypoint_hooks: [./scripts/setup.sh]
     runtime_volumes: ["agent-home:/home/agent"]
+  - plugin: static-header
+    name: stx-llm-gateway                # optional instance name for logs
+    domains: ["agent-gateway.stx-ai.net"]
+    header: "Authorization"
+    value_format: "Bearer ${value}"
+    env_var: "STX_LLM_GATEWAY_API_KEY"
 ```
 
 `true` is shorthand for `{}` (enable with all defaults). CLI validates against each feature's `ConfigSchema()`.

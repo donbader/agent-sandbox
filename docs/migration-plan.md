@@ -45,7 +45,8 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] Reference docs (ADRs, bridge protocol, docker-api-proxy)
 - [x] Phase implementation guide in AGENTS.md
 - [x] GoReleaser release pipeline (`.github/workflows/release.yml`)
-- [x] `examples/simple/` for quick testing
+- [x] `examples/local-coding/` for local machine coding
+- [x] `examples/telegram-vibe/` for Telegram-based coding
 - [x] `install.sh` one-liner
 - [x] Convert codex plugin from Go code to `runtime.yaml` (data-driven)
 - [x] Plugin resolution (local `./plugins/` → embedded defaults)
@@ -74,14 +75,14 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] Compose volumes wiring (named volumes from config)
 - [x] Entrypoint script template (runs hooks → starts agent)
 - [x] Home override directory (./home/ → /opt/home-override/ → cp on start)
-- [x] `examples/home-vc/` example
+- [x] `examples/local-coding/` example
 
 **Config:**
 ```yaml
 name: coder
 runtime: codex
 features:
-  custom-runtime:
+  - plugin: custom-runtime
     commands:
       - "apt-get install -y ripgrep fd-find"
     entrypoint_hooks:
@@ -134,7 +135,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] Sandbox CA generation
 - [x] Bridge config generation (bridge-config.json)
 - [x] Entrypoint: gateway → bridge → agent (process tree)
-- [x] `examples/telegram/` example
+- [x] `examples/telegram-vibe/` example
 
 ---
 

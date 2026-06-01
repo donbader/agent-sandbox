@@ -5,7 +5,7 @@ Everything from `local-coding` plus a Telegram bot channel — talk to your codi
 ## What's Included
 
 - **telegram** — bridge channel that connects a Telegram bot to the agent via ACP protocol (JSON lines on stdin/stdout).
-- **static-header/stx-llm-gateway** — gateway intercepts requests to `agent-gateway.stx-ai.net` and injects your real API key via MITM.
+- **static-header** (instance: stx-llm-gateway) — gateway intercepts requests to `agent-gateway.stx-ai.net` and injects your real API key via MITM.
 - **custom-runtime** — overlays codex configuration into the agent's home directory.
 
 ## Prerequisites
