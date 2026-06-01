@@ -1,4 +1,5 @@
 import { Bot } from "grammy";
+import type { ReactionTypeEmoji } from "@grammyjs/types";
 import type { Channel, CommandDef } from "./types.js";
 import { createLogger } from "../logger.js";
 import { RateLimiter } from "./delivery/rate-limiter.js";
@@ -7,6 +8,23 @@ import { formatMarkdown, splitMessage } from "./formatter/telegram.js";
 
 const log = createLogger("telegram");
 const DUMMY_TOKEN = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+type ReactionEmoji = ReactionTypeEmoji["emoji"];
+
+/** Valid Telegram reaction emojis (from Bot API). */
+const VALID_REACTION_EMOJIS: Set<string> = new Set([
+  "👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢",
+  "🎉", "🤩", "🤮", "💩", "🙏", "👌", "🕊", "🤡", "🥱", "🥴", "😍", "🐳",
+  "❤\u200D🔥", "🌚", "🌭", "💯", "🤣", "⚡", "🍌", "🏆", "💔", "🤨", "😐",
+  "🍓", "🍾", "💋", "🖕", "😈", "😴", "😭", "🤓", "👻", "👨\u200D💻", "👀",
+  "🎃", "🙈", "😇", "😨", "🤝", "✍", "🤗", "🫡", "🎅", "🎄", "☃", "💅",
+  "🤪", "🗿", "🆒", "💘", "🙉", "🦄", "😘", "💊", "🙊", "😎", "👾",
+  "🤷\u200D♂", "🤷", "🤷\u200D♀", "😡",
+]);
+
+function isValidReactionEmoji(emoji: string): emoji is ReactionEmoji {
+  return VALID_REACTION_EMOJIS.has(emoji);
+}
 
 /** Sanitize a command name for Telegram (lowercase a-z, 0-9, underscore only). */
 function sanitizeCommandName(name: string): string {
@@ -23,14 +41,23 @@ export default class TelegramChannel implements Channel {
   private bot: Bot;
   private handler: ((chatId: string, text: string) => void) | null = null;
   private acl: AccessControl;
-  private ackEmoji: string | null;
+  private ackEmoji: ReactionEmoji | null;
   private botUsername: string | null = null;
   private rateLimiter = new RateLimiter(100);
 
   constructor(config: Record<string, unknown>) {
     this.acl = (config?.access_control as AccessControl) ?? {};
     const ackRaw = config?.ack_emoji;
-    this.ackEmoji = ackRaw === undefined ? "👀" : (ackRaw as string) || null;
+    if (ackRaw === undefined) {
+      this.ackEmoji = "👀";
+    } else if (typeof ackRaw === "string" && isValidReactionEmoji(ackRaw)) {
+      this.ackEmoji = ackRaw;
+    } else if (!ackRaw) {
+      this.ackEmoji = null; // explicitly disabled
+    } else {
+      log.warn({ ack_emoji: ackRaw }, "invalid ack_emoji, falling back to 👀");
+      this.ackEmoji = "👀";
+    }
     this.bot = new Bot(DUMMY_TOKEN);
 
     this.bot.catch((err) => {
