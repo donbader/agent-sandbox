@@ -343,7 +343,7 @@ func TestGenerator_Run(t *testing.T) {
 		dfAgentStr := string(dfAgent)
 		assert.Contains(t, dfAgentStr, "FROM node:22-slim")
 		assert.Contains(t, dfAgentStr, "iproute2")
-		assert.NotContains(t, dfAgentStr, "iptables")
+		assert.Contains(t, dfAgentStr, "iptables")
 		assert.Contains(t, dfAgentStr, "useradd -m -s /bin/bash agent")
 		assert.Contains(t, dfAgentStr, `ENTRYPOINT ["/opt/entrypoint.sh"]`)
 		assert.NotContains(t, dfAgentStr, "useradd -r -s /bin/false gateway")

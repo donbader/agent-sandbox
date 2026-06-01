@@ -7,3 +7,10 @@ features:
     access_control:
       allowed_users: ["@${TELEGRAM_USERNAME}"]
       require_mention: false
+  static-header:
+    domains: ["agent-gateway.stx-ai.net"]
+    header: "Authorization"
+    value_format: "Bearer ${value}"
+    env_var: "STX_LLM_GATEWAY_API_KEY"
+  custom-runtime:
+    home_override: "./home"
