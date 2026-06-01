@@ -21,6 +21,7 @@ Route ALL credentials through the transparent proxy, including the Telegram bot 
 - Simpler channel provider implementation (no secret management)
 - All credential injection logic lives in one place (the proxy)
 - Easier to audit — all secrets flow through one component
+- Log output is protected — value-based redaction prevents credentials from leaking into logs even if they appear in unexpected fields (error messages, URL paths, etc.)
 
 **Negative:**
 - Proxy must support different injection strategies (not just headers):

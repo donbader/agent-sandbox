@@ -68,6 +68,17 @@ Agent → api.github.com:443
 
 Agent never sees real credentials. Bridge gets dummy tokens. Real creds exist only in the gateway container.
 
+### Log Redaction
+
+Gateway logs are protected against credential leaks with two layers:
+
+1. **Structural** — request paths are logged *before* rewriters inject secrets, so tokens never appear in debug output even at the most verbose log level.
+2. **Value-based** — a `redact.Handler` wraps the logger and scans all messages and attributes for known secret values (collected from rewriter env vars at startup). Any match is replaced with `[REDACTED]`.
+
+The existing key-based `ReplaceAttr` filter also catches attributes explicitly named `token`, `authorization`, or `api_key`.
+
+This is global — every log line the gateway emits passes through the redaction handler, regardless of which subsystem produced it.
+
 ## Docker Access
 
 When `docker: true`, the docker plugin contributes a DinD sidecar. The gateway itself handles Docker API validation — no separate proxy container needed.
