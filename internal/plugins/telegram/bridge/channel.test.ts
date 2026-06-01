@@ -20,6 +20,7 @@ vi.mock("grammy", () => ({
       sendMessage: vi.fn().mockResolvedValue({}),
       setMessageReaction: vi.fn().mockResolvedValue({}),
       sendChatAction: vi.fn().mockResolvedValue({}),
+      setMyCommands: vi.fn().mockResolvedValue(true),
     },
   })),
 }));
@@ -219,6 +220,73 @@ describe("TelegramChannel", () => {
       expect(() => {
         messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
       }).not.toThrow();
+    });
+  });
+
+  describe("registerCommands", () => {
+    it("calls setMyCommands with sanitized command names", async () => {
+      channel = new TelegramChannel({});
+      const mockApi = (channel as any).bot.api;
+
+      await channel.registerCommands([
+        { name: "new", description: "Start a new session" },
+        { name: "stop", description: "Stop current operation" },
+      ]);
+
+      expect(mockApi.setMyCommands).toHaveBeenCalledWith([
+        { command: "new", description: "Start a new session" },
+        { command: "stop", description: "Stop current operation" },
+      ]);
+    });
+
+    it("sanitizes command names (lowercase, replace invalid chars)", async () => {
+      channel = new TelegramChannel({});
+      const mockApi = (channel as any).bot.api;
+
+      await channel.registerCommands([
+        { name: "My-Command", description: "test" },
+        { name: "UPPER", description: "test" },
+      ]);
+
+      expect(mockApi.setMyCommands).toHaveBeenCalledWith([
+        { command: "my_command", description: "test" },
+        { command: "upper", description: "test" },
+      ]);
+    });
+
+    it("filters out commands with empty names after sanitization", async () => {
+      channel = new TelegramChannel({});
+      const mockApi = (channel as any).bot.api;
+
+      await channel.registerCommands([
+        { name: "---", description: "all invalid" },
+        { name: "valid", description: "ok" },
+      ]);
+
+      expect(mockApi.setMyCommands).toHaveBeenCalledWith([
+        { command: "valid", description: "ok" },
+      ]);
+    });
+
+    it("truncates descriptions to 256 chars", async () => {
+      channel = new TelegramChannel({});
+      const mockApi = (channel as any).bot.api;
+
+      const longDesc = "a".repeat(300);
+      await channel.registerCommands([{ name: "test", description: longDesc }]);
+
+      const calls = mockApi.setMyCommands.mock.calls[0][0];
+      expect(calls[0].description).toHaveLength(256);
+    });
+
+    it("does not throw when setMyCommands fails", async () => {
+      channel = new TelegramChannel({});
+      const mockApi = (channel as any).bot.api;
+      mockApi.setMyCommands.mockRejectedValueOnce(new Error("API error"));
+
+      await expect(
+        channel.registerCommands([{ name: "test", description: "test" }])
+      ).resolves.toBeUndefined();
     });
   });
 });

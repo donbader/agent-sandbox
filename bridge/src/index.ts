@@ -169,6 +169,21 @@ async function main(): Promise<void> {
   // Boot plugins after channel is ready
   await registry.boot(ctx);
 
+  // Register commands with channel platform (e.g., Telegram bot menu)
+  if (channel.registerCommands) {
+    const commands = registry.getCommandNames().map((name) => {
+      const cmd = registry.getCommand(name);
+      return { name, description: cmd?.description ?? "" };
+    });
+    // Always include /help
+    if (!commands.some((c) => c.name === "help")) {
+      commands.push({ name: "help", description: "List all available commands" });
+    }
+    channel.registerCommands(commands).catch((err: unknown) => {
+      log.warn({ error: err }, "failed to register commands with channel");
+    });
+  }
+
   // Handle shutdown
   process.on("SIGTERM", () => {
     log.info("shutting down");

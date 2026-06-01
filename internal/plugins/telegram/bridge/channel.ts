@@ -1,5 +1,5 @@
 import { Bot } from "grammy";
-import type { Channel } from "./types.js";
+import type { Channel, CommandDef } from "./types.js";
 import { createLogger } from "../logger.js";
 import { RateLimiter } from "./delivery/rate-limiter.js";
 import { withRetry } from "./delivery/api-retry.js";
@@ -7,6 +7,11 @@ import { formatMarkdown, splitMessage } from "./formatter/telegram.js";
 
 const log = createLogger("telegram");
 const DUMMY_TOKEN = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+/** Sanitize a command name for Telegram (lowercase a-z, 0-9, underscore only). */
+function sanitizeCommandName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
+}
 
 interface AccessControl {
   allowed_users?: string[];
@@ -92,6 +97,22 @@ export default class TelegramChannel implements Channel {
 
   stop(): void {
     this.bot.stop();
+  }
+
+  async registerCommands(commands: CommandDef[]): Promise<void> {
+    const botCommands = commands
+      .map(({ name, description }) => ({
+        command: sanitizeCommandName(name),
+        description: description.slice(0, 256),
+      }))
+      .filter(({ command }) => command.length > 0 && command.length <= 32);
+
+    try {
+      await this.bot.api.setMyCommands(botCommands);
+      log.info({ count: botCommands.length }, "registered bot commands");
+    } catch (err) {
+      log.warn({ error: err }, "failed to register bot commands");
+    }
   }
 
   onMessage(handler: (chatId: string, text: string) => void): void {
