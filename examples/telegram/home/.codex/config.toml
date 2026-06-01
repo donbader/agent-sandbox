@@ -1,5 +1,5 @@
 # --- codex-switch:begin ---
-model = "claude-sonnet-4-6"
+model = "claude-sonnet-4.6"
 model_provider = "agent_gateway_kiro"
 # --- codex-switch:end ---
 
