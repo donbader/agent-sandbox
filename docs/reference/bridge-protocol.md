@@ -57,6 +57,12 @@ ACP is a JSON-RPC 2.0 protocol over stdio for communicating with AI coding agent
 
 // Agent → Client: Prompt complete
 {"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}
+
+// 4. Client → Agent: Resume session (optional, agent must support)
+{"jsonrpc":"2.0","id":5,"method":"session/load","params":{"sessionId":"abc-123"}}
+
+// Agent → Client: Session loaded
+{"jsonrpc":"2.0","id":5,"result":{"sessionId":"abc-123"}}
 ```
 
 ### ACP Adapters per Runtime
@@ -73,7 +79,7 @@ ACP is a JSON-RPC 2.0 protocol over stdio for communicating with AI coding agent
 
 ### Bridge as ACP Client
 
-The bridge spawns the agent's ACP adapter as a child process and communicates via stdio:
+The bridge runs inside the agent container, spawning the ACP adapter as a child process:
 
 ```
 ┌─ Agent Container ────────────────────────────────────────┐
@@ -81,16 +87,23 @@ The bridge spawns the agent's ACP adapter as a child process and communicates vi
 │  ┌──────────────────────────────────────────────────┐    │
 │  │  Bridge (Node.js)                                │    │
 │  │                                                  │    │
-│  │  ┌─────────────┐     ┌────────────────────────┐ │    │
-│  │  │  Telegram   │     │  AcpAgent              │ │    │
-│  │  │  Channel    │────►│  (ClientSideConnection)│ │    │
-│  │  └─────────────┘     └───────────┬────────────┘ │    │
-│  │                                  │ stdio         │    │
-│  └──────────────────────────────────┼───────────────┘    │
-│                                     │                    │
-│  ┌──────────────────────────────────▼───────────────┐    │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌────────┐  │    │
+│  │  │  Channel    │  │ StartupBuffer│  │ Ext.   │  │    │
+│  │  │  (Telegram) │─►│              │─►│Registry│  │    │
+│  │  └─────────────┘  └──────┬───────┘  └────────┘  │    │
+│  │                          │                       │    │
+│  │  ┌───────────────────────▼────────────────────┐  │    │
+│  │  │  SessionManager (per-chat → sessionId)     │  │    │
+│  │  └───────────────────────┬────────────────────┘  │    │
+│  │                          │                       │    │
+│  │  ┌───────────────────────▼────────────────────┐  │    │
+│  │  │  AcpAgent (ClientSideConnection)           │  │    │
+│  │  └───────────────────────┬────────────────────┘  │    │
+│  │                          │ stdio                  │    │
+│  └──────────────────────────┼───────────────────────┘    │
+│                             │                            │
+│  ┌──────────────────────────▼───────────────────────┐    │
 │  │  ACP Adapter (e.g., codex-acp)                   │    │
-│  │  → wraps Codex CLI into ACP protocol             │    │
 │  └──────────────────────────────────────────────────┘    │
 │                                                          │
 │                              egress (default route → gateway)
@@ -106,14 +119,17 @@ Telegram DM @alice ──┐
                      │     ┌──────────────┐     ┌─────────────┐
 Telegram DM @bob ───┼────►│   Bridge     │────►│  ACP Agent  │
                      │     │              │     │             │
-Group chat ─────────┘     │ Routes:      │     │ Sessions:   │
+Group chat ─────────┘     │ SessionMgr:  │     │ Sessions:   │
                           │ alice→sess1  │     │ sess1       │
                           │ bob→sess2    │     │ sess2       │
                           │ group→sess3  │     │ sess3       │
                           └──────────────┘     └─────────────┘
 ```
 
-Each chat maps to a separate ACP session. The agent maintains independent context per session.
+Each chat maps to a separate ACP session. The SessionManager handles:
+- Lazy session creation (first message from a chat)
+- Session resume via `loadSession` (after bridge restart)
+- Session persistence to disk (survives container restarts)
 
 ### Per-Agent Bots
 
@@ -126,23 +142,95 @@ Agent: reviewer → Bot: @MyReviewerBot  (TELEGRAM_BOT_TOKEN_002)
 
 ## Bridge Implementation
 
+### Message Flow
+
+```
+Channel.onMessage(chatId, text)
+  → StartupBuffer.push(chatId, text)        // buffer during startup
+    → Command routing (if /command)          // core commands handled here
+    → SessionManager.getSession(chatId)      // get or create session
+      → AcpAgent.prompt(sessionId, text)     // send to agent
+        → Channel.sendMessage(chatId, response)
+```
+
 ### AcpAgent Class
 
 ```typescript
-import * as acp from "@agentclientprotocol/sdk";
-
 class AcpAgent {
-  // Spawn ACP adapter, initialize connection, create session
+  // Spawn ACP adapter, initialize connection
   async start(): Promise<void>;
 
-  // Send prompt, collect response chunks, return full text
-  async prompt(text: string): Promise<string>;
+  // Send prompt to a specific session, collect response chunks
+  async prompt(sessionId: string, text: string): Promise<string>;
 
-  // Register callback for streaming chunks
-  onChunk(callback: (text: string) => void): void;
+  // Get the current connection (survives auto-restart)
+  getConnection(): ClientSideConnection | null;
+
+  // Whether the agent has an active connection
+  isReady(): boolean;
+
+  // Kill and restart the agent process
+  async reset(): Promise<void>;
+
+  // Abort current operation (SIGTERM)
+  abort(): void;
 
   // Graceful shutdown
-  async stop(): Promise<void>;
+  stop(): void;
+}
+```
+
+### SessionManager
+
+Manages per-chat ACP sessions on a single connection:
+
+```typescript
+class SessionManager {
+  // Get or create a session for a chat (tries loadSession first)
+  async getSession(chatId: string): Promise<string>;
+
+  // Create a fresh session
+  async createSession(chatId: string): Promise<string>;
+
+  // Reset: delete old session, create new
+  async resetSession(chatId: string): Promise<string>;
+
+  // Resume a specific existing session by ID
+  async resumeSession(chatId: string, sessionId: string): Promise<void>;
+}
+```
+
+### SessionStore (Persistence)
+
+Persists session state to disk for crash recovery:
+
+```typescript
+class SessionStore {
+  // Active session mapping (chatId → sessionId)
+  getSessionId(chatId): string | undefined;
+  setSessionId(chatId, sessionId): void;
+
+  // Session history (max 20 per chat)
+  addToHistory(chatId, sessionId, label?): void;
+  getHistory(chatId): SessionHistoryEntry[];
+  findByPrefix(chatId, prefix): SessionHistoryEntry | null;
+
+  // Atomic writes, debounced history persistence
+  flushSync(): void;  // call on shutdown
+}
+```
+
+Storage: `/var/lib/bridge/sessions/` (session-map.json + session-history.json)
+
+### StartupBuffer
+
+Buffers messages while the agent is starting up:
+
+```typescript
+class StartupBuffer {
+  push(chatId, text): void;   // buffer or pass-through
+  ready(): void;              // flush buffered messages (discard stale >30s)
+  onMessage(handler): void;   // set the downstream handler
 }
 ```
 
@@ -164,17 +252,56 @@ async requestPermission(params: acp.RequestPermissionRequest) {
 
 ### Configuration
 
-The bridge reads its ACP command from bridge-config.json:
+The bridge reads its config from bridge-config.json (generated by CLI):
 
 ```json
 {
+  "channel": "telegram",
   "acp_command": ["npx", "@zed-industries/codex-acp"],
   "cwd": "/workspace",
-  "approve_all": true
+  "bot_token": "dummy:token",
+  "allowed_users": [123456789]
 }
 ```
 
-Or from environment variable: `BRIDGE_ACP_COMMAND="npx @zed-industries/codex-acp"`
+## Bridge Commands
+
+Core commands handled directly by the bridge (never forwarded to agent):
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new conversation session |
+| `/stop` | Abort current operation (SIGTERM) |
+| `/resume [N\|id]` | Browse/switch session history |
+| `/label <name>` | Tag current session with a name |
+| `/version` | Show bridge version |
+| `/sh <cmd>` | Execute shell command in bridge container |
+| `/diagnose` | Show diagnostic info |
+| `/help` | List all available commands |
+
+### Command Resolution Order
+
+```
+1. Core commands (bridge handles directly)
+2. Agent-provided commands (future: declared via ACP initialize)
+3. Unknown → error message
+```
+
+### Extension System
+
+Commands and lifecycle hooks are registered via the `BridgeExtension` interface:
+
+```typescript
+interface BridgeExtension {
+  name: string;
+  commands?: Record<string, CommandDef>;
+  onBoot?(ctx: ExtensionContext): Promise<void>;
+  onTurnStart?(ctx: ExtensionContext, chatId: string): void;
+  onTurnEnd?(ctx: ExtensionContext, chatId: string): void;
+}
+```
+
+Built-in extensions: `commands` (core commands), `perf-tracker` (/perf), `event-logger` (JSONL logs).
 
 ## Channel Provider Interface
 
@@ -182,31 +309,34 @@ Channel providers handle platform-specific messaging:
 
 ```typescript
 export interface Channel {
+  onMessage(handler: (chatId: string, text: string) => void): void;
+  sendMessage(chatId: string, text: string): void;
   start(): Promise<void>;
-  stop(): Promise<void>;
+  stop(): void;
 }
 ```
-
-The channel receives messages from the platform, calls `acpAgent.prompt(text)`, and sends the response back.
 
 ### Telegram Channel Behavior
 
 1. **Connect** — Long-poll Telegram API using dummy token (real token injected by gateway)
-2. **Filter** — Check `allowed_users` and `groups` config
-3. **Route** — Map chat ID to ACP session (create if new)
-4. **Forward** — Call `acpAgent.prompt(text)` with user message
-5. **Respond** — Send agent's response back to Telegram chat
-6. **Error** — On agent crash, send error message and restart
+2. **Filter** — Check `allowed_users` config
+3. **Ack** — React with 👀 emoji on message receipt
+4. **Typing** — Send typing indicator while agent works
+5. **Forward** — Message flows through StartupBuffer → SessionManager → AcpAgent
+6. **Format** — Convert markdown to Telegram HTML, split at 4096 char limit
+7. **Respond** — Send formatted response back to Telegram chat
+8. **Rate limit** — Queue messages, respect Telegram API backoff
 
 ## Error Handling
 
 | Scenario | Bridge Behavior |
 |----------|----------------|
-| Agent adapter crashes | Auto-restart after 2s delay, create new session |
+| Agent adapter crashes | Auto-restart, sessions resume via loadSession |
 | Prompt timeout | Return timeout error to channel |
 | Rate limit (Telegram) | Queue messages, respect backoff |
 | Unauthorized user | Silently ignore (log for audit) |
-| Bridge restart | Create fresh sessions (stateless) |
+| Bridge restart | Resume sessions from SessionStore (persistent) |
+| Agent not ready | Buffer messages in StartupBuffer (discard after 30s) |
 
 ## Security
 
@@ -214,3 +344,4 @@ The channel receives messages from the platform, calls `acpAgent.prompt(text)`, 
 - All API keys injected by gateway MITM (agent never sees real credentials)
 - Bridge uses dummy tokens — gateway rewrites to real ones
 - ACP adapter inherits the sandbox's network restrictions
+- `/sh` executes in bridge container (same security boundary as agent)
