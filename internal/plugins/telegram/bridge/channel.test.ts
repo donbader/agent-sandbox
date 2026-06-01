@@ -11,14 +11,41 @@ vi.mock("grammy", () => ({
         messageHandler = handler;
       }
     }),
+    catch: vi.fn(),
     start: vi.fn(({ onStart }: any) => {
       startCallback = onStart;
     }),
     stop: vi.fn(),
     api: {
       sendMessage: vi.fn().mockResolvedValue({}),
+      setMessageReaction: vi.fn().mockResolvedValue({}),
+      sendChatAction: vi.fn().mockResolvedValue({}),
     },
   })),
+}));
+
+vi.mock("../logger.js", () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+  }),
+}));
+
+vi.mock("../delivery/rate-limiter.js", () => ({
+  RateLimiter: vi.fn().mockImplementation(() => ({
+    acquire: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+vi.mock("../delivery/api-retry.js", () => ({
+  withRetry: vi.fn().mockImplementation((fn: () => Promise<any>) => fn()),
+}));
+
+vi.mock("../formatter/telegram.js", () => ({
+  formatMarkdown: vi.fn().mockImplementation((text: string) => text),
+  splitMessage: vi.fn().mockImplementation((text: string) => [text]),
 }));
 
 // Import after mock setup
@@ -36,7 +63,7 @@ function makeCtx(opts: {
       type: opts.chatType ?? "private",
     },
     from: opts.username ? { username: opts.username } : {},
-    message: { text: opts.text },
+    message: { text: opts.text, message_id: 1 },
   };
 }
 
