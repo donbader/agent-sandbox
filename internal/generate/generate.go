@@ -1001,9 +1001,10 @@ func (g *Generator) writeBridgeSource() error {
 		name := f.BridgeChannel
 		bridgeRoot := fmt.Sprintf("internal/plugins/%s/bridge", name)
 
-		// Copy all .ts files from plugin's bridge/ directory to bridge-src/src/
+		// Copy all .ts files from plugin's bridge/ directory to bridge-src/src/channel/
 		// channel.ts → src/channel/<name>.ts (special case)
-		// other files preserve relative path: delivery/foo.ts → src/delivery/foo.ts
+		// other files placed as siblings: delivery/foo.ts → src/channel/delivery/foo.ts
+		// Note: if multiple plugins contribute same-named files, last one wins.
 		err := fs.WalkDir(sandbox.CorePlugins, bridgeRoot, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -1025,14 +1026,17 @@ func (g *Generator) writeBridgeSource() error {
 			}
 
 			// Determine destination path
-			relPath, _ := filepath.Rel(bridgeRoot, path)
+			relPath, relErr := filepath.Rel(bridgeRoot, path)
+			if relErr != nil {
+				return fmt.Errorf("computing relative path for %s: %w", path, relErr)
+			}
 			var destPath string
 			if relPath == "channel.ts" {
 				// channel.ts → src/channel/<name>.ts
 				destPath = filepath.Join(channelDir, name+".ts")
 			} else {
-				// other files → src/<relPath>
-				destPath = filepath.Join(destDir, "src", relPath)
+				// other files → src/channel/<relPath> (sibling of channel file)
+				destPath = filepath.Join(channelDir, relPath)
 			}
 
 			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {

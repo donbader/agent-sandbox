@@ -1,9 +1,9 @@
 import { Bot } from "grammy";
 import type { Channel } from "./types.js";
 import { createLogger } from "../logger.js";
-import { RateLimiter } from "../delivery/rate-limiter.js";
-import { withRetry } from "../delivery/api-retry.js";
-import { formatMarkdown, splitMessage } from "../formatter/telegram.js";
+import { RateLimiter } from "./delivery/rate-limiter.js";
+import { withRetry } from "./delivery/api-retry.js";
+import { formatMarkdown, splitMessage } from "./formatter/telegram.js";
 
 const log = createLogger("telegram");
 const DUMMY_TOKEN = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
