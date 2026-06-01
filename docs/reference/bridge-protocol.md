@@ -313,6 +313,7 @@ export interface Channel {
   sendMessage(chatId: string, text: string): void;
   start(): Promise<void>;
   stop(): void;
+  registerCommands?(commands: { name: string; description: string }[]): Promise<void>;
 }
 ```
 

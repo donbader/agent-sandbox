@@ -158,7 +158,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [ ] Streaming reply (edit Telegram message as agent streams)
 - [ ] Context buffer (multi-message batching before sending to agent)
 - [ ] Agent-provided commands (declared via ACP initialize response)
-- [ ] Telegram `setMyCommands` registration (bot menu)
+- [x] Telegram `setMyCommands` registration (bot menu)
 - [ ] Security hardening (cap_drop, no-new-privileges, hidepid, file permissions)
 - [ ] `examples/full/` example (all features)
 
