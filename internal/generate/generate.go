@@ -247,7 +247,7 @@ func (g *Generator) writeAgentDockerfile() error {
 
 	// Runtime stage
 	b.WriteString(fmt.Sprintf("FROM %s\n", g.Runtime.BaseImage))
-	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iproute2 ca-certificates && rm -rf /var/lib/apt/lists/*\n")
+	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iproute2 iptables ca-certificates && rm -rf /var/lib/apt/lists/*\n")
 	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n", g.Runtime.User))
 
 	// Install CA cert if MITM is enabled
@@ -387,6 +387,15 @@ func (g *Generator) writeGatewayCompose() error {
 	for _, v := range envVars {
 		b.WriteString(fmt.Sprintf("      - %s=${%s}\n", v, v))
 	}
+
+	// Expose runtime ports on gateway (forwarded to agent)
+	if len(g.Runtime.Ports) > 0 {
+		b.WriteString("    ports:\n")
+		for _, p := range g.Runtime.Ports {
+			b.WriteString(fmt.Sprintf("      - %q\n", p))
+		}
+	}
+
 	b.WriteString("    restart: unless-stopped\n")
 
 	// Agent service: internal network only, no secrets
@@ -398,6 +407,8 @@ func (g *Generator) writeGatewayCompose() error {
 	b.WriteString("      internal:\n")
 	b.WriteString("    cap_add:\n")
 	b.WriteString("      - NET_ADMIN\n")
+	b.WriteString("    sysctls:\n")
+	b.WriteString("      - net.ipv4.conf.all.route_localnet=1\n")
 	b.WriteString("    environment:\n")
 	b.WriteString(fmt.Sprintf("      - LOG_LEVEL=%s\n", g.logLevel()))
 	b.WriteString(fmt.Sprintf("      - GATEWAY_HOST=%s-gateway\n", g.Config.Name))
@@ -550,6 +561,16 @@ func (g *Generator) writeAgentEntrypoint() error {
 		// ip route: set default route via gateway (all traffic goes through gateway)
 		b.WriteString("echo \"entrypoint: setting default route via gateway...\"\n")
 		b.WriteString("ip route replace default via $GATEWAY_IP\n\n")
+
+		// Port forwards: redirect inbound ports to localhost (services bind to 127.0.0.1)
+		if len(g.Runtime.Ports) > 0 {
+			b.WriteString("echo \"entrypoint: setting up port forwards...\"\n")
+			for _, p := range g.Runtime.Ports {
+				_, containerPort := parsePortMapping(p)
+				b.WriteString(fmt.Sprintf("iptables -t nat -A PREROUTING -p tcp --dport %s -j DNAT --to-destination 127.0.0.1:%s\n", containerPort, containerPort))
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	// Home override: copy files from staging to home
@@ -623,6 +644,16 @@ func (g *Generator) writeGatewayConfig() error {
 			if rw.ValueFormat != "" {
 				b.WriteString(fmt.Sprintf("    value_format: \"%s\"\n", rw.ValueFormat))
 			}
+		}
+	}
+
+	// Port forwards: expose runtime ports through gateway to agent
+	if len(g.Runtime.Ports) > 0 {
+		b.WriteString("port_forwards:\n")
+		for _, p := range g.Runtime.Ports {
+			hostPort, containerPort := parsePortMapping(p)
+			b.WriteString(fmt.Sprintf("  - listen: \":%s\"\n", hostPort))
+			b.WriteString(fmt.Sprintf("    target: \"%s:%s\"\n", g.Config.Name, containerPort))
 		}
 	}
 
@@ -825,6 +856,16 @@ func scanValueWithSource(v any, pattern *regexp.Regexp, sources map[string][]str
 	}
 }
 
+
+// parsePortMapping splits a "host:container" port string.
+// If no colon, both host and container are the same port.
+func parsePortMapping(port string) (hostPort, containerPort string) {
+	parts := strings.SplitN(port, ":", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return port, port
+}
 
 // copyDir recursively copies a directory.
 func copyDir(src, dst string) error {

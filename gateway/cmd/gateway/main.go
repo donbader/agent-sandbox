@@ -81,6 +81,16 @@ func main() {
 	}()
 	slog.Info("proxy listening", "addr", cfg.Listen)
 
+	// Start port forwarders
+	for _, pf := range cfg.PortForwards {
+		fwd := proxy.NewForwarder(pf.Listen, pf.Target)
+		go func() {
+			if err := fwd.ListenAndServe(); err != nil {
+				slog.Error("port forward error", "listen", pf.Listen, "target", pf.Target, "error", err)
+			}
+		}()
+	}
+
 	// Wait for shutdown signal
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
