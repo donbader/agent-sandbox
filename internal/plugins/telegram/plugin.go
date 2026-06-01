@@ -10,6 +10,7 @@ import (
 // Config defines the typed configuration for the telegram plugin.
 type Config struct {
 	AccessControl AccessControl `yaml:"access_control" schema:"Access control settings for the Telegram bot" required:"true"`
+	AckEmoji      *string       `yaml:"ack_emoji" schema:"Emoji reaction to acknowledge received messages" default:"👀"`
 }
 
 // AccessControl defines who can interact with the bot.
@@ -27,12 +28,16 @@ type GroupACL struct {
 
 func init() {
 	resolve.Register("telegram", func(_ string, cfg Config) (*resolve.FeatureContributions, error) {
+		bridgeConfig := map[string]any{"access_control": cfg.AccessControl}
+		if cfg.AckEmoji != nil {
+			bridgeConfig["ack_emoji"] = *cfg.AckEmoji
+		}
 		return &resolve.FeatureContributions{
 			Name:          "telegram",
 			MITMDomains:   []string{"api.telegram.org"},
 			BridgeChannel: "telegram",
 			EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
-			BridgeConfig:  map[string]any{"access_control": cfg.AccessControl},
+			BridgeConfig:  bridgeConfig,
 			Rewriters: []resolve.RewriterConfig{
 				{
 					Type:    "telegram-url",
