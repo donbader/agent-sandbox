@@ -13,26 +13,26 @@ export interface AgentEvent {
 /** Command handler for bot commands (e.g., /status, /new). */
 export interface CommandHandler {
   description?: string;
-  handler(ctx: PluginContext, chatId: ChatId, args: string): Promise<string | void>;
+  handler(ctx: ExtensionContext, chatId: ChatId, args: string): Promise<string | void>;
 }
 
 /** Bridge plugin interface. Plugins extend bridge behavior via hooks and commands. */
-export interface BridgePlugin {
+export interface BridgeExtension {
   name: string;
   /** Bot commands this plugin provides. Key = command name without slash. */
   commands?: Record<string, CommandHandler>;
   /** Called once when the bridge boots. */
-  onBoot?(ctx: PluginContext): Promise<void>;
+  onBoot?(ctx: ExtensionContext): Promise<void>;
   /** Called when a turn starts (user message received). */
-  onTurnStart?(ctx: PluginContext, chatId: ChatId): void;
+  onTurnStart?(ctx: ExtensionContext, chatId: ChatId): void;
   /** Called when a turn ends (agent response complete). */
-  onTurnEnd?(ctx: PluginContext, chatId: ChatId): void;
+  onTurnEnd?(ctx: ExtensionContext, chatId: ChatId): void;
   /** Called for agent events (ACP session updates). */
-  onEvent?(ctx: PluginContext, chatId: ChatId, event: AgentEvent): void;
+  onEvent?(ctx: ExtensionContext, chatId: ChatId, event: AgentEvent): void;
 }
 
 /** Controlled API surface exposed to plugins. */
-export interface PluginContext {
+export interface ExtensionContext {
   /** Send a message to a chat (through the channel). */
   sendMessage(chatId: ChatId, text: string): void;
   /** Get bridge config. */
@@ -40,12 +40,12 @@ export interface PluginContext {
 }
 
 /** Plugin registry — manages plugins, dispatches events, routes commands. */
-export class PluginRegistry {
-  private plugins: BridgePlugin[] = [];
-  private commandMap = new Map<string, { plugin: BridgePlugin; handler: CommandHandler }>();
-  private log = createLogger("plugins");
+export class ExtensionRegistry {
+  private plugins: BridgeExtension[] = [];
+  private commandMap = new Map<string, { plugin: BridgeExtension; handler: CommandHandler }>();
+  private log = createLogger("extensions");
 
-  register(plugin: BridgePlugin): void {
+  register(plugin: BridgeExtension): void {
     this.plugins.push(plugin);
     if (plugin.commands) {
       for (const [name, handler] of Object.entries(plugin.commands)) {
@@ -73,11 +73,11 @@ export class PluginRegistry {
     return [...this.commandMap.keys()];
   }
 
-  getPlugins(): readonly BridgePlugin[] {
+  getPlugins(): readonly BridgeExtension[] {
     return this.plugins;
   }
 
-  async boot(ctx: PluginContext): Promise<void> {
+  async boot(ctx: ExtensionContext): Promise<void> {
     for (const plugin of this.plugins) {
       if (plugin.onBoot) {
         try {
@@ -89,7 +89,7 @@ export class PluginRegistry {
     }
   }
 
-  notifyTurnStart(ctx: PluginContext, chatId: ChatId): void {
+  notifyTurnStart(ctx: ExtensionContext, chatId: ChatId): void {
     for (const plugin of this.plugins) {
       if (plugin.onTurnStart) {
         try {
@@ -101,7 +101,7 @@ export class PluginRegistry {
     }
   }
 
-  notifyTurnEnd(ctx: PluginContext, chatId: ChatId): void {
+  notifyTurnEnd(ctx: ExtensionContext, chatId: ChatId): void {
     for (const plugin of this.plugins) {
       if (plugin.onTurnEnd) {
         try {
@@ -113,7 +113,7 @@ export class PluginRegistry {
     }
   }
 
-  notifyEvent(ctx: PluginContext, chatId: ChatId, event: AgentEvent): void {
+  notifyEvent(ctx: ExtensionContext, chatId: ChatId, event: AgentEvent): void {
     for (const plugin of this.plugins) {
       if (plugin.onEvent) {
         try {

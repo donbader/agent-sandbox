@@ -1,4 +1,4 @@
-import type { BridgePlugin, PluginContext, ChatId, AgentEvent } from "../plugin.js";
+import type { BridgeExtension, ExtensionContext, ChatId, AgentEvent } from "../extension.js";
 import { appendFileSync, statSync, truncateSync } from "node:fs";
 
 const LOG_PATH = "/var/log/agent/events.jsonl";
@@ -15,15 +15,15 @@ function emit(data: Record<string, unknown>): void {
   } catch { /* ignore write errors */ }
 }
 
-const eventLoggerPlugin: BridgePlugin = {
+const eventLoggerPlugin: BridgeExtension = {
   name: "event-logger",
-  onTurnStart(_ctx: PluginContext, chatId: ChatId): void {
+  onTurnStart(_ctx: ExtensionContext, chatId: ChatId): void {
     emit({ event: "turn_start", chatId });
   },
-  onTurnEnd(_ctx: PluginContext, chatId: ChatId): void {
+  onTurnEnd(_ctx: ExtensionContext, chatId: ChatId): void {
     emit({ event: "turn_end", chatId });
   },
-  onEvent(_ctx: PluginContext, chatId: ChatId, event: AgentEvent): void {
+  onEvent(_ctx: ExtensionContext, chatId: ChatId, event: AgentEvent): void {
     emit({ event: event.type, chatId, ...event });
   },
 };

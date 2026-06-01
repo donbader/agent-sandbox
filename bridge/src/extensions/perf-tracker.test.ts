@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import perfPlugin from "./perf-tracker.js";
-import type { PluginContext } from "../plugin.js";
+import type { ExtensionContext } from "../extension.js";
 
-const mockCtx: PluginContext = {
+const mockCtx: ExtensionContext = {
   sendMessage: () => {},
   config: {},
 };

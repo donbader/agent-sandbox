@@ -3,11 +3,11 @@ import { AcpAgent } from "./acp-client.js";
 import { channels } from "./channel/channels.gen.js";
 import type { Channel } from "./channel/types.js";
 import { createLogger } from "./logger.js";
-import { PluginRegistry } from "./plugin.js";
-import type { PluginContext } from "./plugin.js";
-import commandsPlugin from "./plugins/commands.js";
-import perfPlugin from "./plugins/perf-tracker.js";
-import eventLoggerPlugin from "./plugins/event-logger.js";
+import { ExtensionRegistry } from "./extension.js";
+import type { ExtensionContext } from "./extension.js";
+import commandsPlugin from "./extensions/commands.js";
+import perfPlugin from "./extensions/perf-tracker.js";
+import eventLoggerPlugin from "./extensions/event-logger.js";
 
 const log = createLogger("bridge");
 
@@ -44,12 +44,12 @@ async function main(): Promise<void> {
   const channel: Channel = new ChannelClass(config);
 
   // Set up plugin registry
-  const registry = new PluginRegistry();
+  const registry = new ExtensionRegistry();
   registry.register(commandsPlugin);
   registry.register(perfPlugin);
   registry.register(eventLoggerPlugin);
 
-  const ctx: PluginContext = {
+  const ctx: ExtensionContext = {
     sendMessage: (chatId, text) => channel.sendMessage(chatId, text),
     config: config as Record<string, unknown>,
   };

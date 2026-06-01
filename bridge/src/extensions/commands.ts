@@ -1,24 +1,24 @@
-import type { BridgePlugin, PluginContext, ChatId } from "../plugin.js";
+import type { BridgeExtension, ExtensionContext, ChatId } from "../extension.js";
 
 /** Core bot commands: /new, /stop, /status, /version */
-const commandsPlugin: BridgePlugin = {
+const commandsPlugin: BridgeExtension = {
   name: "core-commands",
   commands: {
     new: {
       description: "Start a new conversation",
-      async handler(_ctx: PluginContext, _chatId: ChatId) {
+      async handler(_ctx: ExtensionContext, _chatId: ChatId) {
         return "✨ New session started.";
       },
     },
     stop: {
       description: "Stop the current operation",
-      async handler(_ctx: PluginContext, _chatId: ChatId) {
+      async handler(_ctx: ExtensionContext, _chatId: ChatId) {
         return "⏹ Stopped.";
       },
     },
     status: {
       description: "Show current status",
-      async handler(_ctx: PluginContext, _chatId: ChatId) {
+      async handler(_ctx: ExtensionContext, _chatId: ChatId) {
         return "📊 Status: ready";
       },
     },

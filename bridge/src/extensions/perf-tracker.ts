@@ -1,4 +1,4 @@
-import type { BridgePlugin, PluginContext, ChatId } from "../plugin.js";
+import type { BridgeExtension, ExtensionContext, ChatId } from "../extension.js";
 
 interface TurnTrace {
   chatId: string;
@@ -16,12 +16,12 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-const perfPlugin: BridgePlugin = {
+const perfPlugin: BridgeExtension = {
   name: "perf-tracker",
   commands: {
     perf: {
       description: "Show performance stats",
-      async handler(_ctx: PluginContext, chatId: ChatId, args: string) {
+      async handler(_ctx: ExtensionContext, chatId: ChatId, args: string) {
         const n = parseInt(args) || 5;
         const traces = ring.filter(t => t.chatId === chatId).slice(-n);
         if (traces.length === 0) return "No performance data yet.";
@@ -38,10 +38,10 @@ const perfPlugin: BridgePlugin = {
       },
     },
   },
-  onTurnStart(_ctx: PluginContext, chatId: ChatId): void {
+  onTurnStart(_ctx: ExtensionContext, chatId: ChatId): void {
     activeTraces.set(chatId, Date.now());
   },
-  onTurnEnd(_ctx: PluginContext, chatId: ChatId): void {
+  onTurnEnd(_ctx: ExtensionContext, chatId: ChatId): void {
     const start = activeTraces.get(chatId);
     if (start) {
       const endTime = Date.now();
