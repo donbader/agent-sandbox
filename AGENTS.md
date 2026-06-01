@@ -50,7 +50,7 @@ flox activate -- go test ./...
 flox activate -- golangci-lint run ./...
 
 # End-to-end
-agent-sandbox generate -d <dir>        # reads agent.yaml → writes .build/
+agent-sandbox generate -C <dir>        # reads agent.yaml → writes .build/
 agent-sandbox compose up --build       # docker compose passthrough
 ```
 
