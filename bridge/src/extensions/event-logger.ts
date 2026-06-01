@@ -1,7 +1,7 @@
 import type { BridgeExtension, ExtensionContext, ChatId, AgentEvent } from "../extension.js";
 import { appendFileSync, statSync, truncateSync } from "node:fs";
 
-const LOG_PATH = "/var/log/agent/events.jsonl";
+const LOG_PATH = "/var/log/bridge/events.jsonl";
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB
 
 function emit(data: Record<string, unknown>): void {
