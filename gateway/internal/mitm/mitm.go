@@ -6,14 +6,12 @@ package mitm
 import (
 	"bufio"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Handler implements proxy.RequestHandler for MITM domains.
@@ -136,30 +134,28 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 
 // forwardRequest sends the request to the real server over TLS.
 func (h *Handler) forwardRequest(req *http.Request, serverName string) (*http.Response, error) {
-	// Connect to real server
-	destAddr := net.JoinHostPort(serverName, "443")
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	serverConn, err := tls.DialWithDialer(dialer, "tcp", destAddr, &tls.Config{
-		ServerName: serverName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", destAddr, err)
-	}
-	defer serverConn.Close()
-
 	// Set the host header and request URI
 	req.URL.Scheme = "https"
 	req.URL.Host = serverName
 	req.RequestURI = "" // must be empty for client requests
 
-	// Use http.Transport for proper request handling
 	transport := &http.Transport{
-		DialTLS: func(network, addr string) (net.Conn, error) {
-			return serverConn, nil
+		TLSClientConfig: &tls.Config{
+			ServerName: serverName,
+		},
+		// Disable compression so we can stream the raw response bytes
+		DisableCompression: true,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		// Don't follow redirects — pass them through
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}
 
-	return transport.RoundTrip(req)
+	return client.Do(req)
 }
 
 // prefixConn wraps a net.Conn and prepends buffered data before reading from the real conn.
