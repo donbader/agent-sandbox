@@ -5,7 +5,6 @@ import type { Channel } from "./channel/types.js";
 import { createLogger } from "./logger.js";
 import { ExtensionRegistry } from "./extension.js";
 import type { ExtensionContext } from "./extension.js";
-import commandsPlugin from "./extensions/commands.js";
 import perfPlugin from "./extensions/perf-tracker.js";
 import eventLoggerPlugin from "./extensions/event-logger.js";
 
@@ -45,7 +44,6 @@ async function main(): Promise<void> {
 
   // Set up plugin registry
   const registry = new ExtensionRegistry();
-  registry.register(commandsPlugin);
   registry.register(perfPlugin);
   registry.register(eventLoggerPlugin);
 
