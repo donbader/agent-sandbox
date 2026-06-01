@@ -8,9 +8,9 @@ const commandsExtension: BridgeExtension = {
   commands: {
     new: {
       description: "Start a new conversation (reset agent session)",
-      async handler(ctx: ExtensionContext, _chatId: ChatId, _args: string) {
+      async handler(ctx: ExtensionContext, chatId: ChatId, _args: string) {
         try {
-          await ctx.agent.reset();
+          await ctx.agent.reset(chatId);
           return "✨ New session started.";
         } catch (err) {
           log.error({ error: err }, "/new failed");

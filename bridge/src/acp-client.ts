@@ -56,7 +56,6 @@ export class AcpAgent {
   private config: AcpAgentConfig;
   private proc: ChildProcess | null = null;
   private connection: acp.ClientSideConnection | null = null;
-  private sessionId: string | null = null;
   private restarting = false;
   private bridgeClient: BridgeClient;
   private pendingReject: ((err: Error) => void) | null = null;
@@ -118,13 +117,7 @@ export class AcpAgent {
           clientCapabilities: {},
         });
 
-        const { sessionId } = await this.connection.newSession({
-          cwd: this.config.cwd,
-          mcpServers: [],
-        });
-        this.sessionId = sessionId;
-
-        log.info({ sessionId }, "ACP session created");
+        log.info("ACP connection established");
         return;
       } catch (err: unknown) {
         // Kill the failed process before retrying
@@ -133,7 +126,6 @@ export class AcpAgent {
           this.proc = null;
         }
         this.connection = null;
-        this.sessionId = null;
 
         if (attempt === maxRetries) {
           log.error({ error: err, attempt }, "ACP agent failed to start after max retries");
@@ -151,8 +143,8 @@ export class AcpAgent {
    * Sends a prompt to the agent and returns the full response text.
    * Collects all agent_message_chunk updates until the prompt completes.
    */
-  async prompt(text: string): Promise<string> {
-    if (!this.connection || !this.sessionId) {
+  async prompt(sessionId: string, text: string): Promise<string> {
+    if (!this.connection) {
       throw new Error("ACP agent not started");
     }
 
@@ -163,7 +155,7 @@ export class AcpAgent {
       this.pendingReject = reject;
 
       this.connection!.prompt({
-        sessionId: this.sessionId!,
+        sessionId,
         prompt: [{ type: "text", text }],
       })
         .then(() => {
@@ -179,9 +171,13 @@ export class AcpAgent {
     });
   }
 
-  /** Whether the agent has an active connection and session. */
+  /** Whether the agent has an active connection. */
   isReady(): boolean {
-    return this.connection !== null && this.sessionId !== null;
+    return this.connection !== null;
+  }
+
+  getConnection(): acp.ClientSideConnection | null {
+    return this.connection;
   }
 
   /** Reset: kill current process, restart fresh. Returns when new session is ready. */
@@ -195,7 +191,6 @@ export class AcpAgent {
       this.proc = null;
     }
     this.connection = null;
-    this.sessionId = null;
     this.restarting = false;
 
     await this.spawnAndConnect(command, args);
@@ -215,6 +210,5 @@ export class AcpAgent {
       this.proc = null;
     }
     this.connection = null;
-    this.sessionId = null;
   }
 }

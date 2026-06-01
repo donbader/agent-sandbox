@@ -35,8 +35,8 @@ export interface BridgeExtension {
 export interface AgentControl {
   /** Whether the agent is connected and has an active session. */
   isReady(): boolean;
-  /** Reset the agent (kill + restart, new session). */
-  reset(): Promise<void>;
+  /** Reset the session for this chat (creates a new ACP session). */
+  reset(chatId: string): Promise<void>;
   /** Stop the current operation (kill process, will auto-restart). */
   abort(): void;
 }

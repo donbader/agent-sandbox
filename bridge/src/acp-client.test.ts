@@ -134,7 +134,7 @@ describe("BridgeClient.sessionUpdate", () => {
 describe("AcpAgent", () => {
   it("rejects prompt() when not started", async () => {
     const agent = new AcpAgent({ cmd: ["echo", "hi"], cwd: "/tmp" });
-    await expect(agent.prompt("hello")).rejects.toThrow("ACP agent not started");
+    await expect(agent.prompt("session-id", "hello")).rejects.toThrow("ACP agent not started");
   });
 
   it("stop() does not throw when called before start()", () => {

@@ -19,7 +19,7 @@ describe("commands extension", () => {
   it("/new calls agent.reset() and returns success message", async () => {
     const ctx = makeCtx();
     const result = await commandsExtension.commands!.new.handler(ctx, "chat1", "");
-    expect(ctx.agent.reset).toHaveBeenCalled();
+    expect(ctx.agent.reset).toHaveBeenCalledWith("chat1");
     expect(result).toBe("✨ New session started.");
   });
 

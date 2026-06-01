@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { AcpAgent } from "./acp-client.js";
+import { SessionStore } from "./session-store.js";
+import { SessionManager } from "./session-manager.js";
 import { channels } from "./channel/channels.gen.js";
 import type { Channel } from "./channel/types.js";
 import { createLogger } from "./logger.js";
@@ -54,32 +56,45 @@ async function main(): Promise<void> {
     { channel: config.channel, cmd: config.acp_command.join(" ") },
     "starting channel"
   );
+
   const agent = new AcpAgent({
     cmd: config.acp_command,
     cwd: config.cwd ?? process.cwd(),
   });
+
+  const store = new SessionStore();
+  let sessionManager: SessionManager | null = null;
 
   const ctx: ExtensionContext = {
     sendMessage: (chatId, text) => channel.sendMessage(chatId, text),
     config: config as Record<string, unknown>,
     agent: {
       isReady: () => agent.isReady(),
-      reset: () => agent.reset(),
+      reset: async (chatId: string) => {
+        await sessionManager!.resetSession(chatId);
+      },
       abort: () => agent.abort(),
     },
   };
 
   const startupBuffer = new StartupBuffer();
 
-  // Start agent in background — signal buffer when ready
+  // Start agent in background — create SessionManager and signal buffer when ready
   agent.start()
-    .then(() => startupBuffer.ready())
+    .then(() => {
+      sessionManager = new SessionManager({
+        connection: agent.getConnection()!,
+        cwd: config.cwd ?? process.cwd(),
+        store,
+      });
+      startupBuffer.ready();
+    })
     .catch((err: unknown) => {
       log.error({ error: err }, "ACP agent failed to start (will retry on next message)");
     });
 
   // Wire startup buffer → agent (with plugin command routing)
-  startupBuffer.onMessage((chatId, text) => {
+  startupBuffer.onMessage(async (chatId, text) => {
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
       const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
@@ -114,9 +129,10 @@ async function main(): Promise<void> {
       return;
     }
 
+    const sessionId = await sessionManager!.getSession(chatId);
     registry.notifyTurnStart(ctx, chatId);
     agent
-      .prompt(text)
+      .prompt(sessionId, text)
       .then((response) => {
         registry.notifyTurnEnd(ctx, chatId);
         channel.sendMessage(chatId, response);
@@ -141,6 +157,7 @@ async function main(): Promise<void> {
   // Handle shutdown
   process.on("SIGTERM", () => {
     log.info("shutting down");
+    store.flushSync();
     channel.stop();
     agent.stop();
     process.exit(0);
