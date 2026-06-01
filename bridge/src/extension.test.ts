@@ -5,6 +5,11 @@ import type { BridgeExtension, ExtensionContext, CommandHandler } from "./extens
 const mockCtx: ExtensionContext = {
   sendMessage: vi.fn(),
   config: {},
+  agent: {
+    isReady: vi.fn().mockReturnValue(true),
+    reset: vi.fn().mockResolvedValue(undefined),
+    abort: vi.fn(),
+  },
 };
 
 function makePlugin(overrides: Partial<BridgeExtension> = {}): BridgeExtension {

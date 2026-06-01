@@ -5,6 +5,11 @@ import type { ExtensionContext } from "../extension.js";
 const mockCtx: ExtensionContext = {
   sendMessage: () => {},
   config: {},
+  agent: {
+    isReady: () => true,
+    reset: async () => {},
+    abort: () => {},
+  },
 };
 
 describe("perf-tracker", () => {

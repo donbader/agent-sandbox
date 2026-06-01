@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { AcpAgent } from "./acp-client.js";
+import { SessionStore } from "./session-store.js";
+import { SessionManager } from "./session-manager.js";
 import { channels } from "./channel/channels.gen.js";
 import type { Channel } from "./channel/types.js";
 import { createLogger } from "./logger.js";
@@ -7,6 +9,8 @@ import { ExtensionRegistry } from "./extension.js";
 import type { ExtensionContext } from "./extension.js";
 import perfPlugin from "./extensions/perf-tracker.js";
 import eventLoggerPlugin from "./extensions/event-logger.js";
+import commandsExtension from "./extensions/commands.js";
+import { StartupBuffer } from "./startup-buffer.js";
 
 const log = createLogger("bridge");
 
@@ -46,28 +50,57 @@ async function main(): Promise<void> {
   const registry = new ExtensionRegistry();
   registry.register(perfPlugin);
   registry.register(eventLoggerPlugin);
-
-  const ctx: ExtensionContext = {
-    sendMessage: (chatId, text) => channel.sendMessage(chatId, text),
-    config: config as Record<string, unknown>,
-  };
+  registry.register(commandsExtension);
 
   log.info(
     { channel: config.channel, cmd: config.acp_command.join(" ") },
     "starting channel"
   );
+
   const agent = new AcpAgent({
     cmd: config.acp_command,
     cwd: config.cwd ?? process.cwd(),
   });
 
-  // Start agent in background — don't block channel startup
-  agent.start().catch((err: unknown) => {
-    log.error({ error: err }, "ACP agent failed to start (will retry on next message)");
+  const store = new SessionStore();
+  const sessionManager = new SessionManager({
+    getConnection: () => {
+      const conn = agent.getConnection();
+      if (!conn) throw new Error("agent not connected");
+      return conn;
+    },
+    cwd: config.cwd ?? process.cwd(),
+    store,
   });
 
-  // Wire channel → agent (with plugin command routing)
-  channel.onMessage((chatId, text) => {
+  const ctx: ExtensionContext = {
+    sendMessage: (chatId, text) => channel.sendMessage(chatId, text),
+    config: config as Record<string, unknown>,
+    agent: {
+      isReady: () => agent.isReady(),
+      reset: async (chatId: string) => {
+        await sessionManager.resetSession(chatId);
+      },
+      abort: () => agent.abort(),
+    },
+  };
+
+  const startupBuffer = new StartupBuffer();
+
+  // Start agent in background — signal buffer when ready
+  agent.start()
+    .then(() => {
+      startupBuffer.ready();
+    })
+    .catch((err: unknown) => {
+      log.error({ error: err }, "ACP agent failed to start (will retry on next message)");
+      // Mark buffer ready anyway so messages aren't stuck forever.
+      // They'll get errors from sessionManager but at least users get feedback.
+      startupBuffer.ready();
+    });
+
+  // Wire startup buffer → agent (with plugin command routing)
+  startupBuffer.onMessage((chatId, text) => {
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
       const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
@@ -102,17 +135,24 @@ async function main(): Promise<void> {
       return;
     }
 
-    registry.notifyTurnStart(ctx, chatId);
-    agent
-      .prompt(text)
-      .then((response) => {
-        registry.notifyTurnEnd(ctx, chatId);
-        channel.sendMessage(chatId, response);
+    sessionManager.getSession(chatId)
+      .then((sessionId) => {
+        registry.notifyTurnStart(ctx, chatId);
+        return agent.prompt(sessionId, text).then((response) => {
+          registry.notifyTurnEnd(ctx, chatId);
+          channel.sendMessage(chatId, response);
+        });
       })
       .catch((err: unknown) => {
         registry.notifyTurnEnd(ctx, chatId);
         log.error({ error: err, chatId }, "agent prompt failed");
+        channel.sendMessage(chatId, "⚠️ Agent unavailable. Try again shortly.");
       });
+  });
+
+  // Wire channel → startup buffer
+  channel.onMessage((chatId, text) => {
+    startupBuffer.push(chatId, text);
   });
 
   // Start channel
@@ -124,6 +164,7 @@ async function main(): Promise<void> {
   // Handle shutdown
   process.on("SIGTERM", () => {
     log.info("shutting down");
+    store.flushSync();
     channel.stop();
     agent.stop();
     process.exit(0);
