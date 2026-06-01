@@ -8,3 +8,7 @@ config_schema:
       items:
         type: string
       description: Telegram chat IDs allowed to interact with this agent (use ${VAR} for env var references)
+    ack_emoji:
+      type: string
+      description: Emoji reaction to acknowledge received messages (e.g. "👀", "👍"). Set to empty string to disable.
+      default: "👀"

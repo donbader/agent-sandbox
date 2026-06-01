@@ -18,11 +18,14 @@ export default class TelegramChannel implements Channel {
   private bot: Bot;
   private handler: ((chatId: string, text: string) => void) | null = null;
   private acl: AccessControl;
+  private ackEmoji: string | null;
   private botUsername: string | null = null;
   private rateLimiter = new RateLimiter(100);
 
   constructor(config: Record<string, unknown>) {
     this.acl = (config?.access_control as AccessControl) ?? {};
+    const ackRaw = config?.ack_emoji;
+    this.ackEmoji = ackRaw === undefined ? "👀" : (ackRaw as string) || null;
     this.bot = new Bot(DUMMY_TOKEN);
 
     this.bot.catch((err) => {
@@ -59,8 +62,10 @@ export default class TelegramChannel implements Channel {
 
       log.info({ username: username ?? "unknown", chatId }, "received message");
 
-      // Ack emoji — react with 👀 to show we received the message
-      this.ackMessage(chatId, ctx.message.message_id);
+      // Ack emoji — react to show we received the message
+      if (this.ackEmoji) {
+        this.ackMessage(chatId, ctx.message.message_id);
+      }
 
       // Typing indicator
       this.sendTyping(chatId);
@@ -112,7 +117,7 @@ export default class TelegramChannel implements Channel {
   private ackMessage(chatId: string, messageId: number): void {
     withRetry(async () => {
       await this.bot.api.setMessageReaction(Number(chatId), messageId, [
-        { type: "emoji", emoji: "👀" },
+        { type: "emoji", emoji: this.ackEmoji! },
       ]);
     }).catch((err) => {
       // Non-critical — don't fail if reaction fails (old API, permissions, etc.)
