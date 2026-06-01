@@ -7,6 +7,8 @@ import { ExtensionRegistry } from "./extension.js";
 import type { ExtensionContext } from "./extension.js";
 import perfPlugin from "./extensions/perf-tracker.js";
 import eventLoggerPlugin from "./extensions/event-logger.js";
+import commandsExtension from "./extensions/commands.js";
+import { StartupBuffer } from "./startup-buffer.js";
 
 const log = createLogger("bridge");
 
@@ -46,11 +48,7 @@ async function main(): Promise<void> {
   const registry = new ExtensionRegistry();
   registry.register(perfPlugin);
   registry.register(eventLoggerPlugin);
-
-  const ctx: ExtensionContext = {
-    sendMessage: (chatId, text) => channel.sendMessage(chatId, text),
-    config: config as Record<string, unknown>,
-  };
+  registry.register(commandsExtension);
 
   log.info(
     { channel: config.channel, cmd: config.acp_command.join(" ") },
@@ -61,13 +59,27 @@ async function main(): Promise<void> {
     cwd: config.cwd ?? process.cwd(),
   });
 
-  // Start agent in background — don't block channel startup
-  agent.start().catch((err: unknown) => {
-    log.error({ error: err }, "ACP agent failed to start (will retry on next message)");
-  });
+  const ctx: ExtensionContext = {
+    sendMessage: (chatId, text) => channel.sendMessage(chatId, text),
+    config: config as Record<string, unknown>,
+    agent: {
+      isReady: () => agent.isReady(),
+      reset: () => agent.reset(),
+      abort: () => agent.abort(),
+    },
+  };
 
-  // Wire channel → agent (with plugin command routing)
-  channel.onMessage((chatId, text) => {
+  const startupBuffer = new StartupBuffer();
+
+  // Start agent in background — signal buffer when ready
+  agent.start()
+    .then(() => startupBuffer.ready())
+    .catch((err: unknown) => {
+      log.error({ error: err }, "ACP agent failed to start (will retry on next message)");
+    });
+
+  // Wire startup buffer → agent (with plugin command routing)
+  startupBuffer.onMessage((chatId, text) => {
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
       const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
@@ -113,6 +125,11 @@ async function main(): Promise<void> {
         registry.notifyTurnEnd(ctx, chatId);
         log.error({ error: err, chatId }, "agent prompt failed");
       });
+  });
+
+  // Wire channel → startup buffer
+  channel.onMessage((chatId, text) => {
+    startupBuffer.push(chatId, text);
   });
 
   // Start channel

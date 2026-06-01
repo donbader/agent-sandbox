@@ -179,6 +179,35 @@ export class AcpAgent {
     });
   }
 
+  /** Whether the agent has an active connection and session. */
+  isReady(): boolean {
+    return this.connection !== null && this.sessionId !== null;
+  }
+
+  /** Reset: kill current process, restart fresh. Returns when new session is ready. */
+  async reset(): Promise<void> {
+    const [command, ...args] = this.config.cmd;
+    if (!command) throw new Error("acp-agent: empty command");
+
+    this.restarting = true;
+    if (this.proc) {
+      this.proc.kill("SIGTERM");
+      this.proc = null;
+    }
+    this.connection = null;
+    this.sessionId = null;
+    this.restarting = false;
+
+    await this.spawnAndConnect(command, args);
+  }
+
+  /** Abort current operation by killing the process. Auto-restart will handle reconnection. */
+  abort(): void {
+    if (this.proc) {
+      this.proc.kill("SIGTERM");
+    }
+  }
+
   stop(): void {
     this.restarting = true; // prevent auto-restart
     if (this.proc) {

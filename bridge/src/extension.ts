@@ -31,12 +31,24 @@ export interface BridgeExtension {
   onEvent?(ctx: ExtensionContext, chatId: ChatId, event: AgentEvent): void;
 }
 
+/** Agent control interface exposed to extensions. */
+export interface AgentControl {
+  /** Whether the agent is connected and has an active session. */
+  isReady(): boolean;
+  /** Reset the agent (kill + restart, new session). */
+  reset(): Promise<void>;
+  /** Stop the current operation (kill process, will auto-restart). */
+  abort(): void;
+}
+
 /** Controlled API surface exposed to plugins. */
 export interface ExtensionContext {
   /** Send a message to a chat (through the channel). */
   sendMessage(chatId: ChatId, text: string): void;
   /** Get bridge config. */
   readonly config: Record<string, unknown>;
+  /** Agent control interface. */
+  readonly agent: AgentControl;
 }
 
 /** Plugin registry — manages plugins, dispatches events, routes commands. */
