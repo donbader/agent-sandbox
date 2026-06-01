@@ -63,7 +63,15 @@ async function main(): Promise<void> {
   });
 
   const store = new SessionStore();
-  let sessionManager: SessionManager | null = null;
+  const sessionManager = new SessionManager({
+    getConnection: () => {
+      const conn = agent.getConnection();
+      if (!conn) throw new Error("agent not connected");
+      return conn;
+    },
+    cwd: config.cwd ?? process.cwd(),
+    store,
+  });
 
   const ctx: ExtensionContext = {
     sendMessage: (chatId, text) => channel.sendMessage(chatId, text),
@@ -71,7 +79,7 @@ async function main(): Promise<void> {
     agent: {
       isReady: () => agent.isReady(),
       reset: async (chatId: string) => {
-        await sessionManager!.resetSession(chatId);
+        await sessionManager.resetSession(chatId);
       },
       abort: () => agent.abort(),
     },
@@ -79,22 +87,20 @@ async function main(): Promise<void> {
 
   const startupBuffer = new StartupBuffer();
 
-  // Start agent in background — create SessionManager and signal buffer when ready
+  // Start agent in background — signal buffer when ready
   agent.start()
     .then(() => {
-      sessionManager = new SessionManager({
-        connection: agent.getConnection()!,
-        cwd: config.cwd ?? process.cwd(),
-        store,
-      });
       startupBuffer.ready();
     })
     .catch((err: unknown) => {
       log.error({ error: err }, "ACP agent failed to start (will retry on next message)");
+      // Mark buffer ready anyway so messages aren't stuck forever.
+      // They'll get errors from sessionManager but at least users get feedback.
+      startupBuffer.ready();
     });
 
   // Wire startup buffer → agent (with plugin command routing)
-  startupBuffer.onMessage(async (chatId, text) => {
+  startupBuffer.onMessage((chatId, text) => {
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
       const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
@@ -129,17 +135,18 @@ async function main(): Promise<void> {
       return;
     }
 
-    const sessionId = await sessionManager!.getSession(chatId);
-    registry.notifyTurnStart(ctx, chatId);
-    agent
-      .prompt(sessionId, text)
-      .then((response) => {
-        registry.notifyTurnEnd(ctx, chatId);
-        channel.sendMessage(chatId, response);
+    sessionManager.getSession(chatId)
+      .then((sessionId) => {
+        registry.notifyTurnStart(ctx, chatId);
+        return agent.prompt(sessionId, text).then((response) => {
+          registry.notifyTurnEnd(ctx, chatId);
+          channel.sendMessage(chatId, response);
+        });
       })
       .catch((err: unknown) => {
         registry.notifyTurnEnd(ctx, chatId);
         log.error({ error: err, chatId }, "agent prompt failed");
+        channel.sendMessage(chatId, "⚠️ Agent unavailable. Try again shortly.");
       });
   });
 

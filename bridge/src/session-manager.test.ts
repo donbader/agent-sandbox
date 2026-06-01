@@ -34,7 +34,7 @@ describe("SessionManager", () => {
     dir = makeTempDir();
     store = new SessionStore({ dir });
     connection = makeConnection();
-    manager = new SessionManager({ connection, cwd: "/tmp/test", store });
+    manager = new SessionManager({ getConnection: () => connection, cwd: "/tmp/test", store });
   });
 
   afterEach(() => {
@@ -72,7 +72,7 @@ describe("SessionManager", () => {
     const failingConnection = makeConnection({
       loadSession: vi.fn().mockRejectedValue(new Error("session not found")),
     });
-    const failManager = new SessionManager({ connection: failingConnection, cwd: "/tmp/test", store });
+    const failManager = new SessionManager({ getConnection: () => failingConnection, cwd: "/tmp/test", store });
     const sessionId = await failManager.getSession("chat1");
     expect(sessionId).toBe("new-sess-1");
     expect((failingConnection as unknown as MockConnection).newSession).toHaveBeenCalled();

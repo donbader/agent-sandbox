@@ -3,7 +3,8 @@ import { createLogger } from "./logger.js";
 import type { SessionStore, ChatId } from "./session-store.js";
 
 export interface SessionManagerConfig {
-  connection: acp.ClientSideConnection;
+  /** Getter for the current connection (survives auto-restart). */
+  getConnection: () => acp.ClientSideConnection;
   cwd: string;
   store: SessionStore;
 }
@@ -25,14 +26,20 @@ export class SessionManager {
     // Try to resume persisted session
     const persisted = this.config.store.getSessionId(chatId);
     if (persisted) {
-      try {
-        await (this.config.connection as unknown as { loadSession(p: { sessionId: string }): Promise<void> }).loadSession({ sessionId: persisted });
-        this.sessions.set(chatId, persisted);
-        this.config.store.touchSession(chatId, persisted);
-        this.log.info({ chatId, sessionId: persisted }, "resumed session");
-        return persisted;
-      } catch {
-        this.log.warn({ chatId, sessionId: persisted }, "loadSession failed, creating new");
+      const conn = this.config.getConnection();
+      const loadSession = (conn as unknown as Record<string, unknown>)["loadSession"];
+      if (typeof loadSession === "function") {
+        try {
+          await (loadSession as (p: { sessionId: string }) => Promise<unknown>).call(conn, { sessionId: persisted });
+          this.sessions.set(chatId, persisted);
+          this.config.store.touchSession(chatId, persisted);
+          this.log.info({ chatId, sessionId: persisted }, "resumed session");
+          return persisted;
+        } catch {
+          this.log.warn({ chatId, sessionId: persisted }, "loadSession failed, creating new");
+        }
+      } else {
+        this.log.debug({ chatId }, "agent does not support loadSession, creating new");
       }
     }
 
@@ -40,7 +47,8 @@ export class SessionManager {
   }
 
   async createSession(chatId: ChatId): Promise<string> {
-    const { sessionId } = await this.config.connection.newSession({
+    const conn = this.config.getConnection();
+    const { sessionId } = await conn.newSession({
       cwd: this.config.cwd,
       mcpServers: [],
     });
