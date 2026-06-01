@@ -72,7 +72,8 @@ async function main(): Promise<void> {
   channel.onMessage((chatId, text) => {
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
-      const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+      const rawCmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+      const cmd = rawCmd.split("@")[0]; // strip @botname suffix for group chats
       const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
 
       // /help always generates a dynamic list of all registered commands
