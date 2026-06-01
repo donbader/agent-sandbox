@@ -1,5 +1,0 @@
-[user]
-  name = "Example Agent"
-  email = "example-agent@fazzfinancial.com"
-[init]
-  defaultBranch = main
