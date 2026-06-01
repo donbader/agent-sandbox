@@ -15,11 +15,22 @@ export interface AcpAgentConfig {
  * Auto-approves all permission requests and collects agent message chunks.
  * Exported for testing.
  */
+export interface AgentCommand {
+  name: string;
+  description: string;
+  inputHint?: string;
+}
+
 export class BridgeClient implements acp.Client {
   private chunkCallback: ((text: string) => void) | null = null;
+  private commandsCallback: ((commands: AgentCommand[]) => void) | null = null;
 
   setChunkCallback(cb: ((text: string) => void) | null): void {
     this.chunkCallback = cb;
+  }
+
+  setCommandsCallback(cb: ((commands: AgentCommand[]) => void) | null): void {
+    this.commandsCallback = cb;
   }
 
   async requestPermission(
@@ -44,6 +55,21 @@ export class BridgeClient implements acp.Client {
       update.content.type === "text"
     ) {
       this.chunkCallback?.(update.content.text);
+    } else if (update.sessionUpdate === "available_commands_update") {
+      const cmds = (update as any).availableCommands as Array<{
+        name: string;
+        description?: string;
+        input?: { hint?: string } | null;
+      }>;
+      if (Array.isArray(cmds)) {
+        const agentCommands: AgentCommand[] = cmds.map((c) => ({
+          name: c.name,
+          description: c.description ?? "",
+          inputHint: c.input?.hint,
+        }));
+        log.info({ count: agentCommands.length }, "received agent commands");
+        this.commandsCallback?.(agentCommands);
+      }
     }
   }
 }
@@ -59,10 +85,28 @@ export class AcpAgent {
   private restarting = false;
   private bridgeClient: BridgeClient;
   private pendingReject: ((err: Error) => void) | null = null;
+  private agentCommands: AgentCommand[] = [];
+  private commandsListeners: Array<(commands: AgentCommand[]) => void> = [];
 
   constructor(config: AcpAgentConfig) {
     this.config = config;
     this.bridgeClient = new BridgeClient();
+    this.bridgeClient.setCommandsCallback((cmds) => {
+      this.agentCommands = cmds;
+      for (const listener of this.commandsListeners) {
+        listener(cmds);
+      }
+    });
+  }
+
+  /** Get the current list of agent-declared commands. */
+  getAgentCommands(): AgentCommand[] {
+    return this.agentCommands;
+  }
+
+  /** Register a listener for when agent commands change. */
+  onCommandsUpdate(cb: (commands: AgentCommand[]) => void): void {
+    this.commandsListeners.push(cb);
   }
 
   async start(): Promise<void> {

@@ -122,6 +122,16 @@ async function main(): Promise<void> {
           const handler = registry.getCommand(name);
           lines.push(`/${name}${handler?.description ? ` — ${handler.description}` : ""}`);
         }
+        // Show agent-declared commands
+        const agentCmds = agent.getAgentCommands();
+        const coreNames = new Set(names);
+        const agentOnly = agentCmds.filter((c) => !coreNames.has(c.name));
+        if (agentOnly.length > 0) {
+          lines.push("", "Agent commands:", "");
+          for (const c of agentOnly) {
+            lines.push(`/${c.name}${c.description ? ` — ${c.description}` : ""}`);
+          }
+        }
         channel.sendMessage(chatId, lines.join("\n"));
         return;
       }
@@ -138,7 +148,20 @@ async function main(): Promise<void> {
             channel.sendMessage(chatId, "Command failed.");
           });
       } else {
-        channel.sendMessage(chatId, `Unknown command: /${cmd}`);
+        // Not a core command — forward to agent as prompt (agent handles its own commands)
+        sessionManager.getSession(chatId)
+          .then((sessionId) => {
+            registry.notifyTurnStart(ctx, chatId);
+            return agent.prompt(sessionId, text).then((response) => {
+              registry.notifyTurnEnd(ctx, chatId);
+              channel.sendMessage(chatId, response);
+            });
+          })
+          .catch((err: unknown) => {
+            registry.notifyTurnEnd(ctx, chatId);
+            log.error({ error: err, chatId }, "agent prompt failed");
+            channel.sendMessage(chatId, "⚠️ Agent unavailable. Try again shortly.");
+          });
       }
       return;
     }
@@ -170,11 +193,19 @@ async function main(): Promise<void> {
   await registry.boot(ctx);
 
   // Register commands with channel platform (e.g., Telegram bot menu)
-  if (channel.registerCommands) {
+  const registerAllCommands = (): void => {
+    if (!channel.registerCommands) return;
     const commands = registry.getCommandNames().map((name) => {
       const cmd = registry.getCommand(name);
       return { name, description: cmd?.description ?? "" };
     });
+    // Add agent-declared commands (skip those that overlap with core)
+    const coreNames = new Set(commands.map((c) => c.name));
+    for (const agentCmd of agent.getAgentCommands()) {
+      if (!coreNames.has(agentCmd.name)) {
+        commands.push({ name: agentCmd.name, description: agentCmd.description });
+      }
+    }
     // Always include /help
     if (!commands.some((c) => c.name === "help")) {
       commands.push({ name: "help", description: "List all available commands" });
@@ -182,7 +213,15 @@ async function main(): Promise<void> {
     channel.registerCommands(commands).catch((err: unknown) => {
       log.warn({ error: err }, "failed to register commands with channel");
     });
-  }
+  };
+
+  registerAllCommands();
+
+  // Re-register when agent declares its commands
+  agent.onCommandsUpdate(() => {
+    log.info("agent commands updated, re-registering bot menu");
+    registerAllCommands();
+  });
 
   // Handle shutdown
   process.on("SIGTERM", () => {

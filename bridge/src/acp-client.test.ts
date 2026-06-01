@@ -141,4 +141,133 @@ describe("AcpAgent", () => {
     const agent = new AcpAgent({ cmd: ["echo", "hi"], cwd: "/tmp" });
     expect(() => agent.stop()).not.toThrow();
   });
+
+  it("getAgentCommands() returns empty array initially", () => {
+    const agent = new AcpAgent({ cmd: ["echo", "hi"], cwd: "/tmp" });
+    expect(agent.getAgentCommands()).toEqual([]);
+  });
+
+  it("onCommandsUpdate() is called when agent sends available_commands_update", async () => {
+    const agent = new AcpAgent({ cmd: ["echo", "hi"], cwd: "/tmp" });
+    const listener = vi.fn();
+    agent.onCommandsUpdate(listener);
+
+    // Simulate the BridgeClient receiving an available_commands_update
+    // Access the internal bridgeClient to trigger the callback
+    const bridgeClient = (agent as any).bridgeClient as BridgeClient;
+    await bridgeClient.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [
+          { name: "model", description: "Switch model" },
+          { name: "compact", description: "Compact context", input: { hint: "level" } },
+        ],
+      },
+    } as any);
+
+    expect(listener).toHaveBeenCalledWith([
+      { name: "model", description: "Switch model", inputHint: undefined },
+      { name: "compact", description: "Compact context", inputHint: "level" },
+    ]);
+    expect(agent.getAgentCommands()).toEqual([
+      { name: "model", description: "Switch model", inputHint: undefined },
+      { name: "compact", description: "Compact context", inputHint: "level" },
+    ]);
+  });
+
+  it("supports multiple onCommandsUpdate listeners", async () => {
+    const agent = new AcpAgent({ cmd: ["echo", "hi"], cwd: "/tmp" });
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+    agent.onCommandsUpdate(listener1);
+    agent.onCommandsUpdate(listener2);
+
+    const bridgeClient = (agent as any).bridgeClient as BridgeClient;
+    await bridgeClient.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [{ name: "status", description: "Show status" }],
+      },
+    } as any);
+
+    expect(listener1).toHaveBeenCalledTimes(1);
+    expect(listener2).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BridgeClient — available_commands_update
+// ---------------------------------------------------------------------------
+
+describe("BridgeClient.sessionUpdate — available_commands_update", () => {
+  let client: BridgeClient;
+
+  beforeEach(() => {
+    client = new BridgeClient();
+  });
+
+  it("calls commandsCallback with parsed commands", async () => {
+    const cb = vi.fn();
+    client.setCommandsCallback(cb);
+
+    await client.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [
+          { name: "model", description: "Switch model", input: { hint: "model name" } },
+          { name: "compact", description: "Compact context" },
+        ],
+      },
+    } as any);
+
+    expect(cb).toHaveBeenCalledWith([
+      { name: "model", description: "Switch model", inputHint: "model name" },
+      { name: "compact", description: "Compact context", inputHint: undefined },
+    ]);
+  });
+
+  it("does not throw when commandsCallback is null", async () => {
+    await expect(
+      client.sessionUpdate({
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [{ name: "test", description: "" }],
+        },
+      } as any)
+    ).resolves.toBeUndefined();
+  });
+
+  it("handles empty availableCommands array", async () => {
+    const cb = vi.fn();
+    client.setCommandsCallback(cb);
+
+    await client.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [],
+      },
+    } as any);
+
+    expect(cb).toHaveBeenCalledWith([]);
+  });
+
+  it("handles missing description gracefully", async () => {
+    const cb = vi.fn();
+    client.setCommandsCallback(cb);
+
+    await client.sessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [{ name: "test" }],
+      },
+    } as any);
+
+    expect(cb).toHaveBeenCalledWith([{ name: "test", description: "", inputHint: undefined }]);
+  });
 });
