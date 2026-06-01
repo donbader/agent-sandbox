@@ -10,6 +10,14 @@ const mockCtx: ExtensionContext = {
     reset: async () => {},
     abort: () => {},
   },
+  sessions: {
+    getHistory: () => [],
+    getActiveSessionId: () => undefined,
+    resumeSession: async () => {},
+    resetSession: async () => "new-sess",
+    labelSession: () => {},
+    findByPrefix: () => null,
+  },
 };
 
 describe("perf-tracker", () => {

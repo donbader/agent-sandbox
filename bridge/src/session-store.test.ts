@@ -112,6 +112,33 @@ describe("SessionStore", () => {
 
   // --- maxHistory eviction ---
 
+  // --- findByPrefix ---
+
+  it("findByPrefix returns the matching entry when exactly one matches", () => {
+    store.addToHistory("chat1", "abcdef12-1234-5678-abcd-ef1234567890");
+    store.addToHistory("chat1", "12345678-1234-5678-abcd-ef1234567890");
+    const entry = store.findByPrefix("chat1", "abcdef");
+    expect(entry).not.toBeNull();
+    expect(entry!.sessionId).toBe("abcdef12-1234-5678-abcd-ef1234567890");
+  });
+
+  it("findByPrefix returns null when no entries match", () => {
+    store.addToHistory("chat1", "abcdef12-1234-5678-abcd-ef1234567890");
+    expect(store.findByPrefix("chat1", "zzz")).toBeNull();
+  });
+
+  it("findByPrefix returns null when multiple entries match (ambiguous)", () => {
+    store.addToHistory("chat1", "abcdef12-1234-5678-abcd-ef1234567890");
+    store.addToHistory("chat1", "abcdef99-1234-5678-abcd-ef1234567890");
+    expect(store.findByPrefix("chat1", "abcdef")).toBeNull();
+  });
+
+  it("findByPrefix returns null for unknown chatId", () => {
+    expect(store.findByPrefix("unknown-chat", "abc")).toBeNull();
+  });
+
+  // --- maxHistory eviction ---
+
   it("evicts oldest entries when maxHistory is exceeded", () => {
     const smallStore = new SessionStore({ dir, maxHistory: 3 });
     smallStore.addToHistory("chat1", "sess-1");

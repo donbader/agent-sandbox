@@ -1,4 +1,5 @@
 import { createLogger } from "./logger.js";
+import type { SessionHistoryEntry } from "./session-store.js";
 
 // --- Types ---
 
@@ -31,6 +32,16 @@ export interface BridgeExtension {
   onEvent?(ctx: ExtensionContext, chatId: ChatId, event: AgentEvent): void;
 }
 
+/** Session control interface exposed to extensions. */
+export interface SessionControl {
+  getHistory(chatId: ChatId): SessionHistoryEntry[];
+  getActiveSessionId(chatId: ChatId): string | undefined;
+  resumeSession(chatId: ChatId, sessionId: string): Promise<void>;
+  resetSession(chatId: ChatId): Promise<string>;
+  labelSession(chatId: ChatId, sessionId: string, label: string): void;
+  findByPrefix(chatId: ChatId, prefix: string): SessionHistoryEntry | null;
+}
+
 /** Agent control interface exposed to extensions. */
 export interface AgentControl {
   /** Whether the agent is connected and has an active session. */
@@ -49,6 +60,8 @@ export interface ExtensionContext {
   readonly config: Record<string, unknown>;
   /** Agent control interface. */
   readonly agent: AgentControl;
+  /** Session control interface. */
+  readonly sessions: SessionControl;
 }
 
 /** Plugin registry — manages plugins, dispatches events, routes commands. */

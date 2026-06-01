@@ -75,6 +75,12 @@ export class SessionStore {
     }
   }
 
+  findByPrefix(chatId: ChatId, prefix: string): SessionHistoryEntry | null {
+    const entries = this.history[chatId] ?? [];
+    const matches = entries.filter(e => e.sessionId.startsWith(prefix));
+    return matches.length === 1 ? matches[0] : null;
+  }
+
   setLabel(chatId: ChatId, sessionId: string, label: string): void {
     const entry = this.history[chatId]?.find(e => e.sessionId === sessionId);
     if (entry) {

@@ -111,6 +111,31 @@ describe("SessionManager", () => {
     expect(manager.getSessionId("chat1")).toBe("new-sess-2");
   });
 
+  // --- resumeSession ---
+
+  it("resumeSession calls loadSession and updates the in-memory cache", async () => {
+    await manager.resumeSession("chat1", "existing-sess");
+    expect(conn().loadSession).toHaveBeenCalledWith({ sessionId: "existing-sess" });
+    expect(manager.getSessionId("chat1")).toBe("existing-sess");
+    expect(store.getSessionId("chat1")).toBe("existing-sess");
+  });
+
+  it("resumeSession touches the session in history", async () => {
+    store.addToHistory("chat1", "existing-sess");
+    const before = store.getHistory("chat1")[0].touchedAt;
+    await new Promise(r => setTimeout(r, 5));
+    await manager.resumeSession("chat1", "existing-sess");
+    const after = store.getHistory("chat1")[0].touchedAt;
+    expect(after > before).toBe(true);
+  });
+
+  it("resumeSession works when agent does not support loadSession", async () => {
+    const connWithoutLoad = { newSession: vi.fn().mockResolvedValue({ sessionId: "new-sess-1" }) } as unknown as acp.ClientSideConnection;
+    const mgr = new SessionManager({ getConnection: () => connWithoutLoad, cwd: "/tmp/test", store });
+    await expect(mgr.resumeSession("chat1", "existing-sess")).resolves.toBeUndefined();
+    expect(mgr.getSessionId("chat1")).toBe("existing-sess");
+  });
+
   // --- hasSession / getSessionId ---
 
   it("hasSession returns false before any session is created", () => {
