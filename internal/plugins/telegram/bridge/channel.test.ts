@@ -130,51 +130,6 @@ describe("TelegramChannel (thin bridge)", () => {
   });
 
   describe("custom commands", () => {
-    it("/new resets session and next message creates fresh session", async () => {
-      // First create a session
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "hi" }));
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
-
-      // Reset
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/new" }));
-      await vi.waitFor(() =>
-        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
-          100,
-          expect.stringContaining("New session"),
-          expect.any(Object)
-        )
-      );
-
-      // Next message should create a new session
-      agent._connection.newSession.mockClear();
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "after reset" }));
-      await vi.waitFor(() => expect(agent._connection.newSession).toHaveBeenCalled());
-    });
-
-    it("/stop calls agent.abort()", async () => {
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/stop" }));
-      await vi.waitFor(() => expect(agent.abort).toHaveBeenCalled());
-    });
-
-    it("/help lists custom and agent commands", async () => {
-      agent.getAgentCommands.mockReturnValue([
-        { name: "model", description: "Switch model" },
-      ]);
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/help" }));
-      await vi.waitFor(() => {
-        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
-          100,
-          expect.stringContaining("/new"),
-          expect.any(Object)
-        );
-        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
-          100,
-          expect.stringContaining("/model"),
-          expect.any(Object)
-        );
-      });
-    });
-
     it("/diagnose shows diagnostics", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose" }));
       await vi.waitFor(() =>
@@ -192,12 +147,18 @@ describe("TelegramChannel (thin bridge)", () => {
       expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/model gpt-4o");
     });
 
+    it("/new is forwarded to agent (not handled by bridge)", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/new" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/new");
+    });
+
     it("/command@botname strips mention", async () => {
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/new@testbot" }));
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose@testbot" }));
       await vi.waitFor(() =>
         expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
           100,
-          expect.stringContaining("New session"),
+          expect.stringContaining("Diagnostics"),
           expect.any(Object)
         )
       );
@@ -235,8 +196,8 @@ describe("TelegramChannel (thin bridge)", () => {
     it("registers commands on start", () => {
       expect(mockBotApi.setMyCommands).toHaveBeenCalled();
       const calls = mockBotApi.setMyCommands.mock.calls[0][0];
-      expect(calls.some((c: any) => c.command === "new")).toBe(true);
-      expect(calls.some((c: any) => c.command === "help")).toBe(true);
+      expect(calls.some((c: any) => c.command === "sh")).toBe(true);
+      expect(calls.some((c: any) => c.command === "diagnose")).toBe(true);
     });
 
     it("re-registers when agent commands update", () => {

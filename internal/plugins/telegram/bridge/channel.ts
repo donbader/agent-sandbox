@@ -93,40 +93,10 @@ export default function createTelegramChannel(
     return sessionId;
   }
 
-  function resetSession(chatId: string): void {
-    sessions.delete(chatId);
-  }
-
   // --- Commands ---
 
   async function handleCommand(chatId: string, cmd: string, args: string): Promise<string | null> {
     switch (cmd) {
-      case "new":
-        resetSession(chatId);
-        return "✨ New session started.";
-
-      case "stop":
-        agent.abort();
-        return "⏹ Stopped.";
-
-      case "help": {
-        const lines = ["Available commands:", ""];
-        lines.push("/new — Start a new conversation");
-        lines.push("/stop — Stop current operation");
-        lines.push("/sh <cmd> — Execute shell command");
-        lines.push("/diagnose — Show diagnostics");
-        lines.push("/help — This message");
-
-        const agentCmds = agent.getAgentCommands();
-        if (agentCmds.length > 0) {
-          lines.push("", "Agent commands:", "");
-          for (const c of agentCmds) {
-            lines.push(`/${c.name}${c.description ? ` — ${c.description}` : ""}`);
-          }
-        }
-        return lines.join("\n");
-      }
-
       case "sh": {
         if (!args.trim()) return "Usage: /sh <command>";
         const { execSync } = await import("node:child_process");
@@ -156,7 +126,7 @@ export default function createTelegramChannel(
       }
 
       default:
-        // Not a custom command — forward to agent as prompt
+        // Not a bridge command — forward to agent
         return null;
     }
   }
@@ -236,9 +206,6 @@ export default function createTelegramChannel(
 
   function registerBotCommands(): void {
     const commands = [
-      { command: "new", description: "Start a new conversation" },
-      { command: "stop", description: "Stop current operation" },
-      { command: "help", description: "List all commands" },
       { command: "sh", description: "Execute shell command" },
       { command: "diagnose", description: "Show diagnostics" },
     ];
