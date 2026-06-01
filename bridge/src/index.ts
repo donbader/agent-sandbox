@@ -83,6 +83,14 @@ async function main(): Promise<void> {
       },
       abort: () => agent.abort(),
     },
+    sessions: {
+      getHistory: (chatId) => store.getHistory(chatId),
+      getActiveSessionId: (chatId) => sessionManager.getSessionId(chatId),
+      resumeSession: (chatId, sessionId) => sessionManager.resumeSession(chatId, sessionId),
+      resetSession: (chatId) => sessionManager.resetSession(chatId),
+      labelSession: (chatId, sessionId, label) => store.setLabel(chatId, sessionId, label),
+      findByPrefix: (chatId, prefix) => store.findByPrefix(chatId, prefix),
+    },
   };
 
   const startupBuffer = new StartupBuffer();

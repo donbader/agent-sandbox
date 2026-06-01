@@ -72,4 +72,16 @@ export class SessionManager {
   getSessionId(chatId: ChatId): string | undefined {
     return this.sessions.get(chatId);
   }
+
+  async resumeSession(chatId: ChatId, sessionId: string): Promise<void> {
+    const conn = this.config.getConnection();
+    const loadSession = (conn as unknown as Record<string, unknown>)["loadSession"];
+    if (typeof loadSession === "function") {
+      await (loadSession as (p: { sessionId: string }) => Promise<unknown>).call(conn, { sessionId });
+    }
+    this.sessions.set(chatId, sessionId);
+    this.config.store.setSessionId(chatId, sessionId);
+    this.config.store.touchSession(chatId, sessionId);
+    this.log.info({ chatId, sessionId }, "resumed session");
+  }
 }

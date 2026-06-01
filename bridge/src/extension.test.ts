@@ -10,6 +10,14 @@ const mockCtx: ExtensionContext = {
     reset: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn(),
   },
+  sessions: {
+    getHistory: () => [],
+    getActiveSessionId: () => undefined,
+    resumeSession: async () => {},
+    resetSession: async () => "new-sess",
+    labelSession: () => {},
+    findByPrefix: () => null,
+  },
 };
 
 function makePlugin(overrides: Partial<BridgeExtension> = {}): BridgeExtension {
