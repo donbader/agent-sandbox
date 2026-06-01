@@ -92,14 +92,15 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 			return
 		}
 
-		// Apply rewriters
+		// Log the request BEFORE rewriting to avoid leaking injected secrets.
+		originalPath := req.URL.Path
 		rewritten := false
 		for _, rw := range h.rewriters {
 			if rw.RewriteRequest(req) {
 				rewritten = true
 			}
 		}
-		slog.Debug("request", "host", serverName, "method", req.Method, "path", req.URL.Path, "rewritten", rewritten)
+		slog.Debug("request", "host", serverName, "method", req.Method, "path", originalPath, "rewritten", rewritten)
 
 		// Forward to real server
 		resp, err := h.forwardRequest(req, serverName)
