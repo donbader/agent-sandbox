@@ -7,7 +7,7 @@ features:
     access_control:
       allowed_users: ["@${TELEGRAM_USERNAME}"]
       require_mention: false
-  static-header:
+  static-header/stx-llm-gateway:
     domains: ["agent-gateway.stx-ai.net"]
     header: "Authorization"
     value_format: "Bearer ${value}"
