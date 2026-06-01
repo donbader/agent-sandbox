@@ -95,29 +95,29 @@ features:
 
 ---
 
-### Phase 3: Gateway (Network Enforcement)
+### Phase 3: Gateway (Network Enforcement) ✅
 
 **What works after this phase:**
 ```bash
 agent-sandbox generate && agent-sandbox compose up --build
-# → codex agent with transparent proxy (all traffic passthrough, iptables enforced)
+# → codex agent with transparent proxy (all traffic via default route → gateway)
 ```
 
 - [x] Gateway Go module (`gateway/`) — core proxy logic
 - [x] TCP listener + SNI extraction
 - [x] Passthrough mode (pipe bytes to destination)
-- [x] DNS resolver (intercept UDP port 53)
+- [x] DNS resolver (gateway:53, agent resolv.conf points to gateway)
 - [x] go:embed gateway source in CLI
-- [x] Multi-stage Dockerfile (compile gateway + runtime)
-- [x] Entrypoint: iptables setup → gateway start → hooks → agent start
-- [x] Gateway runs as `gateway` user (agent cannot kill it)
+- [x] Separate gateway container (security isolation — agent can't read secrets)
+- [x] Default route proxy (IP forwarding via compose sysctls, no iptables on agent side)
 - [x] `RequestHandler` interface in gateway (for feature handlers)
+- [x] Structured logging (slog for Go, pino for TypeScript)
 - [ ] Handler registry generation (active features → imports)
 - [ ] Integration test (verify traffic routes through gateway)
 
 ---
 
-### Phase 4: Bridge + Telegram
+### Phase 4: Bridge + Telegram ✅
 
 **What works after this phase:**
 ```bash
@@ -126,33 +126,39 @@ agent-sandbox generate && agent-sandbox compose up --build
 ```
 
 - [x] Bridge TypeScript runtime (`bridge/`)
-- [x] Agent process spawning (child process management)
-- [x] Channel plugin loader (dynamic import from /opt/bridge/plugins/)
+- [x] ACP client (ClientSideConnection, auto-approve permissions)
+- [x] Channel plugin loader (generated `channels.gen.ts` registry)
 - [x] `plugins/telegram/feature.yaml`
 - [x] `plugins/telegram/gateway/handler.go` — MITM on api.telegram.org
-- [x] `plugins/telegram/bridge/src/telegram.ts` — grammy channel plugin
+- [x] `plugins/telegram/bridge/` — grammy channel plugin (ack emoji, typing, formatter, rate limiter)
 - [x] MITM logic in gateway core (TLS termination, HTTP interception)
 - [x] Sandbox CA generation
 - [x] Bridge config generation (bridge-config.json)
-- [x] Entrypoint: gateway → bridge → agent (process tree)
 - [x] `examples/telegram-vibe/` example
+- [x] Per-chat session isolation (SessionManager + SessionStore)
+- [x] Session persistence + loadSession resume
+- [x] Startup buffer (buffer messages during agent startup)
+- [x] Extension system (BridgeExtension, ExtensionRegistry)
+- [x] Core commands (/new, /stop, /resume, /label, /version, /sh, /diagnose)
+- [x] claude-code + pi runtime plugins
+- [x] github-pat + static-header gateway plugins
 
 ---
 
-### Phase 5: All Remaining Features
+### Phase 5: Remaining Features
 
 **What works after this phase:**
 ```bash
 agent-sandbox generate && agent-sandbox compose up --build
-# → Full-featured agent: GitHub PAT, Docker, mcp-oauth, static-header
+# → Full-featured agent: Docker API proxy, mcp-oauth, streaming
 ```
 
-- [ ] `plugins/github/feature.yaml` + `gateway/handler.go`
 - [ ] `plugins/docker/feature.yaml` + `gateway/handler.go` + compose sidecar
 - [ ] `plugins/mcp-oauth/feature.yaml` + `gateway/handler.go`
-- [ ] `plugins/static-header/feature.yaml` + `gateway/handler.go`
-- [ ] `plugins/claude-code/runtime.yaml`
-- [ ] `plugins/pi/runtime.yaml`
+- [ ] Streaming reply (edit Telegram message as agent streams)
+- [ ] Context buffer (multi-message batching before sending to agent)
+- [ ] Agent-provided commands (declared via ACP initialize response)
+- [ ] Telegram `setMyCommands` registration (bot menu)
 - [ ] Security hardening (cap_drop, no-new-privileges, hidepid, file permissions)
 - [ ] `examples/full/` example (all features)
 
