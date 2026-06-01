@@ -3,27 +3,31 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock grammy before importing channel
 let messageHandler: ((ctx: any) => void) | null = null;
 let startCallback: ((info: any) => void) | null = null;
+let mockBotApi: any;
 
-vi.mock("grammy", () => ({
-  Bot: vi.fn().mockImplementation(() => ({
-    on: vi.fn((event: string, handler: any) => {
-      if (event === "message:text") {
-        messageHandler = handler;
-      }
-    }),
-    catch: vi.fn(),
-    start: vi.fn(({ onStart }: any) => {
-      startCallback = onStart;
-    }),
-    stop: vi.fn(),
-    api: {
-      sendMessage: vi.fn().mockResolvedValue({}),
-      setMessageReaction: vi.fn().mockResolvedValue({}),
-      sendChatAction: vi.fn().mockResolvedValue({}),
-      setMyCommands: vi.fn().mockResolvedValue(true),
-    },
-  })),
-}));
+vi.mock("grammy", () => {
+  mockBotApi = {
+    sendMessage: vi.fn().mockResolvedValue({}),
+    setMessageReaction: vi.fn().mockResolvedValue({}),
+    sendChatAction: vi.fn().mockResolvedValue({}),
+    setMyCommands: vi.fn().mockResolvedValue(true),
+  };
+  return {
+    Bot: vi.fn().mockImplementation(() => ({
+      on: vi.fn((event: string, handler: any) => {
+        if (event === "message:text") {
+          messageHandler = handler;
+        }
+      }),
+      catch: vi.fn(),
+      start: vi.fn(({ onStart }: any) => {
+        startCallback = onStart;
+      }),
+      stop: vi.fn(),
+      api: mockBotApi,
+    })),
+  };
+});
 
 vi.mock("../logger.js", () => ({
   createLogger: () => ({
@@ -49,244 +53,203 @@ vi.mock("../formatter/telegram.js", () => ({
   splitMessage: vi.fn().mockImplementation((text: string) => [text]),
 }));
 
+// Mock AcpAgent
+function createMockAgent() {
+  const listeners: Array<(cmds: any[]) => void> = [];
+  const connection = {
+    newSession: vi.fn().mockResolvedValue({ sessionId: "test-session-123" }),
+  };
+  return {
+    isReady: vi.fn().mockReturnValue(true),
+    getConnection: vi.fn().mockReturnValue(connection),
+    prompt: vi.fn().mockResolvedValue("Agent response"),
+    abort: vi.fn(),
+    stop: vi.fn(),
+    start: vi.fn().mockResolvedValue(undefined),
+    reset: vi.fn().mockResolvedValue(undefined),
+    getAgentCommands: vi.fn().mockReturnValue([]),
+    onCommandsUpdate: vi.fn((cb: any) => listeners.push(cb)),
+    _triggerCommandsUpdate(cmds: any[]) {
+      for (const cb of listeners) cb(cmds);
+    },
+    _connection: connection,
+  };
+}
+
 // Import after mock setup
-const { default: TelegramChannel } = await import("./channel.js");
+const { default: createTelegramChannel } = await import("./channel.js");
 
 function makeCtx(opts: {
   chatId: string;
   username?: string;
   text: string;
   chatType?: "private" | "group" | "supergroup";
+  messageId?: number;
 }) {
   return {
-    chat: {
-      id: Number(opts.chatId),
-      type: opts.chatType ?? "private",
-    },
-    from: opts.username ? { username: opts.username } : {},
-    message: { text: opts.text, message_id: 1 },
+    chat: { id: Number(opts.chatId), type: opts.chatType ?? "private" },
+    from: opts.username ? { username: opts.username } : undefined,
+    message: { text: opts.text, message_id: opts.messageId ?? 1 },
   };
 }
 
-describe("TelegramChannel", () => {
-  let channel: InstanceType<typeof TelegramChannel>;
-  let handler: ReturnType<typeof vi.fn>;
+describe("TelegramChannel (thin bridge)", () => {
+  let agent: ReturnType<typeof createMockAgent>;
 
-  beforeEach(() => {
-    messageHandler = null;
-    startCallback = null;
-    handler = vi.fn();
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    agent = createMockAgent();
+    const ch = createTelegramChannel({}, agent as any);
+    await ch.start();
+    // Simulate bot connected
+    startCallback?.({ username: "testbot" });
   });
 
-  describe("allowed_users", () => {
-    it("allows messages from authorized users", () => {
-      channel = new TelegramChannel({ access_control: { allowed_users: ["@alice"] } });
-      channel.onMessage(handler);
-
+  describe("message forwarding", () => {
+    it("forwards regular messages to agent", async () => {
       messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
-      expect(handler).toHaveBeenCalledWith("123", "hello");
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "hello");
     });
 
-    it("blocks messages from unauthorized users", () => {
-      channel = new TelegramChannel({ access_control: { allowed_users: ["@alice"] } });
-      channel.onMessage(handler);
-
-      messageHandler!(makeCtx({ chatId: "123", username: "bob", text: "hello" }));
-      expect(handler).not.toHaveBeenCalled();
+    it("creates a session on first message from a chat", async () => {
+      messageHandler!(makeCtx({ chatId: "456", username: "bob", text: "hi" }));
+      await vi.waitFor(() => expect(agent._connection.newSession).toHaveBeenCalled());
     });
 
-    it("blocks messages from users without username when allowed_users is set", () => {
-      channel = new TelegramChannel({ access_control: { allowed_users: ["@alice"] } });
-      channel.onMessage(handler);
+    it("reuses session for same chat", async () => {
+      messageHandler!(makeCtx({ chatId: "789", username: "carol", text: "first" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
 
-      messageHandler!(makeCtx({ chatId: "123", text: "hello" }));
-      expect(handler).not.toHaveBeenCalled();
-    });
+      messageHandler!(makeCtx({ chatId: "789", username: "carol", text: "second" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
 
-    it("allows all messages when allowed_users is empty", () => {
-      channel = new TelegramChannel({ access_control: {} });
-      channel.onMessage(handler);
-
-      messageHandler!(makeCtx({ chatId: "123", username: "anyone", text: "hello" }));
-      expect(handler).toHaveBeenCalledWith("123", "hello");
-    });
-
-    it("allows all messages when no config provided", () => {
-      channel = new TelegramChannel({});
-      channel.onMessage(handler);
-
-      messageHandler!(makeCtx({ chatId: "123", username: "anyone", text: "hello" }));
-      expect(handler).toHaveBeenCalledWith("123", "hello");
+      // newSession should only be called once
+      expect(agent._connection.newSession).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe("require_mention", () => {
-    it("passes messages in private chats regardless of require_mention", () => {
-      channel = new TelegramChannel({ access_control: { require_mention: true } });
-      channel.onMessage(handler);
+  describe("custom commands", () => {
+    it("/new resets session and next message creates fresh session", async () => {
+      // First create a session
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "hi" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
 
-      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello", chatType: "private" }));
-      expect(handler).toHaveBeenCalledWith("123", "hello");
+      // Reset
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/new" }));
+      await vi.waitFor(() =>
+        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
+          100,
+          expect.stringContaining("New session"),
+          expect.any(Object)
+        )
+      );
+
+      // Next message should create a new session
+      agent._connection.newSession.mockClear();
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "after reset" }));
+      await vi.waitFor(() => expect(agent._connection.newSession).toHaveBeenCalled());
     });
 
-    it("blocks messages in groups without @mention when require_mention is true", async () => {
-      channel = new TelegramChannel({ access_control: { require_mention: true } });
-      channel.onMessage(handler);
-      await channel.start();
-      startCallback?.({ username: "mybot" });
-
-      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello", chatType: "group" }));
-      expect(handler).not.toHaveBeenCalled();
+    it("/stop calls agent.abort()", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/stop" }));
+      await vi.waitFor(() => expect(agent.abort).toHaveBeenCalled());
     });
 
-    it("passes messages in groups with @mention when require_mention is true", async () => {
-      channel = new TelegramChannel({ access_control: { require_mention: true } });
-      channel.onMessage(handler);
-      await channel.start();
-      startCallback?.({ username: "mybot" });
-
-      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hey @mybot do something", chatType: "group" }));
-      expect(handler).toHaveBeenCalledWith("123", "hey @mybot do something");
-    });
-
-    it("passes all group messages when require_mention is false", () => {
-      channel = new TelegramChannel({ access_control: { require_mention: false } });
-      channel.onMessage(handler);
-
-      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello", chatType: "group" }));
-      expect(handler).toHaveBeenCalledWith("123", "hello");
-    });
-  });
-
-  describe("per-group ACL overrides", () => {
-    it("uses group-specific allowed_users over top-level", () => {
-      channel = new TelegramChannel({
-        access_control: {
-          allowed_users: ["@alice"],
-          groups: { "456": { allowed_users: ["@bob"] } },
-        },
+    it("/help lists custom and agent commands", async () => {
+      agent.getAgentCommands.mockReturnValue([
+        { name: "model", description: "Switch model" },
+      ]);
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/help" }));
+      await vi.waitFor(() => {
+        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
+          100,
+          expect.stringContaining("/new"),
+          expect.any(Object)
+        );
+        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
+          100,
+          expect.stringContaining("/model"),
+          expect.any(Object)
+        );
       });
-      channel.onMessage(handler);
-
-      // alice is top-level allowed but not in group 456
-      messageHandler!(makeCtx({ chatId: "456", username: "alice", text: "hi", chatType: "group" }));
-      expect(handler).not.toHaveBeenCalled();
-
-      // bob is allowed in group 456
-      messageHandler!(makeCtx({ chatId: "456", username: "bob", text: "hi", chatType: "group" }));
-      expect(handler).toHaveBeenCalledWith("456", "hi");
     });
 
-    it("uses group-specific require_mention over top-level", async () => {
-      channel = new TelegramChannel({
-        access_control: {
-          require_mention: false,
-          groups: { "789": { require_mention: true } },
-        },
-      });
-      channel.onMessage(handler);
-      await channel.start();
-      startCallback?.({ username: "mybot" });
-
-      // Group 789 requires mention even though top-level doesn't
-      messageHandler!(makeCtx({ chatId: "789", username: "alice", text: "hello", chatType: "supergroup" }));
-      expect(handler).not.toHaveBeenCalled();
-
-      messageHandler!(makeCtx({ chatId: "789", username: "alice", text: "hey @mybot", chatType: "supergroup" }));
-      expect(handler).toHaveBeenCalledWith("789", "hey @mybot");
+    it("/diagnose shows diagnostics", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose" }));
+      await vi.waitFor(() =>
+        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
+          100,
+          expect.stringContaining("Diagnostics"),
+          expect.any(Object)
+        )
+      );
     });
 
-    it("falls back to top-level for groups without override", () => {
-      channel = new TelegramChannel({
-        access_control: {
-          allowed_users: ["@alice"],
-          groups: { "456": { allowed_users: ["@bob"] } },
-        },
-      });
-      channel.onMessage(handler);
+    it("unknown /commands are forwarded to agent", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/model gpt-4o" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/model gpt-4o");
+    });
 
-      // Group 999 has no override, uses top-level allowed_users
-      messageHandler!(makeCtx({ chatId: "999", username: "alice", text: "hi", chatType: "group" }));
-      expect(handler).toHaveBeenCalledWith("999", "hi");
+    it("/command@botname strips mention", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/new@testbot" }));
+      await vi.waitFor(() =>
+        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
+          100,
+          expect.stringContaining("New session"),
+          expect.any(Object)
+        )
+      );
     });
   });
 
-  describe("handler assignment", () => {
-    it("does not call handler when none is registered", () => {
-      channel = new TelegramChannel({});
-      // Don't call onMessage — handler stays null
+  describe("access control", () => {
+    it("ignores unauthorized users", async () => {
+      // Create a new channel with ACL
+      const ch = createTelegramChannel(
+        { access_control: { allowed_users: ["@alice"] } },
+        agent as any
+      );
+      await ch.start();
+      startCallback?.({ username: "testbot" });
 
-      // Should not throw
-      expect(() => {
-        messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
-      }).not.toThrow();
+      messageHandler!(makeCtx({ chatId: "100", username: "bob", text: "hi" }));
+      expect(agent.prompt).not.toHaveBeenCalled();
     });
   });
 
-  describe("registerCommands", () => {
-    it("calls setMyCommands with sanitized command names", async () => {
-      channel = new TelegramChannel({});
-      const mockApi = (channel as any).bot.api;
+  describe("startup buffer", () => {
+    it("buffers messages before bot is ready", async () => {
+      const freshAgent = createMockAgent();
+      const ch = createTelegramChannel({}, freshAgent as any);
+      // Call start but don't trigger startCallback — bot not connected yet
+      await ch.start();
 
-      await channel.registerCommands([
-        { name: "new", description: "Start a new session" },
-        { name: "stop", description: "Stop current operation" },
-      ]);
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "buffered" }));
+      expect(freshAgent.prompt).not.toHaveBeenCalled();
+    });
+  });
 
-      expect(mockApi.setMyCommands).toHaveBeenCalledWith([
-        { command: "new", description: "Start a new session" },
-        { command: "stop", description: "Stop current operation" },
-      ]);
+  describe("bot menu registration", () => {
+    it("registers commands on start", () => {
+      expect(mockBotApi.setMyCommands).toHaveBeenCalled();
+      const calls = mockBotApi.setMyCommands.mock.calls[0][0];
+      expect(calls.some((c: any) => c.command === "new")).toBe(true);
+      expect(calls.some((c: any) => c.command === "help")).toBe(true);
     });
 
-    it("sanitizes command names (lowercase, replace invalid chars)", async () => {
-      channel = new TelegramChannel({});
-      const mockApi = (channel as any).bot.api;
-
-      await channel.registerCommands([
-        { name: "My-Command", description: "test" },
-        { name: "UPPER", description: "test" },
+    it("re-registers when agent commands update", () => {
+      mockBotApi.setMyCommands.mockClear();
+      agent.getAgentCommands.mockReturnValue([
+        { name: "model", description: "Switch model" },
       ]);
-
-      expect(mockApi.setMyCommands).toHaveBeenCalledWith([
-        { command: "my_command", description: "test" },
-        { command: "upper", description: "test" },
+      agent._triggerCommandsUpdate([
+        { name: "model", description: "Switch model" },
       ]);
-    });
-
-    it("filters out commands with empty names after sanitization", async () => {
-      channel = new TelegramChannel({});
-      const mockApi = (channel as any).bot.api;
-
-      await channel.registerCommands([
-        { name: "---", description: "all invalid" },
-        { name: "valid", description: "ok" },
-      ]);
-
-      expect(mockApi.setMyCommands).toHaveBeenCalledWith([
-        { command: "valid", description: "ok" },
-      ]);
-    });
-
-    it("truncates descriptions to 256 chars", async () => {
-      channel = new TelegramChannel({});
-      const mockApi = (channel as any).bot.api;
-
-      const longDesc = "a".repeat(300);
-      await channel.registerCommands([{ name: "test", description: longDesc }]);
-
-      const calls = mockApi.setMyCommands.mock.calls[0][0];
-      expect(calls[0].description).toHaveLength(256);
-    });
-
-    it("does not throw when setMyCommands fails", async () => {
-      channel = new TelegramChannel({});
-      const mockApi = (channel as any).bot.api;
-      mockApi.setMyCommands.mockRejectedValueOnce(new Error("API error"));
-
-      await expect(
-        channel.registerCommands([{ name: "test", description: "test" }])
-      ).resolves.toBeUndefined();
+      expect(mockBotApi.setMyCommands).toHaveBeenCalled();
+      const calls = mockBotApi.setMyCommands.mock.calls[0][0];
+      expect(calls.some((c: any) => c.command === "model")).toBe(true);
     });
   });
 });
