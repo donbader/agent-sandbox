@@ -66,7 +66,11 @@ export default class TelegramChannel implements Channel {
       this.sendTyping(chatId);
 
       if (this.handler) {
-        this.handler(chatId, text);
+        // Strip @botname from commands (Telegram group chat convention)
+        const normalized = text.startsWith("/")
+          ? text.replace(/^(\/\w+)@\S+/, "$1")
+          : text;
+        this.handler(chatId, normalized);
       }
     });
   }
