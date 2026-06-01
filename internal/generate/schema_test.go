@@ -101,15 +101,59 @@ func TestStructToJSONSchema(t *testing.T) {
 	})
 }
 
-func TestCollectFeatureSchemas(t *testing.T) {
-	schemas := collectFeatureSchemas()
+func TestCollectFeatureItemSchemas(t *testing.T) {
+	schemas := collectFeatureItemSchemas()
+	require.NotEmpty(t, schemas)
 
-	t.Run("includes custom-runtime schema", func(t *testing.T) {
-		schema, ok := schemas["custom-runtime"]
-		require.True(t, ok)
-		s := schema.(map[string]any)
-		assert.Equal(t, "object", s["type"])
-		props := s["properties"].(map[string]any)
+	// Helper to find a plugin schema by name in the oneOf array
+	findPlugin := func(name string) map[string]any {
+		for _, s := range schemas {
+			item := s.(map[string]any)
+			props := item["properties"].(map[string]any)
+			pluginProp := props["plugin"].(map[string]any)
+			if pluginProp["const"] == name {
+				return item
+			}
+		}
+		return nil
+	}
+
+	t.Run("features schema is array with oneOf items", func(t *testing.T) {
+		schema := buildAgentSchema()
+		props := schema["properties"].(map[string]any)
+		features := props["features"].(map[string]any)
+		assert.Equal(t, "array", features["type"])
+		items := features["items"].(map[string]any)
+		assert.Contains(t, items, "oneOf")
+	})
+
+	t.Run("each item has plugin as required const", func(t *testing.T) {
+		for _, s := range schemas {
+			item := s.(map[string]any)
+			props := item["properties"].(map[string]any)
+			assert.Contains(t, props, "plugin")
+			pluginProp := props["plugin"].(map[string]any)
+			assert.Contains(t, pluginProp, "const")
+
+			required := item["required"].([]string)
+			assert.Contains(t, required, "plugin")
+		}
+	})
+
+	t.Run("each item has optional name field", func(t *testing.T) {
+		for _, s := range schemas {
+			item := s.(map[string]any)
+			props := item["properties"].(map[string]any)
+			assert.Contains(t, props, "name")
+			nameProp := props["name"].(map[string]any)
+			assert.Equal(t, "string", nameProp["type"])
+		}
+	})
+
+	t.Run("includes custom-runtime plugin properties", func(t *testing.T) {
+		item := findPlugin("custom-runtime")
+		require.NotNil(t, item)
+		props := item["properties"].(map[string]any)
 		assert.Contains(t, props, "commands")
 		assert.Contains(t, props, "entrypoint_hooks")
 		assert.Contains(t, props, "runtime_volumes")
@@ -117,18 +161,20 @@ func TestCollectFeatureSchemas(t *testing.T) {
 		assert.Contains(t, props, "env")
 	})
 
-	t.Run("includes telegram schema", func(t *testing.T) {
-		schema, ok := schemas["telegram"]
-		require.True(t, ok)
-		s := schema.(map[string]any)
-		assert.Equal(t, "object", s["type"])
-		props := s["properties"].(map[string]any)
+	t.Run("includes telegram plugin properties", func(t *testing.T) {
+		item := findPlugin("telegram")
+		require.NotNil(t, item)
+		props := item["properties"].(map[string]any)
 		assert.Contains(t, props, "access_control")
+
+		required := item["required"].([]string)
+		assert.Contains(t, required, "access_control")
 	})
 
 	t.Run("custom-runtime commands has correct type", func(t *testing.T) {
-		s := schemas["custom-runtime"].(map[string]any)
-		props := s["properties"].(map[string]any)
+		item := findPlugin("custom-runtime")
+		require.NotNil(t, item)
+		props := item["properties"].(map[string]any)
 		cmdProp := props["commands"].(map[string]any)
 		assert.Equal(t, "array", cmdProp["type"])
 		assert.Equal(t, map[string]any{"type": "string"}, cmdProp["items"])

@@ -28,7 +28,7 @@ func (g *Generator) writeSchema() error {
 
 // buildAgentSchema generates a JSON Schema describing agent.yaml format.
 func buildAgentSchema() map[string]any {
-	featureSchemas := collectFeatureSchemas()
+	featureItemSchemas := collectFeatureItemSchemas()
 
 	schema := map[string]any{
 		"$schema": "http://json-schema.org/draft-07/schema#",
@@ -50,9 +50,11 @@ func buildAgentSchema() map[string]any {
 				"default":     true,
 			},
 			"features": map[string]any{
-				"type":        "object",
+				"type":        "array",
 				"description": "Feature plugins and their configuration",
-				"properties":  featureSchemas,
+				"items": map[string]any{
+					"oneOf": featureItemSchemas,
+				},
 			},
 		},
 		"required": []string{"name", "runtime"},
@@ -61,16 +63,50 @@ func buildAgentSchema() map[string]any {
 	return schema
 }
 
-// collectFeatureSchemas uses reflection on registered plugins' ConfigType()
-// to generate JSON Schema for each plugin's configuration.
-func collectFeatureSchemas() map[string]any {
-	schemas := map[string]any{}
+// collectFeatureItemSchemas builds a oneOf array where each item is a plugin schema
+// with a discriminator on the "plugin" field.
+func collectFeatureItemSchemas() []any {
+	var schemas []any
 	for name, plugin := range resolve.RegisteredPlugins() {
 		configType := plugin.ConfigType()
-		schema := structToJSONSchema(configType)
-		if schema != nil {
-			schemas[name] = schema
+		pluginSchema := structToJSONSchema(configType)
+
+		// Build properties: plugin (const) + name (optional) + plugin-specific fields
+		props := map[string]any{
+			"plugin": map[string]any{
+				"const":       name,
+				"description": "Plugin type",
+			},
+			"name": map[string]any{
+				"type":        "string",
+				"description": "Optional instance name for logging (defaults to features[i])",
+			},
 		}
+
+		var required []string
+		required = append(required, "plugin")
+
+		// Merge plugin-specific properties
+		if pluginSchema != nil {
+			if pluginProps, ok := pluginSchema["properties"].(map[string]any); ok {
+				for k, v := range pluginProps {
+					props[k] = v
+				}
+			}
+			// Carry over plugin-specific required fields
+			if pluginRequired, ok := pluginSchema["required"].([]string); ok {
+				required = append(required, pluginRequired...)
+			}
+		}
+
+		itemSchema := map[string]any{
+			"type":                 "object",
+			"properties":          props,
+			"required":            required,
+			"additionalProperties": false,
+		}
+
+		schemas = append(schemas, itemSchema)
 	}
 	return schemas
 }
