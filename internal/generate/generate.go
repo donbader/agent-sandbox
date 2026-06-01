@@ -999,18 +999,49 @@ func (g *Generator) writeBridgeSource() error {
 			continue
 		}
 		name := f.BridgeChannel
+		bridgeRoot := fmt.Sprintf("internal/plugins/%s/bridge", name)
 
-		// Read plugin's bridge/channel.ts from embedded CorePlugins
-		srcPath := fmt.Sprintf("internal/plugins/%s/bridge/channel.ts", name)
-		data, err := sandbox.CorePlugins.ReadFile(srcPath)
+		// Copy all .ts files from plugin's bridge/ directory to bridge-src/src/
+		// channel.ts → src/channel/<name>.ts (special case)
+		// other files preserve relative path: delivery/foo.ts → src/delivery/foo.ts
+		err := fs.WalkDir(sandbox.CorePlugins, bridgeRoot, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if !strings.HasSuffix(path, ".ts") {
+				return nil
+			}
+			// Skip test files
+			if strings.HasSuffix(path, ".test.ts") {
+				return nil
+			}
+
+			data, err := sandbox.CorePlugins.ReadFile(path)
+			if err != nil {
+				return err
+			}
+
+			// Determine destination path
+			relPath, _ := filepath.Rel(bridgeRoot, path)
+			var destPath string
+			if relPath == "channel.ts" {
+				// channel.ts → src/channel/<name>.ts
+				destPath = filepath.Join(channelDir, name+".ts")
+			} else {
+				// other files → src/<relPath>
+				destPath = filepath.Join(destDir, "src", relPath)
+			}
+
+			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+				return err
+			}
+			return os.WriteFile(destPath, data, 0644)
+		})
 		if err != nil {
-			return fmt.Errorf("plugin %q declares BridgeChannel but has no bridge/channel.ts: %w", name, err)
-		}
-
-		// Write to .build/bridge-src/src/channel/<name>.ts
-		destPath := filepath.Join(channelDir, name+".ts")
-		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			return err
+			return fmt.Errorf("plugin %q: copying bridge files: %w", name, err)
 		}
 		channels = append(channels, name)
 	}
