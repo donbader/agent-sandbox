@@ -6,6 +6,7 @@ Everything from `local-coding` plus a Telegram bot channel — talk to your codi
 
 - **telegram** — channel plugin that connects a Telegram bot to the agent via ACP protocol (JSON lines on stdin/stdout).
 - **static-header** (instance: stx-llm-gateway) — gateway intercepts requests to `agent-gateway.stx-ai.net` and injects your real API key via MITM.
+- **mcp-oauth** (notion) — OAuth token injection for Notion MCP server. Tokens managed via `/oauth` command.
 - **custom-runtime** — overlays codex configuration into the agent's home directory.
 
 ## Prerequisites
@@ -52,3 +53,18 @@ Telegram API
 ```
 
 The real bot token and API keys never enter the agent's environment — they're only available to the gateway process.
+
+## Connecting Notion MCP
+
+After the agent is running, connect Notion via Telegram:
+
+```
+/oauth notion
+→ Bot sends an authorization URL
+→ Click the URL, authorize in Notion
+→ Copy the callback URL from your browser
+→ Paste it back in Telegram
+→ Done! Agent can now use Notion tools.
+```
+
+The token is stored in a shared volume and auto-refreshes. No restart needed.

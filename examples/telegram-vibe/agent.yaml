@@ -16,5 +16,10 @@ features:
     value_format: "Bearer ${value}"
     secret: "${STX_LLM_GATEWAY_API_KEY}"
 
+  - plugin: mcp-oauth
+    providers:
+      notion:
+        mcp_url: https://mcp.notion.com/mcp
+
   - plugin: custom-runtime
     home_override: "./home"
