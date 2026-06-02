@@ -249,6 +249,15 @@ func (g *Generator) writeAgentDockerfile() error {
 
 
 
+	// Runtime install commands (before channel-manager COPY for better layer caching —
+	// these change rarely, while channel-manager source changes on every build)
+	for _, cmd := range g.Runtime.Install {
+		b.WriteString(fmt.Sprintf("RUN %s\n", cmd))
+	}
+
+	// Feature install commands
+	g.writeFeatureCommands(&b)
+
 	// Copy channel-manager dist if enabled
 	if g.ChannelManager {
 		b.WriteString("# Install channel-manager\n")
@@ -257,14 +266,6 @@ func (g *Generator) writeAgentDockerfile() error {
 		b.WriteString("COPY --from=channel-manager-build /src/package.json /opt/channel-manager/package.json\n")
 		b.WriteString("COPY channel-manager-config.json /opt/channel-manager/config.json\n")
 	}
-
-	// Runtime install commands
-	for _, cmd := range g.Runtime.Install {
-		b.WriteString(fmt.Sprintf("RUN %s\n", cmd))
-	}
-
-	// Feature install commands
-	g.writeFeatureCommands(&b)
 
 	// Copy home override, hooks, entrypoint
 	g.writeCopyStatements(&b)

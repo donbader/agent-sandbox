@@ -521,3 +521,88 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, string(env), "TELEGRAM_BOT_TOKEN=")
 	})
 }
+
+func TestGenerator_DockerfileLayerOrder(t *testing.T) {
+	t.Run("runtime install before channel-manager COPY for cache optimization", func(t *testing.T) {
+		srcDir := t.TempDir()
+		outDir := t.TempDir()
+
+		// Create minimal gateway source
+		gwDir := filepath.Join(srcDir, "gateway")
+		require.NoError(t, os.MkdirAll(filepath.Join(gwDir, "cmd", "gateway"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(gwDir, "go.mod"), []byte("module gateway\ngo 1.24\n"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(gwDir, "cmd", "gateway", "main.go"), []byte("package main\nfunc main() {}\n"), 0644))
+
+		g := &Generator{
+			Config: &config.AgentConfig{
+				Name:    "coder",
+				Runtime: "codex",
+				Features: []config.FeatureEntry{
+					{Plugin: "telegram", Config: map[string]any{"bot_token": "${TELEGRAM_BOT_TOKEN}"}},
+				},
+			},
+			Runtime: &resolve.RuntimeConfig{
+				Name:      "codex",
+				BaseImage: "node:22-slim",
+				Install:   []string{"--mount=type=cache,target=/root/.npm npm install -g @openai/codex@latest"},
+				Cmd:       []string{"sleep", "infinity"},
+				User:      "agent",
+			},
+			Features: []*resolve.FeatureContributions{
+				{
+					MITMDomains:   []string{"api.telegram.org"},
+					ChannelName:   "telegram",
+					ChannelConfig: map[string]any{},
+					Rewriters: []resolve.RewriterConfig{
+						{Type: "telegram-url", Domains: []string{"api.telegram.org"}, EnvVar: "TELEGRAM_BOT_TOKEN"},
+					},
+				},
+			},
+			Gateway:        true,
+			ChannelManager: true,
+			GatewaySpec: GatewaySpec{
+				BuildImage: "golang:1.24-alpine",
+				BinaryPath: "/gateway",
+				ListenPort: 8443,
+				DNSPort:    5353,
+			},
+			ChannelManagerSpec: ChannelManagerSpec{
+				BuildImage: "node:22-slim",
+				InstallCmd: "npm install",
+				BuildCmd:   "npm run build",
+				DistDir:    "/src/dist",
+				EntryPoint: "node /opt/channel-manager/dist/index.js",
+			},
+			Dir:    srcDir,
+			OutDir: outDir,
+		}
+
+		err := g.Run()
+		require.NoError(t, err)
+
+		dfAgent, err := os.ReadFile(filepath.Join(outDir, "Dockerfile.agent"))
+		require.NoError(t, err)
+		dfAgentStr := string(dfAgent)
+
+		// Runtime install should use BuildKit cache mount
+		assert.Contains(t, dfAgentStr, "RUN --mount=type=cache,target=/root/.npm npm install -g @openai/codex@latest")
+
+		// Runtime install should appear BEFORE channel-manager COPY for layer cache optimization
+		runtimeInstallIdx := indexOf(dfAgentStr, "npm install -g @openai/codex")
+		channelManagerCopyIdx := indexOf(dfAgentStr, "COPY --from=channel-manager-build")
+		require.Greater(t, runtimeInstallIdx, -1, "runtime install not found in Dockerfile.agent")
+		require.Greater(t, channelManagerCopyIdx, -1, "channel-manager COPY not found in Dockerfile.agent")
+		assert.Less(t, runtimeInstallIdx, channelManagerCopyIdx,
+			"runtime install should come before channel-manager COPY for better Docker layer caching")
+	})
+}
+
+// indexOf returns the byte offset of the first occurrence of substr in s, or -1.
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}

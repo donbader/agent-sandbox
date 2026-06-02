@@ -2,6 +2,6 @@ name: codex
 base_image: node:22-slim
 install:
   - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*
-  - npm install -g @openai/codex@latest @zed-industries/codex-acp@latest
+  - --mount=type=cache,target=/root/.npm npm install -g @openai/codex@latest @zed-industries/codex-acp@latest
 cmd: ["sleep", "infinity"]
 acp_cmd: ["codex-acp"]
