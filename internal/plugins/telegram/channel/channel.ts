@@ -137,7 +137,7 @@ export default function createTelegramChannel(
     const segments = splitMessage(html);
 
     for (const segment of segments) {
-      rateLimiter.acquire().then(() =>
+      rateLimiter.acquire(chatId).then(() =>
         withRetry(async () => {
           await bot.api.sendMessage(Number(chatId), segment, {
             parse_mode: "HTML",
