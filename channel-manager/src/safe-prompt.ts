@@ -2,7 +2,7 @@
  * Safe prompt helper — wraps agent.prompt() with error handling.
  * Returns the response string on success, or an error message on failure.
  */
-import type { AcpAgent } from "./acp-client.js";
+import type { AcpAgent, PromptOptions } from "./acp-client.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("safe-prompt");
@@ -14,10 +14,11 @@ const log = createLogger("safe-prompt");
 export async function safePrompt(
   agent: AcpAgent,
   sessionId: string,
-  text: string
+  text: string,
+  options?: PromptOptions
 ): Promise<{ ok: true; response: string } | { ok: false; error: string }> {
   try {
-    const response = await agent.prompt(sessionId, text);
+    const response = await agent.prompt(sessionId, text, options);
     return { ok: true, response };
   } catch (err: unknown) {
     log.error({ error: err, sessionId }, "agent prompt failed");

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { safePrompt } from "./safe-prompt.js";
-import type { AcpAgent } from "./acp-client.js";
+import type { AcpAgent, PromptOptions } from "./acp-client.js";
 
 function mockAgent(response?: string, error?: Error): AcpAgent {
   return {
@@ -27,6 +27,15 @@ describe("safePrompt", () => {
   it("passes sessionId and text to agent.prompt", async () => {
     const agent = mockAgent("ok");
     await safePrompt(agent, "my-session", "fix the bug");
-    expect(agent.prompt).toHaveBeenCalledWith("my-session", "fix the bug");
+    expect(agent.prompt).toHaveBeenCalledWith("my-session", "fix the bug", undefined);
+  });
+
+  it("passes options through to agent.prompt", async () => {
+    const agent = mockAgent("streamed");
+    const onSessionUpdate = vi.fn();
+    const options: PromptOptions = { onSessionUpdate };
+    const result = await safePrompt(agent, "sess-2", "hello", options);
+    expect(result).toEqual({ ok: true, response: "streamed" });
+    expect(agent.prompt).toHaveBeenCalledWith("sess-2", "hello", options);
   });
 });
