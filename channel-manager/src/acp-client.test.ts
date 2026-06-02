@@ -274,19 +274,19 @@ describe("BridgeClient.sessionUpdate — available_commands_update", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BridgeClient — sessionUpdateCallback (forwards ALL notifications)
+// BridgeClient — sessionUpdateCallbackForSession (forwards notifications per session)
 // ---------------------------------------------------------------------------
 
-describe("BridgeClient.sessionUpdateCallback", () => {
+describe("BridgeClient.sessionUpdateCallbackForSession", () => {
   let client: BridgeClient;
 
   beforeEach(() => {
     client = new BridgeClient();
   });
 
-  it("forwards agent_message_chunk to sessionUpdateCallback", async () => {
+  it("forwards agent_message_chunk to session-specific callback", async () => {
     const cb = vi.fn();
-    client.setSessionUpdateCallback(cb);
+    client.setSessionUpdateCallbackForSession("s1", cb);
 
     const notification: SessionNotification = {
       sessionId: "s1",
@@ -297,9 +297,9 @@ describe("BridgeClient.sessionUpdateCallback", () => {
     expect(cb).toHaveBeenCalledWith(notification);
   });
 
-  it("forwards agent_thought_chunk to sessionUpdateCallback", async () => {
+  it("forwards agent_thought_chunk to session-specific callback", async () => {
     const cb = vi.fn();
-    client.setSessionUpdateCallback(cb);
+    client.setSessionUpdateCallbackForSession("s1", cb);
 
     const notification = {
       sessionId: "s1",
@@ -310,9 +310,9 @@ describe("BridgeClient.sessionUpdateCallback", () => {
     expect(cb).toHaveBeenCalledWith(notification);
   });
 
-  it("forwards tool_call to sessionUpdateCallback", async () => {
+  it("forwards tool_call to session-specific callback", async () => {
     const cb = vi.fn();
-    client.setSessionUpdateCallback(cb);
+    client.setSessionUpdateCallbackForSession("s1", cb);
 
     const notification = {
       sessionId: "s1",
@@ -323,9 +323,9 @@ describe("BridgeClient.sessionUpdateCallback", () => {
     expect(cb).toHaveBeenCalledWith(notification);
   });
 
-  it("forwards tool_call_update to sessionUpdateCallback", async () => {
+  it("forwards tool_call_update to session-specific callback", async () => {
     const cb = vi.fn();
-    client.setSessionUpdateCallback(cb);
+    client.setSessionUpdateCallbackForSession("s1", cb);
 
     const notification = {
       sessionId: "s1",
@@ -336,9 +336,9 @@ describe("BridgeClient.sessionUpdateCallback", () => {
     expect(cb).toHaveBeenCalledWith(notification);
   });
 
-  it("sessionUpdateCallback is called BEFORE chunkCallback for agent_message_chunk", async () => {
+  it("session-specific callback is called BEFORE chunkCallback for agent_message_chunk", async () => {
     const order: string[] = [];
-    client.setSessionUpdateCallback(() => order.push("sessionUpdate"));
+    client.setSessionUpdateCallbackForSession("s1", () => order.push("sessionUpdate"));
     client.setChunkCallback(() => order.push("chunk"));
 
     await client.sessionUpdate({
@@ -349,10 +349,10 @@ describe("BridgeClient.sessionUpdateCallback", () => {
     expect(order).toEqual(["sessionUpdate", "chunk"]);
   });
 
-  it("agent_message_chunk still collected by chunkCallback when sessionUpdateCallback is set", async () => {
+  it("agent_message_chunk still collected by chunkCallback when session callback is set", async () => {
     const chunks: string[] = [];
     const sessionCb = vi.fn();
-    client.setSessionUpdateCallback(sessionCb);
+    client.setSessionUpdateCallbackForSession("s1", sessionCb);
     client.setChunkCallback((t) => chunks.push(t));
 
     await client.sessionUpdate({
@@ -364,14 +364,51 @@ describe("BridgeClient.sessionUpdateCallback", () => {
     expect(sessionCb).toHaveBeenCalledTimes(1);
   });
 
-  it("clears sessionUpdateCallback with null", async () => {
+  it("clears session callback with null", async () => {
     const cb = vi.fn();
-    client.setSessionUpdateCallback(cb);
-    client.setSessionUpdateCallback(null);
+    client.setSessionUpdateCallbackForSession("s1", cb);
+    client.setSessionUpdateCallbackForSession("s1", null);
 
     await client.sessionUpdate({
       sessionId: "s1",
       update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking" } },
+    } as SessionNotification);
+
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("routes notifications to correct session callback (concurrent sessions)", async () => {
+    const cb1 = vi.fn();
+    const cb2 = vi.fn();
+    client.setSessionUpdateCallbackForSession("s1", cb1);
+    client.setSessionUpdateCallbackForSession("s2", cb2);
+
+    const notification1 = {
+      sessionId: "s1",
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "for s1" } },
+    } as SessionNotification;
+
+    const notification2 = {
+      sessionId: "s2",
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "for s2" } },
+    } as SessionNotification;
+
+    await client.sessionUpdate(notification1);
+    await client.sessionUpdate(notification2);
+
+    expect(cb1).toHaveBeenCalledTimes(1);
+    expect(cb1).toHaveBeenCalledWith(notification1);
+    expect(cb2).toHaveBeenCalledTimes(1);
+    expect(cb2).toHaveBeenCalledWith(notification2);
+  });
+
+  it("does not forward to unregistered session", async () => {
+    const cb = vi.fn();
+    client.setSessionUpdateCallbackForSession("s1", cb);
+
+    await client.sessionUpdate({
+      sessionId: "s-unknown",
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } },
     } as SessionNotification);
 
     expect(cb).not.toHaveBeenCalled();

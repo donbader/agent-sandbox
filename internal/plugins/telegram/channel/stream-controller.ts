@@ -231,7 +231,7 @@ export class StreamController {
 
   private tickThrottle(): void {
     if (this.state !== "STREAMING") return;
-    if (this.messageId === null || this.overflowing) return;
+    if (!this.messageId || this.overflowing) return;
 
     const content = this.renderContent();
     if (!content) return;
@@ -298,7 +298,7 @@ export class StreamController {
 
   private sendThinkingDraft(): void {
     const text = this.thinkingBuffer || "Still thinking...";
-    this.deps.sendDraft(this.draftId, `🧠 ${text}`);
+    this.safeAsync(this.deps.sendDraft(this.draftId, `🧠 ${text}`));
   }
 
   private ensureDraftRefresh(): void {
@@ -309,7 +309,7 @@ export class StreamController {
         this.thinkingDirty = false;
         this.sendThinkingDraft();
       } else {
-        this.deps.sendDraft(this.draftId, "🧠 Still thinking...");
+        this.safeAsync(this.deps.sendDraft(this.draftId, "🧠 Still thinking..."));
       }
     }, DRAFT_REFRESH_MS);
   }

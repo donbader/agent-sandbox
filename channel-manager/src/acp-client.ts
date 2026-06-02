@@ -28,7 +28,7 @@ export interface PromptOptions {
 export class BridgeClient implements acp.Client {
   private chunkCallback: ((text: string) => void) | null = null;
   private commandsCallback: ((commands: AgentCommand[]) => void) | null = null;
-  private sessionUpdateCallback: ((notification: acp.SessionNotification) => void) | null = null;
+  private sessionUpdateCallbacks = new Map<string, (notification: acp.SessionNotification) => void>();
 
   setChunkCallback(cb: ((text: string) => void) | null): void {
     this.chunkCallback = cb;
@@ -38,8 +38,12 @@ export class BridgeClient implements acp.Client {
     this.commandsCallback = cb;
   }
 
-  setSessionUpdateCallback(cb: ((notification: acp.SessionNotification) => void) | null): void {
-    this.sessionUpdateCallback = cb;
+  setSessionUpdateCallbackForSession(sessionId: string, cb: ((notification: acp.SessionNotification) => void) | null): void {
+    if (cb) {
+      this.sessionUpdateCallbacks.set(sessionId, cb);
+    } else {
+      this.sessionUpdateCallbacks.delete(sessionId);
+    }
   }
 
   async requestPermission(
@@ -58,11 +62,15 @@ export class BridgeClient implements acp.Client {
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {
-    // Forward ALL notifications to sessionUpdateCallback before specific handling
-    try {
-      this.sessionUpdateCallback?.(params);
-    } catch (e) {
-      // Don't let caller errors break chunk collection
+    // Forward to session-specific callback before specific handling
+    const sessionId = (params as any).sessionId as string | undefined;
+    const cb = sessionId ? this.sessionUpdateCallbacks.get(sessionId) : undefined;
+    if (cb) {
+      try {
+        cb(params);
+      } catch {
+        // Don't let caller errors break chunk collection
+      }
     }
 
     const { update } = params;
@@ -212,7 +220,7 @@ export class AcpAgent {
 
     this.acpHandler.setChunkCallback((chunk) => chunks.push(chunk));
     if (options?.onSessionUpdate) {
-      this.acpHandler.setSessionUpdateCallback(options.onSessionUpdate);
+      this.acpHandler.setSessionUpdateCallbackForSession(sessionId, options.onSessionUpdate);
     }
 
     try {
@@ -233,7 +241,7 @@ export class AcpAgent {
     } finally {
       this.pendingReject = null;
       this.acpHandler.setChunkCallback(null);
-      this.acpHandler.setSessionUpdateCallback(null);
+      this.acpHandler.setSessionUpdateCallbackForSession(sessionId, null);
     }
   }
 
