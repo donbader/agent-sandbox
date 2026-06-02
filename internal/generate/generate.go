@@ -1112,7 +1112,7 @@ func (g *Generator) writeCommandPlugins() error {
 			continue
 		}
 
-		commandRoot := fmt.Sprintf("internal/plugins/%s/%s", f.Name, f.CommandPluginDir)
+		commandRoot := f.CommandPluginDir // already expanded to full embedded path by resolver
 
 		err := fs.WalkDir(sandbox.CorePlugins, commandRoot, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {

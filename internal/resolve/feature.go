@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"fmt"
+	"strings"
 
 	sandbox "github.com/donbader/agent-sandbox"
 	"gopkg.in/yaml.v3"
@@ -23,6 +24,10 @@ func ResolveFeature(projectDir string, plugin string, instanceName string, userC
 			return nil, err
 		}
 		contrib.Name = instanceName
+		// Expand relative CommandPluginDir to full embedded path using plugin name.
+		if contrib.CommandPluginDir != "" && !strings.HasPrefix(contrib.CommandPluginDir, "internal/") {
+			contrib.CommandPluginDir = fmt.Sprintf("internal/plugins/%s/%s", plugin, contrib.CommandPluginDir)
+		}
 		return contrib, nil
 	}
 
