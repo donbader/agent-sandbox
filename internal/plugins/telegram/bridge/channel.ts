@@ -98,49 +98,8 @@ export default function createTelegramChannel(
   }
 
   // --- Commands ---
-
-  async function handleCommand(chatId: string, cmd: string, args: string): Promise<string | null> {
-    switch (cmd) {
-      case "sh": {
-        if (!args.trim()) return "Usage: /sh <command>";
-        const { execSync } = await import("node:child_process");
-        try {
-          const output = execSync(args.trim(), {
-            timeout: 30_000,
-            maxBuffer: 1024 * 1024,
-            encoding: "utf-8",
-          });
-          const trimmed = output.trim().slice(0, 4000);
-          return trimmed || "(no output)";
-        } catch (err: unknown) {
-          const e = err as { status?: number; stdout?: string; stderr?: string };
-          const output = (e.stdout || "") + (e.stderr || "");
-          return `Exit ${e.status ?? "?"}:\n${output.trim().slice(0, 4000)}`;
-        }
-      }
-
-      case "diagnose": {
-        const lines = ["🔍 Diagnostics:"];
-        lines.push(`  Chat ID: ${chatId}`);
-        lines.push(`  Agent ready: ${agent.isReady()}`);
-        const sessionId = sessions.get(chatId);
-        lines.push(`  Session: ${sessionId ? sessionId.slice(0, 8) + "…" : "none"}`);
-        lines.push(`  Active sessions: ${sessions.size}`);
-        if (perfHistory.length > 0) {
-          const sorted = [...perfHistory].sort((a, b) => a - b);
-          const avg = Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length);
-          const p95 = sorted[Math.floor(sorted.length * 0.95)];
-          const last = perfHistory[perfHistory.length - 1];
-          lines.push(`  Perf (${sorted.length} prompts): avg ${avg}ms / p95 ${p95}ms / last ${last}ms`);
-        }
-        return lines.join("\n");
-      }
-
-      default:
-        // Not a bridge command — forward to agent
-        return null;
-    }
-  }
+  // None — all commands handled by ACP wrapper on agent side.
+  // Channel is a pure platform adapter.
 
   // --- Message handling ---
 
@@ -153,21 +112,29 @@ export default function createTelegramChannel(
     // Typing indicator
     sendTyping(chatId);
 
-    // Command routing
+    // Command routing — all forwarded to agent (wrapper handles bridge commands)
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
       const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
-      const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
-
       // Strip @botname from command
       const cleanCmd = cmd.split("@")[0];
+      const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+      // Reconstruct clean command text
+      const cleanText = args ? `/${cleanCmd} ${args}` : `/${cleanCmd}`;
 
-      const response = await handleCommand(chatId, cleanCmd, args);
-      if (response !== null) {
+      try {
+        const sessionId = await getOrCreateSession(chatId);
+        const t0 = Date.now();
+        const response = await agent.prompt(sessionId, cleanText);
+        const elapsed = Date.now() - t0;
+        perfHistory.push(elapsed);
+        if (perfHistory.length > PERF_MAX) perfHistory.shift();
         sendMessage(chatId, response);
-        return;
+      } catch (err: unknown) {
+        log.error({ error: err, chatId }, "agent prompt failed");
+        sendMessage(chatId, "⚠️ Agent unavailable. Try again shortly.");
       }
-      // null = not a custom command, forward to agent
+      return;
     }
 
     // Forward to agent
@@ -220,22 +187,20 @@ export default function createTelegramChannel(
   }
 
   function registerBotCommands(): void {
-    const commands = [
-      { command: "sh", description: "Execute shell command" },
-      { command: "diagnose", description: "Show diagnostics and perf stats" },
-    ];
+    // Only agent-declared commands (bridge has no custom commands)
+    const commands: Array<{ command: string; description: string }> = [];
 
-    // Add agent-declared commands
-    const coreNames = new Set(commands.map((c) => c.command));
     for (const agentCmd of agent.getAgentCommands()) {
       const sanitized = sanitizeCommandName(agentCmd.name);
-      if (sanitized && !coreNames.has(sanitized) && sanitized.length <= 32) {
+      if (sanitized && sanitized.length <= 32) {
         commands.push({
           command: sanitized,
           description: agentCmd.description.slice(0, 256) || agentCmd.name,
         });
       }
     }
+
+    if (commands.length === 0) return; // Don't register empty list
 
     bot.api.setMyCommands(commands).then(() => {
       log.info({ count: commands.length }, "registered bot commands");

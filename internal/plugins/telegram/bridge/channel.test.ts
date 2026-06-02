@@ -130,38 +130,28 @@ describe("TelegramChannel (thin bridge)", () => {
   });
 
   describe("custom commands", () => {
-    it("/diagnose shows diagnostics", async () => {
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose" }));
-      await vi.waitFor(() =>
-        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
-          100,
-          expect.stringContaining("Diagnostics"),
-          expect.any(Object)
-        )
-      );
-    });
-
-    it("unknown /commands are forwarded to agent", async () => {
+    it("all /commands are forwarded to agent", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/model gpt-4o" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
       expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/model gpt-4o");
     });
 
-    it("/new is forwarded to agent (not handled by bridge)", async () => {
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/new" }));
+    it("/sh is forwarded to agent (handled by ACP wrapper)", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/sh ls" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/new");
+      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/sh ls");
     });
 
-    it("/command@botname strips mention", async () => {
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose@testbot" }));
-      await vi.waitFor(() =>
-        expect(mockBotApi.sendMessage).toHaveBeenCalledWith(
-          100,
-          expect.stringContaining("Diagnostics"),
-          expect.any(Object)
-        )
-      );
+    it("/diagnose is forwarded to agent (handled by ACP wrapper)", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/diagnose");
+    });
+
+    it("/command@botname strips mention before forwarding", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/model@testbot gpt-4o" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/model gpt-4o");
     });
   });
 
@@ -193,24 +183,24 @@ describe("TelegramChannel (thin bridge)", () => {
   });
 
   describe("bot menu registration", () => {
-    it("registers commands on start", () => {
-      expect(mockBotApi.setMyCommands).toHaveBeenCalled();
-      const calls = mockBotApi.setMyCommands.mock.calls[0][0];
-      expect(calls.some((c: any) => c.command === "sh")).toBe(true);
-      expect(calls.some((c: any) => c.command === "diagnose")).toBe(true);
+    it("does not register commands if agent has none", () => {
+      // Agent has no commands declared yet
+      expect(mockBotApi.setMyCommands).not.toHaveBeenCalled();
     });
 
-    it("re-registers when agent commands update", () => {
-      mockBotApi.setMyCommands.mockClear();
+    it("registers when agent commands update", () => {
       agent.getAgentCommands.mockReturnValue([
         { name: "model", description: "Switch model" },
+        { name: "new", description: "New conversation" },
       ]);
       agent._triggerCommandsUpdate([
         { name: "model", description: "Switch model" },
+        { name: "new", description: "New conversation" },
       ]);
       expect(mockBotApi.setMyCommands).toHaveBeenCalled();
       const calls = mockBotApi.setMyCommands.mock.calls[0][0];
       expect(calls.some((c: any) => c.command === "model")).toBe(true);
+      expect(calls.some((c: any) => c.command === "new")).toBe(true);
     });
   });
 });
