@@ -21,9 +21,14 @@ export interface AgentCommand {
   inputHint?: string;
 }
 
+export interface PromptOptions {
+  onSessionUpdate?: (notification: acp.SessionNotification) => void;
+}
+
 export class BridgeClient implements acp.Client {
   private chunkCallback: ((text: string) => void) | null = null;
   private commandsCallback: ((commands: AgentCommand[]) => void) | null = null;
+  private sessionUpdateCallback: ((notification: acp.SessionNotification) => void) | null = null;
 
   setChunkCallback(cb: ((text: string) => void) | null): void {
     this.chunkCallback = cb;
@@ -31,6 +36,10 @@ export class BridgeClient implements acp.Client {
 
   setCommandsCallback(cb: ((commands: AgentCommand[]) => void) | null): void {
     this.commandsCallback = cb;
+  }
+
+  setSessionUpdateCallback(cb: ((notification: acp.SessionNotification) => void) | null): void {
+    this.sessionUpdateCallback = cb;
   }
 
   async requestPermission(
@@ -49,6 +58,13 @@ export class BridgeClient implements acp.Client {
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+    // Forward ALL notifications to sessionUpdateCallback before specific handling
+    try {
+      this.sessionUpdateCallback?.(params);
+    } catch (e) {
+      // Don't let caller errors break chunk collection
+    }
+
     const { update } = params;
     if (
       update.sessionUpdate === "agent_message_chunk" &&
@@ -187,32 +203,38 @@ export class AcpAgent {
    * Sends a prompt to the agent and returns the full response text.
    * Collects all agent_message_chunk updates until the prompt completes.
    */
-  async prompt(sessionId: string, text: string): Promise<string> {
+  async prompt(sessionId: string, text: string, options?: PromptOptions): Promise<string> {
     if (!this.connection) {
       throw new Error("ACP agent not started");
     }
 
     const chunks: string[] = [];
 
-    return new Promise<string>((resolve, reject) => {
-      this.acpHandler.setChunkCallback((chunk) => chunks.push(chunk));
-      this.pendingReject = reject;
+    this.acpHandler.setChunkCallback((chunk) => chunks.push(chunk));
+    if (options?.onSessionUpdate) {
+      this.acpHandler.setSessionUpdateCallback(options.onSessionUpdate);
+    }
 
-      this.connection!.prompt({
-        sessionId,
-        prompt: [{ type: "text", text }],
-      })
-        .then(() => {
-          this.pendingReject = null;
-          this.acpHandler.setChunkCallback(null);
-          resolve(chunks.join(""));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.pendingReject = reject;
+
+        this.connection!.prompt({
+          sessionId,
+          prompt: [{ type: "text", text }],
         })
-        .catch((err: unknown) => {
-          this.pendingReject = null;
-          this.acpHandler.setChunkCallback(null);
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
-    });
+          .then(() => resolve())
+          .catch((err: unknown) => {
+            reject(err instanceof Error ? err : new Error(String(err)));
+          });
+      });
+
+      return chunks.join("");
+    } finally {
+      this.pendingReject = null;
+      this.acpHandler.setChunkCallback(null);
+      this.acpHandler.setSessionUpdateCallback(null);
+    }
   }
 
   /** Whether the agent has an active connection. */
