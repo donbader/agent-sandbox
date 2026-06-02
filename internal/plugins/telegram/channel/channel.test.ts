@@ -248,6 +248,36 @@ describe("TelegramChannel (thin channel manager)", () => {
       // Should not throw — error is caught internally
       // The sendMessage mock will be called by stream.abort with any buffered content
     });
+
+    it("sends thinking content via sendMessageDraft callApi", async () => {
+      agent.prompt.mockImplementation(async (_sid: string, _text: string, opts?: any) => {
+        // Simulate thinking chunks arriving before text response
+        opts?.onSessionUpdate?.({
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "Let me analyze this..." },
+          },
+        });
+        opts?.onSessionUpdate?.({
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Here's the answer." },
+          },
+        });
+        return "done";
+      });
+
+      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "think about this" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+
+      // Verify sendMessageDraft was called via callApi
+      expect(mockBotApi.callApi).toHaveBeenCalledWith("sendMessageDraft", {
+        chat_id: 123,
+        draft_id: 1,
+        text: "🧠 Let me analyze this...",
+        parse_mode: "HTML",
+      });
+    });
   });
 
   describe("bot menu registration", () => {
