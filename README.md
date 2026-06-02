@@ -1,40 +1,28 @@
 # agent-sandbox
 
-Opinionated agent sandbox orchestrator. Deploy AI coding agents inside Docker containers with transparent egress proxy, credential injection, and messaging channels.
+Deploy AI coding agents in Docker containers with transparent egress proxy, credential injection, and Telegram messaging.
 
-## Status
+## Features
 
-Under active development. Core features work (Phases 0–4 complete). See [Roadmap](docs/roadmap.md) for what's done and what's next.
+- **Data-driven plugins** — runtime (codex, claude-code, pi) and feature plugins configured via YAML
+- **Transparent gateway** — all agent traffic routes through a proxy for credential injection and MITM
+- **Telegram channel** — chat with your agent via Telegram (access control, session management, commands)
+- **Custom runtime** — install packages, mount volumes, run startup hooks
+- **Multi-agent** — run multiple agents from a single `fleet.yaml`
+- **One command** — `agent-sandbox generate && agent-sandbox compose up --build`
 
-**What works today:** generate build artifacts, run agents in containers, transparent proxy with credential injection, Telegram channel, custom runtime packages/volumes/hooks.
-
-## Quick Start
+## Quickstart
 
 ```bash
 # Install
 curl -fsSL https://raw.githubusercontent.com/donbader/agent-sandbox/main/install.sh | bash
 
-# Create a project directory
+# Scaffold a project
 mkdir my-agent && cd my-agent
+agent-sandbox init
 
-# Write your config
+# Or write config manually
 cat > agent.yaml << 'EOF'
-name: coder
-runtime: codex
-EOF
-
-# Generate build artifacts and start
-agent-sandbox generate
-agent-sandbox compose up --build -d
-
-# View logs
-agent-sandbox compose logs -f
-```
-
-## Configuration
-
-```yaml
-# agent.yaml
 name: coder
 runtime: codex
 
@@ -43,77 +31,53 @@ features:
     token: "${GITHUB_PAT}"
   - plugin: telegram
     access_control:
-      allowed_users: ["@donbader"]
+      allowed_users: ["@yourname"]
   - plugin: custom-runtime
     commands:
-      - "apt-get update && apt-get install -y --no-install-recommends ripgrep fd-find && rm -rf /var/lib/apt/lists/*"
+      - "apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*"
     runtime_volumes:
       - "agent-home:/home/agent"
+EOF
+
+# Generate and run
+agent-sandbox generate
+agent-sandbox compose up --build -d
+agent-sandbox compose logs -f
 ```
-
-See [examples/](examples/) for working setups.
-
-## Architecture
-
-```
-┌────────────────────────────────┐
-│  agent-sandbox CLI             │
-│  Reads agent.yaml → generates  │
-│  Dockerfile + docker-compose   │
-└────────────────────────────────┘
-
-         docker compose up
-              │
-    ┌─────────┴──────────┐
-    ▼                    ▼
-┌──────────┐     ┌─────────────────────┐
-│ Gateway  │     │ Agent Container      │
-│ container│◄────│                      │
-│          │     │  Channel Manager     │
-│ - proxy  │     │  (spawns agent)      │
-│ - DNS    │     │                      │
-│ - MITM   │     │  Agent Runtime       │
-│ - creds  │     │  (codex/claude/pi)   │
-└──────────┘     └─────────────────────┘
-```
-
-- **Runtime plugins** — set base image + agent CLI (one per agent): codex, claude-code, pi
-- **Feature plugins** — additive capabilities (multiple per agent): custom-runtime, telegram, github-pat, static-header
-- **Gateway** — separate container, transparent proxy (default route enforced), MITM for credential injection
-- **Channel Manager** — TypeScript process that spawns agent as child, loads channel plugins (Telegram, etc.)
 
 ## Commands
 
 ```bash
 agent-sandbox init              # interactive project scaffold
-agent-sandbox generate          # read config → write .build/ artifacts
+agent-sandbox generate          # agent.yaml → .build/ (Dockerfile, docker-compose.yml)
 agent-sandbox validate          # check config without generating
 agent-sandbox plugins           # list available plugins
-agent-sandbox compose ...       # docker compose passthrough (up, down, logs, etc.)
-agent-sandbox upgrade           # self-update to latest release
+agent-sandbox compose ...       # docker compose passthrough
+agent-sandbox upgrade           # self-update
 ```
 
-## Current Limitations
+## Architecture
 
-These features are planned but not yet available:
+```
+┌─────────────────┐         ┌──────────────────────┐
+│ Gateway         │◄────────│ Agent Container       │
+│  - proxy/DNS    │         │  Channel Manager      │
+│  - MITM         │         │  (spawns agent)       │
+│  - cred inject  │         │  Agent Runtime        │
+└─────────────────┘         └──────────────────────┘
+```
 
-- Docker API proxy (let agent spin up containers)
-- MCP OAuth credential flow
-- Streaming reply (edit Telegram message as agent streams)
-- Security hardening (cap_drop, no-new-privileges)
+All agent traffic flows through the gateway container via default route. The gateway injects credentials (GitHub PAT, API keys) without exposing them to the agent environment.
 
-See [Roadmap](docs/roadmap.md) for the full plan.
+## Documentation
 
-## Docs
-
-- [Configuration](docs/configuration.md)
-- [Plugins](docs/plugins.md)
+- [Configuration](docs/configuration.md) — agent.yaml reference
+- [Plugins](docs/plugins.md) — available runtime and feature plugins
 - [Troubleshooting](docs/troubleshooting.md)
 - [Security](docs/security.md)
-- [Plugin System](docs/plugin-system.md) (for developers)
-- [Build & Deploy](docs/build-and-deploy.md) (for developers)
-- [Decisions](docs/decisions.md)
-- [Roadmap](docs/roadmap.md)
+- [Roadmap](docs/roadmap.md) — what's done, what's next
+
+See [examples/](examples/) for working setups.
 
 ## License
 
