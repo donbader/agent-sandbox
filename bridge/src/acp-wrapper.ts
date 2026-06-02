@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /**
- * base-acp-wrapper — ACP middleware that intercepts bridge commands
- * before forwarding to the actual agent.
+ * base-acp-wrapper — SDK-based ACP middleware that intercepts bridge commands.
  *
  * Usage: node acp-wrapper.js -- <agent-acp-command...>
  *   e.g.: node acp-wrapper.js -- npx codex-acp
  *
- * Speaks ACP JSON-RPC on stdin/stdout (to bridge).
- * Spawns the real agent command as subprocess and proxies ACP traffic.
- * Intercepts certain prompts (/sh, /diagnose) and handles them locally.
+ * Acts as ACP server to bridge (stdin/stdout via AgentSideConnection).
+ * Acts as ACP client to real agent (subprocess via ClientSideConnection).
+ * Intercepts /sh and /diagnose prompts, handles locally.
  */
 import { spawn } from "node:child_process";
 import { execSync } from "node:child_process";
-import { createInterface } from "node:readline";
+import { Writable, Readable } from "node:stream";
 import { cpus, totalmem, freemem } from "node:os";
+import * as acp from "@agentclientprotocol/sdk";
 
 // --- Parse args ---
 const args = process.argv.slice(2);
@@ -32,7 +32,6 @@ const PERF_MAX = 50;
 function handleBridgeCommand(text: string): string | null {
   const trimmed = text.trim();
 
-  // /sh <command>
   if (trimmed.startsWith("/sh ")) {
     const cmd = trimmed.slice(4).trim();
     if (!cmd) return "Usage: /sh <command>";
@@ -51,7 +50,8 @@ function handleBridgeCommand(text: string): string | null {
     }
   }
 
-  // /diagnose
+  if (trimmed === "/sh") return "Usage: /sh <command>";
+
   if (trimmed === "/diagnose") {
     const lines = ["🔍 Agent Diagnostics:"];
     lines.push(`  PID: ${process.pid}`);
@@ -70,11 +70,11 @@ function handleBridgeCommand(text: string): string | null {
     return lines.join("\n");
   }
 
-  return null; // Not a bridge command
+  return null;
 }
 
-// --- Extract text from ACP prompt content ---
-function extractPromptText(prompt: unknown[]): string | null {
+/** Extract text from ACP prompt content array. */
+function extractPromptText(prompt: unknown): string | null {
   if (!Array.isArray(prompt) || prompt.length === 0) return null;
   const first = prompt[0] as { type?: string; text?: string };
   if (first.type === "text" && typeof first.text === "string") {
@@ -83,103 +83,107 @@ function extractPromptText(prompt: unknown[]): string | null {
   return null;
 }
 
-// --- JSON-RPC helpers ---
-let nextId = 1_000_000; // Use high IDs to avoid collisions with bridge
-
-function makeResponse(id: unknown, result: unknown): string {
-  return JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n";
-}
-
-function makeSessionUpdate(sessionId: string, text: string): string {
-  return JSON.stringify({
-    jsonrpc: "2.0",
-    method: "session/update",
-    params: {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text },
-      },
-    },
-  }) + "\n";
-}
-
-// --- Spawn agent subprocess ---
+// --- Spawn real agent subprocess ---
 const [cmd, ...cmdArgs] = agentCmd;
-const agent = spawn(cmd, cmdArgs, {
+const agentProc = spawn(cmd, cmdArgs, {
   stdio: ["pipe", "pipe", "inherit"],
 });
 
-agent.on("exit", (code) => {
+agentProc.on("exit", (code) => {
   process.stderr.write(`[acp-wrapper] agent exited with code ${code}\n`);
   process.exit(code ?? 1);
 });
 
-// --- Proxy: bridge stdin → agent stdin (with interception) ---
-const bridgeInput = createInterface({ input: process.stdin });
+// --- Connect to real agent as ACP client ---
+const agentInput = Writable.toWeb(agentProc.stdin!);
+const agentOutput = Readable.toWeb(agentProc.stdout!) as ReadableStream<Uint8Array>;
+const agentStream = acp.ndJsonStream(agentInput, agentOutput);
 
-// Track in-flight prompts for perf timing
-const promptTimers = new Map<unknown, number>();
+// BridgeClient proxies session updates from agent back to bridge
+let bridgeConn: acp.AgentSideConnection | null = null;
 
-bridgeInput.on("line", (line) => {
-  let msg: any;
-  try {
-    msg = JSON.parse(line);
-  } catch {
-    // Not JSON, pass through
-    agent.stdin!.write(line + "\n");
-    return;
+class ProxyClient implements acp.Client {
+  async requestPermission(
+    params: acp.RequestPermissionRequest
+  ): Promise<acp.RequestPermissionResponse> {
+    // Proxy permission requests back to bridge (auto-approve here since bridge also auto-approves)
+    const allowOption = params.options.find(
+      (o) => o.kind === "allow_once" || o.kind === "allow_always"
+    );
+    const chosen = allowOption ?? params.options[0];
+    if (!chosen) throw new Error("requestPermission: no options");
+    return { outcome: { outcome: "selected", optionId: chosen.optionId } };
   }
 
-  // Intercept session/prompt requests
-  if (msg.method === "session/prompt" && msg.id != null) {
-    const text = extractPromptText(msg.params?.prompt);
+  async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+    // Forward all session updates from agent to bridge
+    if (bridgeConn) {
+      await bridgeConn.sessionUpdate(params);
+    }
+  }
+}
+
+const agentConn = new acp.ClientSideConnection(() => new ProxyClient(), agentStream);
+
+// --- Accept bridge connection as ACP server ---
+const bridgeInput = Writable.toWeb(process.stdout);
+const bridgeOutput = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
+const bridgeStream = acp.ndJsonStream(bridgeInput, bridgeOutput);
+
+class WrapperAgent implements acp.Agent {
+  async initialize(params: acp.InitializeRequest): Promise<acp.InitializeResponse> {
+    return agentConn.initialize(params);
+  }
+
+  async newSession(params: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
+    return agentConn.newSession(params);
+  }
+
+  async loadSession(params: acp.LoadSessionRequest): Promise<acp.LoadSessionResponse> {
+    return agentConn.loadSession(params);
+  }
+
+  async authenticate(params: acp.AuthenticateRequest): Promise<acp.AuthenticateResponse | void> {
+    return (agentConn as any).authenticate?.(params);
+  }
+
+  async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
+    const text = extractPromptText(params.prompt);
+
+    // Intercept bridge commands
     if (text) {
       const result = handleBridgeCommand(text);
       if (result !== null) {
-        // Handle locally — send chunk + response back to bridge
-        const sessionId = msg.params?.sessionId ?? "";
-        process.stdout.write(makeSessionUpdate(sessionId, result));
-        process.stdout.write(makeResponse(msg.id, { stopReason: "end_turn" }));
-        return; // Don't forward to agent
+        // Send response as agent_message_chunk, then return
+        await bridgeConn!.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: result },
+          },
+        });
+        return { stopReason: "end_turn" } as acp.PromptResponse;
       }
     }
-    // Track timing for forwarded prompts
-    promptTimers.set(msg.id, Date.now());
-  }
 
-  // Forward to agent
-  agent.stdin!.write(line + "\n");
-});
-
-bridgeInput.on("close", () => {
-  agent.stdin!.end();
-});
-
-// --- Proxy: agent stdout → bridge stdout (with perf tracking) ---
-const agentOutput = createInterface({ input: agent.stdout! });
-
-agentOutput.on("line", (line) => {
-  // Track prompt completion for perf
-  let msg: any;
-  try {
-    msg = JSON.parse(line);
-  } catch {
-    process.stdout.write(line + "\n");
-    return;
-  }
-
-  // If this is a response to a tracked prompt, record timing
-  if (msg.id != null && msg.result?.stopReason && promptTimers.has(msg.id)) {
-    const elapsed = Date.now() - promptTimers.get(msg.id)!;
-    promptTimers.delete(msg.id);
+    // Forward to real agent with perf tracking
+    const t0 = Date.now();
+    const response = await agentConn.prompt(params);
+    const elapsed = Date.now() - t0;
     perfHistory.push(elapsed);
     if (perfHistory.length > PERF_MAX) perfHistory.shift();
+
+    return response;
   }
 
-  process.stdout.write(line + "\n");
-});
+  async cancel(params: acp.CancelNotification): Promise<void> {
+    return (agentConn as any).cancel?.(params);
+  }
+}
 
-agentOutput.on("close", () => {
-  process.exit(0);
-});
+bridgeConn = new acp.AgentSideConnection(
+  () => new WrapperAgent(),
+  bridgeStream
+);
+
+process.stderr.write(`[acp-wrapper] proxying to: ${agentCmd.join(" ")}\n`);
