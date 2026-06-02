@@ -4,7 +4,7 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { CommandPlugin, CommandContext, CommandReply } from "../../../channel-manager/src/command/types.js";
+import type { CommandPlugin, CommandContext, CommandReply } from "./types.js";
 import type { OAuthConfig, OAuthProviderConfig, PendingFlow, StoredToken } from "./types.js";
 import { generateCodeVerifier, generateCodeChallenge, generateState } from "./pkce.js";
 import { discoverAuthServer } from "./discovery.js";
@@ -28,7 +28,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
   }
 
   init(config: Record<string, unknown>): void {
-    const oauthConfig = config["mcp-oauth"] as OAuthConfig | undefined;
+    const oauthConfig = config["oauth"] as OAuthConfig | undefined;
     if (oauthConfig) {
       this.config = oauthConfig;
     }
@@ -198,7 +198,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
     return {
       access_token: data.access_token,
       refresh_token: data.refresh_token,
-      expires_at: Date.now() + (data.expires_in ?? 3600) * 1000,
+      expires_at: Math.floor(Date.now() / 1000) + (data.expires_in ?? 3600),
       token_endpoint: flow.tokenEndpoint,
       client_id: flow.clientId,
       client_secret: flow.clientSecret,
@@ -232,3 +232,5 @@ export class OAuthCommandPlugin implements CommandPlugin {
 export function createOAuthPlugin(): CommandPlugin {
   return new OAuthCommandPlugin();
 }
+
+export default createOAuthPlugin();
