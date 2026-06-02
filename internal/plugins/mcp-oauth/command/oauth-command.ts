@@ -43,6 +43,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
   }
 
   async onMessage(text: string, chatId: string, reply: CommandReply): Promise<boolean> {
+    if (this.pendingFlows.size === 0) return false;
     return this.handleCallbackUrl(text.trim(), chatId, reply);
   }
 
