@@ -152,13 +152,18 @@ func (r *OAuthRewriter) readTokenFile() (*StoredToken, error) {
 	return &token, nil
 }
 
-// writeTokenFile atomically writes the token back to disk.
+// writeTokenFile writes the refreshed token back to disk using write-rename
+// for crash safety (avoids partial writes corrupting the JSON file).
 func (r *OAuthRewriter) writeTokenFile(token *StoredToken) error {
 	data, err := json.MarshalIndent(token, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.tokenFile, data, 0600)
+	tmp := r.tokenFile + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, r.tokenFile)
 }
 
 // tokenResponse is the OAuth token endpoint response.
@@ -193,7 +198,7 @@ func (r *OAuthRewriter) refreshToken(stored *StoredToken) (*StoredToken, error) 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB max
 	if err != nil {
 		return nil, fmt.Errorf("reading refresh response: %w", err)
 	}
