@@ -4,6 +4,7 @@
 package mitm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,7 +53,8 @@ func NewOAuthRewriter(domains []string, tokenFile string) (*OAuthRewriter, error
 		domains:   domains,
 		tokenFile: tokenFile,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: ssrfSafeTransport(),
 		},
 	}
 
@@ -173,10 +175,59 @@ type tokenResponse struct {
 	ExpiresIn    int64  `json:"expires_in"`
 }
 
+// validateTokenEndpoint checks that the token endpoint URL is safe to call.
+func validateTokenEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("oauth: invalid token_endpoint URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("oauth: token_endpoint must use https, got %q", u.Scheme)
+	}
+	return nil
+}
+
+// isPrivateIP returns true if the IP is in a private, loopback, or link-local range.
+func isPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
+// ssrfSafeTransport returns an http.Transport with a custom DialContext that blocks
+// connections to private/internal IP addresses (SSRF protection).
+func ssrfSafeTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("oauth: invalid address %q: %w", addr, err)
+			}
+
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("oauth: DNS lookup failed for %q: %w", host, err)
+			}
+
+			for _, ip := range ips {
+				if isPrivateIP(ip.IP) {
+					return nil, fmt.Errorf("oauth: refusing to connect to private IP %s (resolved from %s)", ip.IP, host)
+				}
+			}
+
+			// All IPs are public — connect to the first one.
+			dialer := &net.Dialer{Timeout: 10 * time.Second}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
+}
+
 // refreshToken exchanges a refresh token for a new access token.
 func (r *OAuthRewriter) refreshToken(stored *StoredToken) (*StoredToken, error) {
 	if stored.RefreshToken == nil || *stored.RefreshToken == "" {
 		return nil, fmt.Errorf("no refresh_token available — re-run oauth setup")
+	}
+
+	if err := validateTokenEndpoint(stored.TokenEndpoint); err != nil {
+		return nil, err
 	}
 
 	params := url.Values{
