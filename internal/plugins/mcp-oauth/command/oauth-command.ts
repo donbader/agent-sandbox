@@ -8,6 +8,7 @@ import type { CommandPlugin, CommandContext, CommandReply } from "./types.js";
 import type { OAuthConfig, OAuthProviderConfig, PendingFlow, StoredToken } from "./types.js";
 import { generateCodeVerifier, generateCodeChallenge, generateState } from "./pkce.js";
 import { discoverAuthServer } from "./discovery.js";
+import { registerClient } from "./registration.js";
 
 const FLOW_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const DEFAULT_TOKEN_DIR = "/data/oauth-tokens";
@@ -87,10 +88,19 @@ export class OAuthCommandPlugin implements CommandPlugin {
     try {
       const metadata = await discoverAuthServer(config.mcp_url);
 
-      const clientId = config.client_id ?? "";
+      let clientId = config.client_id ?? "";
+      let clientSecret = config.client_secret;
+
+      // If no client_id configured, use Dynamic Client Registration (RFC 7591).
       if (!clientId) {
-        reply(`Error: No client_id configured for provider "${name}".`);
-        return;
+        if (!metadata.registration_endpoint) {
+          reply(`Error: No client_id configured for "${name}" and server doesn't support dynamic registration.\nAdd client_id to your agent.yaml config.`);
+          return;
+        }
+        reply(`Registering client with ${name}...`);
+        const reg = await registerClient(metadata.registration_endpoint, DEFAULT_REDIRECT_URI, `agent-sandbox-${name}`);
+        clientId = reg.client_id;
+        clientSecret = reg.client_secret;
       }
 
       const codeVerifier = generateCodeVerifier();
@@ -104,7 +114,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
         state,
         tokenEndpoint: metadata.token_endpoint,
         clientId,
-        clientSecret: config.client_secret,
+        clientSecret,
         redirectUri: DEFAULT_REDIRECT_URI,
         startedAt: Date.now(),
       };
