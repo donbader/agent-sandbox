@@ -93,7 +93,7 @@ function makeCtx(opts: {
   };
 }
 
-describe("TelegramChannel (thin bridge)", () => {
+describe("TelegramChannel (thin channel manager)", () => {
   let agent: ReturnType<typeof createMockAgent>;
 
   beforeEach(async () => {

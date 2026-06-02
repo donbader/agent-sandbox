@@ -1,5 +1,5 @@
 // Package telegram implements the Telegram feature plugin.
-// It provides a Telegram bot channel via the bridge, with MITM token injection
+// It provides a Telegram bot channel via the channel manager, with MITM token injection
 // through the gateway.
 package telegram
 
@@ -28,16 +28,16 @@ type GroupACL struct {
 
 func init() {
 	resolve.Register("telegram", func(_ string, cfg Config) (*resolve.FeatureContributions, error) {
-		bridgeConfig := map[string]any{"access_control": cfg.AccessControl}
+		channelConfig := map[string]any{"access_control": cfg.AccessControl}
 		if cfg.AckEmoji != nil {
-			bridgeConfig["ack_emoji"] = *cfg.AckEmoji
+			channelConfig["ack_emoji"] = *cfg.AckEmoji
 		}
 		return &resolve.FeatureContributions{
 			Name:          "telegram",
 			MITMDomains:   []string{"api.telegram.org"},
-			BridgeChannel: "telegram",
+			ChannelName: "telegram",
 			EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
-			BridgeConfig:  bridgeConfig,
+			ChannelConfig:  channelConfig,
 			Rewriters: []resolve.RewriterConfig{
 				{
 					Type:    "telegram-url",

@@ -20,7 +20,7 @@ func TestResolve(t *testing.T) {
 		contrib, err := resolve.ResolveFeature("/project", "telegram", "telegram", config)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"api.telegram.org"}, contrib.MITMDomains)
-		assert.Equal(t, "telegram", contrib.BridgeChannel)
+		assert.Equal(t, "telegram", contrib.ChannelName)
 		assert.Equal(t, []string{"TELEGRAM_BOT_TOKEN"}, contrib.EnvVars)
 	})
 
@@ -28,7 +28,7 @@ func TestResolve(t *testing.T) {
 		contrib, err := resolve.ResolveFeature("/project", "telegram", "telegram", map[string]any{})
 		require.NoError(t, err)
 		assert.Equal(t, []string{"api.telegram.org"}, contrib.MITMDomains)
-		assert.Equal(t, "telegram", contrib.BridgeChannel)
+		assert.Equal(t, "telegram", contrib.ChannelName)
 		assert.Equal(t, []string{"TELEGRAM_BOT_TOKEN"}, contrib.EnvVars)
 	})
 }

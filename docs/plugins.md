@@ -16,7 +16,7 @@ runtime: codex    # reads plugins/codex/runtime.yaml
 | `claude-code` | node:22-slim | git, curl, @anthropic-ai/claude-code | sleep infinity |
 | `pi` | node:22-slim | git, curl, pi-coding-agent | sleep infinity |
 
-Default CMD is `sleep infinity` because without a bridge, there's no way to send prompts. When a channel feature is active, bridge becomes the entrypoint and spawns the agent CLI (e.g., `codex exec`).
+Default CMD is `sleep infinity` because without a channel manager, there's no way to send prompts. When a channel feature is active, channel manager becomes the entrypoint and spawns the agent CLI (e.g., `codex exec`).
 
 ### Custom Runtime (Inline)
 
@@ -49,7 +49,7 @@ user: agent
 
 Additive capabilities. Multiple per agent. Listed under `features:` in config.
 
-Feature plugins are hybrid — YAML metadata + optional Go code (gateway) + optional TypeScript (bridge).
+Feature plugins are hybrid — YAML metadata + optional Go code (gateway) + optional TypeScript (channel).
 
 ### Credential Features
 
@@ -63,7 +63,7 @@ Note: LLM API credentials (OpenAI, Anthropic) are handled by the runtime itself 
 
 ### Channel Features
 
-Contribute both gateway rules AND bridge TypeScript. One plugin, two directories.
+Contribute both gateway rules AND channel TypeScript. One plugin, two directories.
 
 | Plugin | Gateway | Bridge |
 |--------|---------|--------|
@@ -72,7 +72,7 @@ Contribute both gateway rules AND bridge TypeScript. One plugin, two directories
 
 ### Infrastructure Features
 
-| Plugin | What it does | Has gateway/ | Has bridge/ |
+| Plugin | What it does | Has gateway/ | Has channel/ |
 |--------|-------------|-------------|-------------|
 | `docker` | DinD sidecar, DOCKER_HOST env, API validation | yes | no |
 | `custom-runtime` | Custom commands, hooks, volumes | no | no |

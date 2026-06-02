@@ -16,5 +16,5 @@ These documents are ported from the predecessor project (agent-fleet) for histor
 
 | Document | Purpose |
 |----------|---------|
-| [bridge-protocol.md](bridge-protocol.md) | ACP protocol spec (bridge ↔ agent stdin/stdout JSON) |
+| [channel-manager-protocol.md](channel-manager-protocol.md) | ACP protocol spec (channel manager ↔ agent stdin/stdout JSON) |
 | [docker-api-proxy.md](docker-api-proxy.md) | Docker API validation in gateway (block dangerous ops) |

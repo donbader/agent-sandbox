@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { AcpAgent } from "./acp-client.js";
 import { createLogger } from "./logger.js";
 
-const log = createLogger("bridge");
+const log = createLogger("channel-manager");
 
 interface BridgeConfig {
   channel: string;
@@ -12,18 +12,18 @@ interface BridgeConfig {
 }
 
 async function main(): Promise<void> {
-  const configPath = process.env.BRIDGE_CONFIG ?? "/opt/bridge/config.json";
+  const configPath = process.env.CHANNEL_MANAGER_CONFIG ?? "/opt/channel-manager/config.json";
   const raw = readFileSync(configPath, "utf-8");
   const config: BridgeConfig = JSON.parse(raw);
 
   if (!config.acp_command || config.acp_command.length === 0) {
-    log.fatal("acp_command is required in bridge config");
+    log.fatal("acp_command is required in channel-manager config");
     process.exit(1);
   }
 
   log.info(
     { channel: config.channel, cmd: config.acp_command.join(" ") },
-    "starting bridge"
+    "starting channel manager"
   );
 
   // Create ACP agent
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   await agent.start();
   await channel.start();
 
-  log.info("bridge ready");
+  log.info("channel manager ready");
 
   // Handle shutdown
   process.on("SIGTERM", () => {

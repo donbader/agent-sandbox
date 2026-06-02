@@ -112,7 +112,7 @@ export default function createTelegramChannel(
     // Typing indicator
     sendTyping(chatId);
 
-    // Command routing — all forwarded to agent (wrapper handles bridge commands)
+    // Command routing — all forwarded to agent (wrapper handles these)
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
       const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
@@ -187,7 +187,7 @@ export default function createTelegramChannel(
   }
 
   function registerBotCommands(): void {
-    // Only agent-declared commands (bridge has no custom commands)
+    // Only agent-declared commands (channel has no custom commands)
     const commands: Array<{ command: string; description: string }> = [];
 
     for (const agentCmd of agent.getAgentCommands()) {

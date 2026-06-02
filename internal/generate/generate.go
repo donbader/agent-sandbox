@@ -21,9 +21,9 @@ type Generator struct {
 	Runtime     *resolve.RuntimeConfig
 	Features    []*resolve.FeatureContributions
 	Gateway     bool        // include gateway (transparent proxy)
-	Bridge      bool        // include bridge (message relay)
+	ChannelManager bool        // include channel manager (message relay)
 	GatewaySpec GatewaySpec // injected build spec
-	BridgeSpec  BridgeSpec  // injected build spec
+	ChannelManagerSpec  ChannelManagerSpec  // injected build spec
 	Dir         string      // source directory (where agent.yaml lives)
 	OutDir      string      // output directory (.build/)
 }
@@ -61,12 +61,12 @@ func (g *Generator) validate() error {
 		}
 	}
 
-	if g.Bridge {
-		if g.BridgeSpec.BuildImage == "" {
-			return fmt.Errorf("generator: Bridge is enabled but BridgeSpec.BuildImage is empty")
+	if g.ChannelManager {
+		if g.ChannelManagerSpec.BuildImage == "" {
+			return fmt.Errorf("generator: Bridge is enabled but ChannelManagerSpec.BuildImage is empty")
 		}
-		if g.BridgeSpec.EntryPoint == "" {
-			return fmt.Errorf("generator: Bridge is enabled but BridgeSpec.EntryPoint is empty")
+		if g.ChannelManagerSpec.EntryPoint == "" {
+			return fmt.Errorf("generator: Bridge is enabled but ChannelManagerSpec.EntryPoint is empty")
 		}
 	}
 
@@ -77,24 +77,24 @@ func (g *Generator) validate() error {
 		}
 	}
 
-	// Check for features that need bridge but bridge is disabled
+	// Check for features that need channel-manager but channel-manager is disabled
 	for _, f := range g.Features {
-		if f.BridgeChannel != "" && !g.Bridge {
-			return fmt.Errorf("feature %q declares BridgeChannel %q but bridge is disabled", f.Name, f.BridgeChannel)
+		if f.ChannelName != "" && !g.ChannelManager {
+			return fmt.Errorf("feature %q declares ChannelName %q but channel-manager is disabled", f.Name, f.ChannelName)
 		}
 	}
 
-	// Check that bridge has at least one channel
-	if g.Bridge {
+	// Check that channel-manager has at least one channel
+	if g.ChannelManager {
 		hasChannel := false
 		for _, f := range g.Features {
-			if f.BridgeChannel != "" {
+			if f.ChannelName != "" {
 				hasChannel = true
 				break
 			}
 		}
 		if !hasChannel {
-			return fmt.Errorf("bridge is enabled but no feature declares a BridgeChannel")
+			return fmt.Errorf("channel-manager is enabled but no feature declares a ChannelName")
 		}
 	}
 
@@ -130,11 +130,11 @@ func (g *Generator) Run() error {
 		}
 	}
 
-	if g.Bridge {
-		if err := g.writeBridgeSource(); err != nil {
+	if g.ChannelManager {
+		if err := g.writeChannelManagerSource(); err != nil {
 			return err
 		}
-		if err := g.writeBridgeConfig(); err != nil {
+		if err := g.writeChannelConfig(); err != nil {
 			return err
 		}
 	}
@@ -171,9 +171,9 @@ func (g *Generator) Run() error {
 }
 
 // needsEntrypoint returns true when a custom entrypoint is needed.
-// Gateway or bridge always requires an entrypoint.
+// Gateway or channel-manager always requires an entrypoint.
 func (g *Generator) needsEntrypoint() bool {
-	if g.Gateway || g.Bridge {
+	if g.Gateway || g.ChannelManager {
 		return true
 	}
 	for _, f := range g.Features {
@@ -230,19 +230,19 @@ func (g *Generator) writeGatewayDockerfile() error {
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-// writeAgentDockerfile produces Dockerfile.agent: builds the bridge (if enabled)
+// writeAgentDockerfile produces Dockerfile.agent: builds the channel manager (if enabled)
 // and packages the runtime with iptables for traffic redirection to the gateway container.
 func (g *Generator) writeAgentDockerfile() error {
 	var b strings.Builder
 
 	// Bridge build stage (if enabled)
-	if g.Bridge {
-		b.WriteString(fmt.Sprintf("FROM %s AS bridge-build\n", g.BridgeSpec.BuildImage))
+	if g.ChannelManager {
+		b.WriteString(fmt.Sprintf("FROM %s AS channel-manager-build\n", g.ChannelManagerSpec.BuildImage))
 		b.WriteString("WORKDIR /src\n")
-		b.WriteString("COPY bridge-src/package.json bridge-src/tsconfig.json ./\n")
-		b.WriteString(fmt.Sprintf("RUN %s\n", g.BridgeSpec.InstallCmd))
-		b.WriteString("COPY bridge-src/src/ ./src/\n")
-		b.WriteString(fmt.Sprintf("RUN %s\n\n", g.BridgeSpec.BuildCmd))
+		b.WriteString("COPY channel-manager-src/package.json channel-manager-src/tsconfig.json ./\n")
+		b.WriteString(fmt.Sprintf("RUN %s\n", g.ChannelManagerSpec.InstallCmd))
+		b.WriteString("COPY channel-manager-src/src/ ./src/\n")
+		b.WriteString(fmt.Sprintf("RUN %s\n\n", g.ChannelManagerSpec.BuildCmd))
 	}
 
 	// Runtime stage
@@ -258,13 +258,13 @@ func (g *Generator) writeAgentDockerfile() error {
 		b.WriteString("ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/sandbox-ca.crt\n")
 	}
 
-	// Copy bridge dist if enabled
-	if g.Bridge {
-		b.WriteString("# Install bridge\n")
-		b.WriteString(fmt.Sprintf("COPY --from=bridge-build %s/ /opt/bridge/dist/\n", g.BridgeSpec.DistDir))
-		b.WriteString("COPY --from=bridge-build /src/node_modules/ /opt/bridge/node_modules/\n")
-		b.WriteString("COPY --from=bridge-build /src/package.json /opt/bridge/package.json\n")
-		b.WriteString("COPY bridge-config.json /opt/bridge/config.json\n")
+	// Copy channel-manager dist if enabled
+	if g.ChannelManager {
+		b.WriteString("# Install channel-manager\n")
+		b.WriteString(fmt.Sprintf("COPY --from=channel-manager-build %s/ /opt/channel-manager/dist/\n", g.ChannelManagerSpec.DistDir))
+		b.WriteString("COPY --from=channel-manager-build /src/node_modules/ /opt/channel-manager/node_modules/\n")
+		b.WriteString("COPY --from=channel-manager-build /src/package.json /opt/channel-manager/package.json\n")
+		b.WriteString("COPY channel-manager-config.json /opt/channel-manager/config.json\n")
 	}
 
 	// Runtime install commands
@@ -593,9 +593,9 @@ func (g *Generator) writeAgentEntrypoint() error {
 	}
 
 	// Execute the runtime CMD as agent user
-	if g.Bridge {
-		b.WriteString("echo \"entrypoint: starting bridge...\"\n")
-		b.WriteString(fmt.Sprintf("exec %s\n", g.BridgeSpec.EntryPoint))
+	if g.ChannelManager {
+		b.WriteString("echo \"entrypoint: starting channel-manager...\"\n")
+		b.WriteString(fmt.Sprintf("exec %s\n", g.ChannelManagerSpec.EntryPoint))
 	} else {
 		b.WriteString("echo \"entrypoint: starting agent...\"\n")
 		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
@@ -956,18 +956,18 @@ func (g *Generator) collectFeatureEnvVars() []string {
 	return vars
 }
 
-// writeBridgeSource writes the embedded bridge source to .build/bridge-src/,
+// writeChannelManagerSource writes the embedded channel-manager source to .build/channel-manager-src/,
 // copies plugin channel implementations, and generates the channel registry.
-func (g *Generator) writeBridgeSource() error {
-	destDir := filepath.Join(g.OutDir, "bridge-src")
+func (g *Generator) writeChannelManagerSource() error {
+	destDir := filepath.Join(g.OutDir, "channel-manager-src")
 
-	// 1. Copy bridge core source
-	err := fs.WalkDir(sandbox.BridgeSource, "bridge", func(path string, d fs.DirEntry, err error) error {
+	// 1. Copy channel-manager core source
+	err := fs.WalkDir(sandbox.ChannelManagerSource, "channel-manager", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		relPath, err := filepath.Rel("bridge", path)
+		relPath, err := filepath.Rel("channel-manager", path)
 		if err != nil {
 			return err
 		}
@@ -977,7 +977,7 @@ func (g *Generator) writeBridgeSource() error {
 			return os.MkdirAll(destPath, 0755)
 		}
 
-		data, err := sandbox.BridgeSource.ReadFile(path)
+		data, err := sandbox.ChannelManagerSource.ReadFile(path)
 		if err != nil {
 			return err
 		}
@@ -995,17 +995,17 @@ func (g *Generator) writeBridgeSource() error {
 
 	var channels []string
 	for _, f := range g.Features {
-		if f.BridgeChannel == "" {
+		if f.ChannelName == "" {
 			continue
 		}
-		name := f.BridgeChannel
-		bridgeRoot := fmt.Sprintf("internal/plugins/%s/bridge", name)
+		name := f.ChannelName
+		channelRoot := fmt.Sprintf("internal/plugins/%s/channel", name)
 
-		// Copy all .ts files from plugin's bridge/ directory to bridge-src/src/channel/
+		// Copy all .ts files from plugin's channel/ directory to channel-manager-src/src/channel/
 		// channel.ts → src/channel/<name>.ts (special case)
 		// other files placed as siblings: delivery/foo.ts → src/channel/delivery/foo.ts
 		// Note: if multiple plugins contribute same-named files, last one wins.
-		err := fs.WalkDir(sandbox.CorePlugins, bridgeRoot, func(path string, d fs.DirEntry, err error) error {
+		err := fs.WalkDir(sandbox.CorePlugins, channelRoot, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -1026,7 +1026,7 @@ func (g *Generator) writeBridgeSource() error {
 			}
 
 			// Determine destination path
-			relPath, relErr := filepath.Rel(bridgeRoot, path)
+			relPath, relErr := filepath.Rel(channelRoot, path)
 			if relErr != nil {
 				return fmt.Errorf("computing relative path for %s: %w", path, relErr)
 			}
@@ -1045,7 +1045,7 @@ func (g *Generator) writeBridgeSource() error {
 			return os.WriteFile(destPath, data, 0644)
 		})
 		if err != nil {
-			return fmt.Errorf("plugin %q: copying bridge files: %w", name, err)
+			return fmt.Errorf("plugin %q: copying channel files: %w", name, err)
 		}
 		channels = append(channels, name)
 	}
@@ -1077,12 +1077,12 @@ func (g *Generator) writeChannelRegistry(channelDir string, channels []string) e
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-// writeBridgeConfig generates .build/bridge-config.json.
-func (g *Generator) writeBridgeConfig() error {
+// writeChannelConfig generates .build/channel-manager-config.json.
+func (g *Generator) writeChannelConfig() error {
 	channel := ""
 	for _, f := range g.Features {
-		if f.BridgeChannel != "" {
-			channel = f.BridgeChannel
+		if f.ChannelName != "" {
+			channel = f.ChannelName
 			break
 		}
 	}
@@ -1096,18 +1096,18 @@ func (g *Generator) writeBridgeConfig() error {
 		"acp_command": []string{"sh", "-c", acpCmd},
 	}
 
-	// Pass plugin-specific config to bridge (generic — no plugin knowledge here)
+	// Pass plugin-specific config to channel-manager (generic — no plugin knowledge here)
 	for _, f := range g.Features {
-		for k, v := range f.BridgeConfig {
+		for k, v := range f.ChannelConfig {
 			config[k] = v
 		}
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling bridge config: %w", err)
+		return fmt.Errorf("marshaling channel-manager config: %w", err)
 	}
 
-	path := filepath.Join(g.OutDir, "bridge-config.json")
+	path := filepath.Join(g.OutDir, "channel-manager-config.json")
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }

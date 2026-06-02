@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     include: [
       "src/**/*.test.ts",
-      "../internal/plugins/*/bridge/**/*.test.ts",
+      "../internal/plugins/*/channel/**/*.test.ts",
     ],
   },
 });

@@ -153,9 +153,9 @@ describe("AcpAgent", () => {
     agent.onCommandsUpdate(listener);
 
     // Simulate the BridgeClient receiving an available_commands_update
-    // Access the internal bridgeClient to trigger the callback
-    const bridgeClient = (agent as any).bridgeClient as BridgeClient;
-    await bridgeClient.sessionUpdate({
+    // Access the internal acpHandler to trigger the callback
+    const acpHandler = (agent as any).acpHandler as BridgeClient;
+    await acpHandler.sessionUpdate({
       sessionId: "test-session",
       update: {
         sessionUpdate: "available_commands_update",
@@ -183,8 +183,8 @@ describe("AcpAgent", () => {
     agent.onCommandsUpdate(listener1);
     agent.onCommandsUpdate(listener2);
 
-    const bridgeClient = (agent as any).bridgeClient as BridgeClient;
-    await bridgeClient.sessionUpdate({
+    const acpHandler = (agent as any).acpHandler as BridgeClient;
+    await acpHandler.sessionUpdate({
       sessionId: "test-session",
       update: {
         sessionUpdate: "available_commands_update",

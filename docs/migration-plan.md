@@ -6,7 +6,7 @@ New repo (`donbader/agent-sandbox`). agent-fleet stays in maintenance mode (secu
 
 **Principle:** Every phase produces a working `agent-sandbox generate && agent-sandbox compose up --build`. Each phase adds capabilities, never breaks what's already working.
 
-**Key design:** Plugins are data-driven. Runtime plugins are pure YAML. Feature plugins are YAML + optional code (Go gateway handlers compiled during Docker build, TypeScript bridge plugins). CLI is a generic template engine — plugin updates never require CLI upgrades.
+**Key design:** Plugins are data-driven. Runtime plugins are pure YAML. Feature plugins are YAML + optional code (Go gateway handlers compiled during Docker build, TypeScript channel plugins). CLI is a generic template engine — plugin updates never require CLI upgrades.
 
 ## Phases
 
@@ -31,7 +31,7 @@ New repo (`donbader/agent-sandbox`). agent-fleet stays in maintenance mode (secu
 **What works after this phase:**
 ```bash
 agent-sandbox generate && agent-sandbox compose up --build
-# → codex agent running in a container (direct entrypoint, no proxy, no bridge)
+# → codex agent running in a container (direct entrypoint, no proxy, no channel manager)
 ```
 
 - [x] `plugins/codex/runtime.yaml` (base image, install commands, CMD)
@@ -42,7 +42,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] .env.example generation (scan ${VAR} patterns)
 - [x] Integration test (`//go:build integration` docker build test)
 - [x] Testing guidelines in AGENTS.md
-- [x] Reference docs (ADRs, bridge protocol, docker-api-proxy)
+- [x] Reference docs (ADRs, channel-manager protocol, docker-api-proxy)
 - [x] Phase implementation guide in AGENTS.md
 - [x] GoReleaser release pipeline (`.github/workflows/release.yml`)
 - [x] `examples/local-coding/` for local machine coding
@@ -125,15 +125,15 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → codex agent reachable via Telegram (send message → agent responds)
 ```
 
-- [x] Bridge TypeScript runtime (`bridge/`)
+- [x] Channel manager TypeScript (`channel-manager/`)
 - [x] ACP client (ClientSideConnection, auto-approve permissions)
 - [x] Channel plugin loader (generated `channels.gen.ts` registry)
 - [x] `plugins/telegram/feature.yaml`
 - [x] `plugins/telegram/gateway/handler.go` — MITM on api.telegram.org
-- [x] `plugins/telegram/bridge/` — grammy channel plugin (ack emoji, typing, formatter, rate limiter)
+- [x] `plugins/telegram/channel/` — grammy channel plugin (ack emoji, typing, formatter, rate limiter)
 - [x] MITM logic in gateway core (TLS termination, HTTP interception)
 - [x] Sandbox CA generation
-- [x] Bridge config generation (bridge-config.json)
+- [x] Channel manager config generation (channel-manager-config.json)
 - [x] `examples/telegram-vibe/` example
 - [x] Per-chat session isolation (SessionManager + SessionStore)
 - [x] Session persistence + loadSession resume
@@ -199,7 +199,7 @@ agent-sandbox upgrade                   # self-update
 |-------------------|--------------------------|-------|---------|
 | `pkg/gateway/` (proxy, sni) | `gateway/` | 3 | 80% |
 | `pkg/gateway/mitm.go` | `gateway/mitm.go` | 4, 5 | 80% |
-| `runtimes/channels-bridge/src/` | `bridge/src/` | 4 | 70% |
+| `runtimes/channels-bridge/src/` | `channel-manager/src/` | 4 | 70% |
 | `runtimes/codex/` | `plugins/codex/runtime.yaml` | 1 | 30% |
 | `runtimes/codex/entrypoint.sh` | `templates/entrypoint.sh` | 2 | 50% |
 | `pkg/selfupdate/` | `internal/selfupdate/` | 6 | 90% |

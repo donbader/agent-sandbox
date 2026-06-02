@@ -12,15 +12,15 @@ agent-sandbox generate
   │
   └── Generate .build/:
         ├── gateway-src/        (embedded gateway core + feature gateway/ dirs)
-        ├── bridge-src/         (embedded bridge runtime + channel plugins)
+        ├── channel-manager-src/     (embedded channel manager + channel plugins)
         ├── home-override/      (from user's home/ dir)
         ├── hooks/              (from feature entrypoint hooks)
         ├── Dockerfile.gateway  (gateway container: compile + minimal alpine)
-        ├── Dockerfile.agent    (agent container: bridge build + runtime)
+        ├── Dockerfile.agent    (agent container: channel-manager build + runtime)
         ├── gateway-config.yaml (merged hosts from feature.yaml files)
         ├── gateway-entrypoint.sh
-        ├── entrypoint.sh       (agent: default route + bridge/agent start)
-        ├── bridge-config.json  (channels + agent cmd from runtime.yaml)
+        ├── entrypoint.sh       (agent: default route + channel-manager/agent start)
+        ├── channel-manager-config.json (channels + agent cmd from runtime.yaml)
         ├── certs/              (CA cert + key for MITM)
         └── docker-compose.yml  (two services + internal network)
 
@@ -63,10 +63,10 @@ ENTRYPOINT ["/opt/entrypoint.sh"]
 ### Dockerfile.agent
 
 ```dockerfile
-# Stage 1: Compile bridge (if channels active)
-FROM node:22-slim AS bridge-build
+# Stage 1: Compile channel manager (if channels active)
+FROM node:22-slim AS channel-manager-build
 WORKDIR /src
-COPY bridge-src/package.json bridge-src/tsconfig.json ./
+COPY channel-manager-src/package.json channel-manager-src/tsconfig.json ./
 RUN npm install
 COPY bridge-src/src/ ./src/
 RUN npm run build

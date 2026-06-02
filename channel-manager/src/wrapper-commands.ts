@@ -12,8 +12,8 @@ export interface WrapperCommandContext {
 }
 
 /**
- * Attempt to handle a bridge command.
- * Returns the response string if handled, or null if not a bridge command.
+ * Attempt to handle a wrapper command.
+ * Returns the response string if handled, or null if not a wrapper command.
  */
 export function handleWrapperCommand(text: string, ctx: WrapperCommandContext): string | null {
   const trimmed = text.trim();

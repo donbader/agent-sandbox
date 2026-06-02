@@ -13,8 +13,8 @@
 | 7 | Gateway inside each container | Self-contained. Per-agent config without routing complexity. |
 | 8 | Plugin updates independent of CLI | CLI ships embedded defaults. Local `plugins/` dir overrides. No CLI upgrade for plugin fixes. |
 | 9 | Home override via /opt staging | Volume hides /home/agent. Staging + entrypoint cp ensures configs win. |
-| 10 | Channels are bridge sub-plugins | Messaging is bridge's concern. TypeScript in plugin's `bridge/` dir. |
-| 11 | All credentials through gateway | Even bridge gets dummy tokens. Real creds never in container env. |
+| 10 | Channels are channel-manager sub-plugins | Messaging is channel-manager's concern. TypeScript in plugin's `channel/` dir. |
+| 11 | All credentials through gateway | Even channel-manager gets dummy tokens. Real creds never in container env. |
 | 12 | Gateway code compiles during Docker build | go:embed gateway source in CLI. Multi-stage Dockerfile compiles it. User doesn't need Go. |
 | 13 | Optional fleet.yaml | Single agent first-class. Multi-agent additive. |
 | 14 | UDP restricted | DNS redirected to gateway resolver. All other UDP dropped. Prevents tunneling. |
@@ -26,7 +26,7 @@
 
 **Decision:** Split plugins into data (YAML/templates) and code (Go/TypeScript):
 - Data (runtime.yaml, feature.yaml) → read by CLI at generate time → no compilation
-- Code (gateway/*.go, bridge/*.ts) → compiled/bundled during Docker build → not in CLI binary
+- Code (gateway/*.go, channel/*.ts) → compiled/bundled during Docker build → not in CLI binary
 
 **Consequences:**
 - CLI binary is smaller (no plugin Go code compiled in)
@@ -69,7 +69,7 @@
 | Gateway source embedded in CLI | ~20MB added to binary | Accept it. Single binary distribution is worth the size. Bridge TypeScript adds ~5MB. |
 | Plugin YAML schema changes | Existing plugins break | Semantic versioning on schema. Additive only. |
 | Multi-stage build adds time | First build ~60s | Docker layer cache. Gateway stage rarely changes. Subsequent builds ~5s. |
-| Two languages (Go + TypeScript) | Higher maintenance | Clear boundary: Go = proxy/gateway. TypeScript = messaging/bridge. No overlap. |
+| Two languages (Go + TypeScript) | Higher maintenance | Clear boundary: Go = proxy/gateway. TypeScript = messaging/channel-manager. No overlap. |
 | Gateway fix requires rebuild | Slow rollout | Edit gateway source locally, rebuild container. No CLI upgrade needed. |
 
 ### Upgrade Path
@@ -79,7 +79,7 @@
 | New built-in plugin | `agent-sandbox upgrade` (optional — can also add locally) |
 | Plugin data fix (runtime.yaml) | Override locally OR `agent-sandbox upgrade` |
 | Gateway handler fix | Override `plugins/<name>/gateway/` locally, rebuild |
-| Bridge plugin fix | Override `plugins/<name>/bridge/` locally, rebuild |
+| Channel plugin fix | Override `plugins/<name>/channel/` locally, rebuild |
 | CLI template engine fix | `agent-sandbox upgrade` |
 | Config schema change | Edit agent.yaml → re-generate |
 

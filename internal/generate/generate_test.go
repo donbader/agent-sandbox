@@ -389,7 +389,7 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, string(gwCfg), "listen:")
 	})
 
-	t.Run("with gateway and bridge (telegram)", func(t *testing.T) {
+	t.Run("with gateway and channel-manager (telegram)", func(t *testing.T) {
 		srcDir := t.TempDir()
 		outDir := t.TempDir()
 
@@ -417,9 +417,9 @@ func TestGenerator_Run(t *testing.T) {
 			Features: []*resolve.FeatureContributions{
 				{
 					MITMDomains:   []string{"api.telegram.org"},
-					BridgeChannel: "telegram",
+					ChannelName: "telegram",
 					EnvVars:       []string{"TELEGRAM_BOT_TOKEN"},
-					BridgeConfig:  map[string]any{"access_control": map[string]any{"allowed_users": []any{"@testuser"}}},
+					ChannelConfig:  map[string]any{"access_control": map[string]any{"allowed_users": []any{"@testuser"}}},
 				},
 			},
 			Gateway: true,
@@ -430,12 +430,12 @@ func TestGenerator_Run(t *testing.T) {
 				ListenPort: 8443,
 				DNSPort:    5353,
 			},
-			BridgeSpec: BridgeSpec{
+			ChannelManagerSpec: ChannelManagerSpec{
 				BuildImage: "node:22-slim",
 				InstallCmd: "npm install",
 				BuildCmd:   "npm run build",
 				DistDir:    "/src/dist",
-				EntryPoint: "node /opt/bridge/dist/index.js",
+				EntryPoint: "node /opt/channel-manager/dist/index.js",
 			},
 			Dir:    srcDir,
 			OutDir: outDir,
@@ -444,15 +444,15 @@ func TestGenerator_Run(t *testing.T) {
 		err := g.Run()
 		require.NoError(t, err)
 
-		// Dockerfile.agent should have bridge build stage and CA cert
+		// Dockerfile.agent should have channel-manager build stage and CA cert
 		dfAgent, err := os.ReadFile(filepath.Join(outDir, "Dockerfile.agent"))
 		require.NoError(t, err)
 		dfAgentStr := string(dfAgent)
-		assert.Contains(t, dfAgentStr, "FROM node:22-slim AS bridge-build")
+		assert.Contains(t, dfAgentStr, "FROM node:22-slim AS channel-manager-build")
 		assert.Contains(t, dfAgentStr, "RUN npm install")
 		assert.Contains(t, dfAgentStr, "RUN npm run build")
-		assert.Contains(t, dfAgentStr, "COPY --from=bridge-build /src/dist/ /opt/bridge/dist/")
-		assert.Contains(t, dfAgentStr, "COPY bridge-config.json /opt/bridge/config.json")
+		assert.Contains(t, dfAgentStr, "COPY --from=channel-manager-build /src/dist/ /opt/channel-manager/dist/")
+		assert.Contains(t, dfAgentStr, "COPY channel-manager-config.json /opt/channel-manager/config.json")
 		assert.Contains(t, dfAgentStr, "COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt")
 		assert.Contains(t, dfAgentStr, "RUN update-ca-certificates")
 
@@ -460,12 +460,12 @@ func TestGenerator_Run(t *testing.T) {
 		_, err = os.Stat(filepath.Join(outDir, "Dockerfile.gateway"))
 		assert.NoError(t, err)
 
-		// Agent entrypoint should use DNAT and start bridge
+		// Agent entrypoint should use DNAT and start channel-manager
 		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
 		require.NoError(t, err)
 		epStr := string(ep)
 		assert.Contains(t, epStr, "nameserver $GATEWAY_IP")
-		assert.Contains(t, epStr, "exec node /opt/bridge/dist/index.js")
+		assert.Contains(t, epStr, "exec node /opt/channel-manager/dist/index.js")
 		assert.NotContains(t, epStr, "exec su -c")
 
 		// Gateway config should have MITM domains
@@ -484,18 +484,18 @@ func TestGenerator_Run(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Bridge config should exist with correct content
-		bridgeCfg, err := os.ReadFile(filepath.Join(outDir, "bridge-config.json"))
+		channelCfg, err := os.ReadFile(filepath.Join(outDir, "channel-manager-config.json"))
 		require.NoError(t, err)
-		bridgeCfgStr := string(bridgeCfg)
-		assert.Contains(t, bridgeCfgStr, `"channel": "telegram"`)
-		assert.Contains(t, bridgeCfgStr, `"acp_command"`)
-		assert.Contains(t, bridgeCfgStr, `"access_control"`)
-		assert.Contains(t, bridgeCfgStr, `"allowed_users"`)
+		channelCfgStr := string(channelCfg)
+		assert.Contains(t, channelCfgStr, `"channel": "telegram"`)
+		assert.Contains(t, channelCfgStr, `"acp_command"`)
+		assert.Contains(t, channelCfgStr, `"access_control"`)
+		assert.Contains(t, channelCfgStr, `"allowed_users"`)
 
 		// Bridge source should be copied
-		_, err = os.Stat(filepath.Join(outDir, "bridge-src", "package.json"))
+		_, err = os.Stat(filepath.Join(outDir, "channel-manager-src", "package.json"))
 		assert.NoError(t, err)
-		_, err = os.Stat(filepath.Join(outDir, "bridge-src", "tsconfig.json"))
+		_, err = os.Stat(filepath.Join(outDir, "channel-manager-src", "tsconfig.json"))
 		assert.NoError(t, err)
 
 		// docker-compose.yml should have TELEGRAM_BOT_TOKEN

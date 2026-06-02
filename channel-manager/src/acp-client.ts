@@ -11,7 +11,7 @@ export interface AcpAgentConfig {
 }
 
 /**
- * Implements the ACP Client interface for headless bridge use.
+ * Implements the ACP Client interface for headless channel-manager use.
  * Auto-approves all permission requests and collects agent message chunks.
  * Exported for testing.
  */
@@ -83,15 +83,15 @@ export class AcpAgent {
   private proc: ChildProcess | null = null;
   private connection: acp.ClientSideConnection | null = null;
   private restarting = false;
-  private bridgeClient: BridgeClient;
+  private acpHandler: BridgeClient;
   private pendingReject: ((err: Error) => void) | null = null;
   private agentCommands: AgentCommand[] = [];
   private commandsListeners: Array<(commands: AgentCommand[]) => void> = [];
 
   constructor(config: AcpAgentConfig) {
     this.config = config;
-    this.bridgeClient = new BridgeClient();
-    this.bridgeClient.setCommandsCallback((cmds) => {
+    this.acpHandler = new BridgeClient();
+    this.acpHandler.setCommandsCallback((cmds) => {
       this.agentCommands = cmds;
       for (const listener of this.commandsListeners) {
         listener(cmds);
@@ -153,7 +153,7 @@ export class AcpAgent {
         ) as ReadableStream<Uint8Array>;
         const stream = acp.ndJsonStream(input, output);
 
-        const client = this.bridgeClient;
+        const client = this.acpHandler;
         this.connection = new acp.ClientSideConnection((_agent) => client, stream);
 
         await this.connection.initialize({
@@ -195,7 +195,7 @@ export class AcpAgent {
     const chunks: string[] = [];
 
     return new Promise<string>((resolve, reject) => {
-      this.bridgeClient.setChunkCallback((chunk) => chunks.push(chunk));
+      this.acpHandler.setChunkCallback((chunk) => chunks.push(chunk));
       this.pendingReject = reject;
 
       this.connection!.prompt({
@@ -204,12 +204,12 @@ export class AcpAgent {
       })
         .then(() => {
           this.pendingReject = null;
-          this.bridgeClient.setChunkCallback(null);
+          this.acpHandler.setChunkCallback(null);
           resolve(chunks.join(""));
         })
         .catch((err: unknown) => {
           this.pendingReject = null;
-          this.bridgeClient.setChunkCallback(null);
+          this.acpHandler.setChunkCallback(null);
           reject(err instanceof Error ? err : new Error(String(err)));
         });
     });

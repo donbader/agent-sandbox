@@ -62,44 +62,44 @@ func TestValidate(t *testing.T) {
 		assert.ErrorContains(t, g.validate(), "gateway is disabled")
 	})
 
-	t.Run("BridgeChannel without bridge", func(t *testing.T) {
+	t.Run("ChannelName without channel-manager", func(t *testing.T) {
 		g := validGenerator()
-		g.Bridge = false
+		g.ChannelManager = false
 		g.Features = []*resolve.FeatureContributions{
-			{Name: "telegram", BridgeChannel: "telegram"},
+			{Name: "telegram", ChannelName: "telegram"},
 		}
-		assert.ErrorContains(t, g.validate(), "bridge is disabled")
+		assert.ErrorContains(t, g.validate(), "channel-manager is disabled")
 	})
 
-	t.Run("bridge enabled but no channel", func(t *testing.T) {
+	t.Run("channel-manager enabled but no channel", func(t *testing.T) {
 		g := validGenerator()
-		g.Bridge = true
-		g.BridgeSpec = BridgeSpec{
+		g.ChannelManager = true
+		g.ChannelManagerSpec = ChannelManagerSpec{
 			BuildImage: "node:22-slim",
-			EntryPoint: "node /opt/bridge/dist/index.js",
+			EntryPoint: "node /opt/channel-manager/dist/index.js",
 		}
 		g.Features = []*resolve.FeatureContributions{
 			{Name: "custom-runtime"},
 		}
-		assert.ErrorContains(t, g.validate(), "no feature declares a BridgeChannel")
+		assert.ErrorContains(t, g.validate(), "no feature declares a ChannelName")
 	})
 
-	t.Run("valid with gateway and bridge", func(t *testing.T) {
+	t.Run("valid with gateway and channel-manager", func(t *testing.T) {
 		g := validGenerator()
 		g.Gateway = true
-		g.Bridge = true
+		g.ChannelManager = true
 		g.GatewaySpec = GatewaySpec{
 			BuildImage: "golang:1.24-alpine",
 			BinaryPath: "/gateway",
 			ListenPort: 8443,
 			DNSPort:    5353,
 		}
-		g.BridgeSpec = BridgeSpec{
+		g.ChannelManagerSpec = ChannelManagerSpec{
 			BuildImage: "node:22-slim",
-			EntryPoint: "node /opt/bridge/dist/index.js",
+			EntryPoint: "node /opt/channel-manager/dist/index.js",
 		}
 		g.Features = []*resolve.FeatureContributions{
-			{Name: "telegram", MITMDomains: []string{"api.telegram.org"}, BridgeChannel: "telegram"},
+			{Name: "telegram", MITMDomains: []string{"api.telegram.org"}, ChannelName: "telegram"},
 		}
 		assert.NoError(t, g.validate())
 	})
@@ -118,23 +118,23 @@ func TestValidate(t *testing.T) {
 		assert.ErrorContains(t, g.validate(), "GatewaySpec.ListenPort")
 	})
 
-	t.Run("bridge enabled but BridgeSpec.BuildImage empty", func(t *testing.T) {
+	t.Run("channel-manager enabled but ChannelManagerSpec.BuildImage empty", func(t *testing.T) {
 		g := validGenerator()
-		g.Bridge = true
-		g.BridgeSpec = BridgeSpec{EntryPoint: "node /opt/bridge/dist/index.js"}
+		g.ChannelManager = true
+		g.ChannelManagerSpec = ChannelManagerSpec{EntryPoint: "node /opt/channel-manager/dist/index.js"}
 		g.Features = []*resolve.FeatureContributions{
-			{Name: "telegram", BridgeChannel: "telegram"},
+			{Name: "telegram", ChannelName: "telegram"},
 		}
-		assert.ErrorContains(t, g.validate(), "BridgeSpec.BuildImage")
+		assert.ErrorContains(t, g.validate(), "ChannelManagerSpec.BuildImage")
 	})
 
-	t.Run("bridge enabled but BridgeSpec.EntryPoint empty", func(t *testing.T) {
+	t.Run("channel-manager enabled but ChannelManagerSpec.EntryPoint empty", func(t *testing.T) {
 		g := validGenerator()
-		g.Bridge = true
-		g.BridgeSpec = BridgeSpec{BuildImage: "node:22-slim"}
+		g.ChannelManager = true
+		g.ChannelManagerSpec = ChannelManagerSpec{BuildImage: "node:22-slim"}
 		g.Features = []*resolve.FeatureContributions{
-			{Name: "telegram", BridgeChannel: "telegram"},
+			{Name: "telegram", ChannelName: "telegram"},
 		}
-		assert.ErrorContains(t, g.validate(), "BridgeSpec.EntryPoint")
+		assert.ErrorContains(t, g.validate(), "ChannelManagerSpec.EntryPoint")
 	})
 }

@@ -128,7 +128,7 @@ func TestRegister(t *testing.T) {
 		Name string `yaml:"name"`
 	}
 	Register("test-register", func(_ string, c cfg) (*FeatureContributions, error) {
-		return &FeatureContributions{BridgeChannel: c.Name}, nil
+		return &FeatureContributions{ChannelName: c.Name}, nil
 	})
 	t.Cleanup(func() { delete(registry, "test-register") })
 
@@ -148,7 +148,7 @@ func TestRegister(t *testing.T) {
 		plugin := registry["test-register"]
 		contrib, err := plugin.Resolve("/dir", map[string]any{"name": "hello"})
 		require.NoError(t, err)
-		assert.Equal(t, "hello", contrib.BridgeChannel)
+		assert.Equal(t, "hello", contrib.ChannelName)
 	})
 
 	t.Run("Resolve handles invalid config gracefully", func(t *testing.T) {
@@ -157,7 +157,7 @@ func TestRegister(t *testing.T) {
 		plugin := registry["test-register"]
 		contrib, err := plugin.Resolve("/dir", map[string]any{"unknown_field": 123})
 		require.NoError(t, err)
-		assert.Equal(t, "", contrib.BridgeChannel)
+		assert.Equal(t, "", contrib.ChannelName)
 	})
 }
 

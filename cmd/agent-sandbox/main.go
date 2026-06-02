@@ -66,7 +66,7 @@ func generateCmd(dir *string) *cobra.Command {
 					return fmt.Errorf("resolving feature %q (plugin %q): %w", instanceName, entry.Plugin, err)
 				}
 				features = append(features, contrib)
-				if contrib.BridgeChannel != "" {
+				if contrib.ChannelName != "" {
 					hasBridge = true
 				}
 			}
@@ -83,12 +83,12 @@ func generateCmd(dir *string) *cobra.Command {
 					ListenPort: 8443,
 					DNSPort:    53,
 				},
-				BridgeSpec: generate.BridgeSpec{
+				ChannelManagerSpec: generate.ChannelManagerSpec{
 					BuildImage: "node:22-slim",
 					InstallCmd: "npm install",
 					BuildCmd:   "npm run build",
 					DistDir:    "/src/dist",
-					EntryPoint: "node /opt/bridge/dist/index.js",
+					EntryPoint: "node /opt/channel-manager/dist/index.js",
 				},
 				Dir:    *dir,
 				OutDir: outDir,

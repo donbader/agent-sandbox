@@ -27,7 +27,7 @@ internal/
 ext/
   plugins/              ← external plugins (per-plugin versioning)
 gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
-bridge/                 ← Bridge TypeScript core (agent process spawning, generic channel loader)
+channel-manager/         ← Channel manager TypeScript (ACP client, channel loader, wrapper)
 sdk/                    ← Gateway handler interface (for feature plugins)
 docs/                   ← Design documents
 templates/              ← Dockerfile.tmpl, entrypoint.sh template
@@ -84,12 +84,12 @@ internal/plugins/<name>/feature.yaml   ← metadata, config schema
 internal/plugins/<name>/plugin.go      ← Go: typed Config struct + Register[C]() call
 ```
 
-External feature plugins live in `ext/plugins/<name>/` with optional gateway/bridge code:
+External feature plugins live in `ext/plugins/<name>/` with optional gateway/channel code:
 
 ```
 ext/plugins/<name>/feature.yaml        ← metadata, config schema, hosts
 ext/plugins/<name>/gateway/            ← optional Go: compiled during Docker build
-ext/plugins/<name>/bridge/             ← optional TypeScript: channel implementation (Channel Protocol)
+ext/plugins/<name>/channel/            ← optional TypeScript: channel implementation (Channel Protocol)
 ```
 
 - Each plugin defines a typed Config struct with `yaml` and `schema` tags
@@ -146,7 +146,7 @@ Refer to docs/migration-plan.md for the phased implementation plan.
 
 ### Reference Docs
 
-- `docs/reference/bridge-protocol.md` — ACP protocol (bridge ↔ agent communication)
+- `docs/reference/channel-manager-protocol.md` — ACP protocol (channel manager ↔ agent communication)
 - `docs/reference/docker-api-proxy.md` — Docker API validation design
 - `docs/reference/adr/` — Architecture Decision Records (why transparent proxy, why Go, etc.)
 
@@ -155,7 +155,7 @@ Refer to docs/migration-plan.md for the phased implementation plan.
 - Every phase produces a working `agent-sandbox generate && agent-sandbox compose up --build`
 - Plugin updates never require CLI upgrades
 - Runtime plugins are pure data (YAML) — no Go code
-- Feature plugins are hybrid (YAML + optional Go gateway + optional TypeScript bridge)
+- Feature plugins are hybrid (YAML + optional Go gateway + optional TypeScript channel)
 - Gateway handlers compile during Docker build, not CLI build
 - Bridge spawns agent as child process, loads channel plugins dynamically
 - Ephemeral by default — containers start fresh every restart

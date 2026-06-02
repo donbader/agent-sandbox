@@ -21,4 +21,4 @@ Thumbs.db
 
 # Environment
 .env
-bridge/node_modules/
+channel-manager/node_modules/

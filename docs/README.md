@@ -40,9 +40,9 @@ An opinionated agent sandbox orchestrator that deploys AI coding agents inside s
 │  └─────────────────────────────────────────────────────┘    │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  Agent Runtime (child of bridge)                      │    │
+│  │  Agent Runtime (child of channel manager)                      │    │
 │  │  - codex | claude-code | pi                          │    │
-│  │  - Unaware of proxy, bridge, or channels             │    │
+│  │  - Unaware of proxy, channel manager, or channels             │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘

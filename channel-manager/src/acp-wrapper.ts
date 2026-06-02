@@ -4,8 +4,8 @@
  *
  * Usage: node acp-wrapper.js -- <agent-acp-command...>
  *
- * Transparent ndjson pipe between bridge and agent.
- * Intercepts session/prompt for bridge commands (/sh, /diagnose).
+ * Transparent ndjson pipe between channel manager and agent.
+ * Intercepts session/prompt for wrapper commands (/sh, /diagnose).
  * All other ACP messages pass through untouched.
  */
 import { spawn } from "node:child_process";
@@ -31,7 +31,7 @@ const perfHistory: number[] = [];
 const PERF_MAX = 50;
 const promptTimers = new Map<unknown, number>();
 
-/** Write a JSON-RPC message to bridge (stdout). */
+/** Write a JSON-RPC message to channel manager (stdout). */
 function writeToBridge(msg: object): void {
   process.stdout.write(JSON.stringify(msg) + "\n");
 }
@@ -58,9 +58,9 @@ agent.on("exit", (code) => {
 });
 
 // --- Bridge → Agent (with interception) ---
-const bridgeInput = createInterface({ input: process.stdin });
+const managerInput = createInterface({ input: process.stdin });
 
-bridgeInput.on("line", (line) => {
+managerInput.on("line", (line) => {
   let msg: { jsonrpc?: string; method?: string; id?: unknown; params?: any };
   try {
     msg = JSON.parse(line);
@@ -107,7 +107,7 @@ bridgeInput.on("line", (line) => {
   agent.stdin!.write(line + "\n");
 });
 
-bridgeInput.on("close", () => {
+managerInput.on("close", () => {
   agent.stdin!.end();
 });
 

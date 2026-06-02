@@ -10,7 +10,7 @@ ext/plugins/
   <plugin-name>/
     feature.yaml          ← plugin metadata and config schema
     gateway/              ← optional Go gateway handler (compiled during Docker build)
-    bridge/               ← optional TypeScript bridge plugin (copied into image)
+    channel/              ← optional TypeScript channel plugin (copied into image)
     CHANGELOG.md          ← version history
 ```
 
