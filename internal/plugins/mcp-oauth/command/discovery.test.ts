@@ -30,6 +30,7 @@ describe("discoverAuthServer", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       "https://mcp.example.com/.well-known/oauth-authorization-server",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(result).toEqual(metadata);
   });
@@ -57,6 +58,22 @@ describe("discoverAuthServer", () => {
     );
   });
 
+  it("passes an AbortSignal for timeout", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        issuer: "https://auth.example.com",
+        authorization_endpoint: "https://auth.example.com/authorize",
+        token_endpoint: "https://auth.example.com/token",
+      }),
+    });
+
+    await discoverAuthServer("https://mcp.example.com/mcp");
+
+    const options = mockFetch.mock.calls[0][1];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("uses origin of the MCP URL for well-known path", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -71,6 +88,7 @@ describe("discoverAuthServer", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       "https://mcp.example.com:8443/.well-known/oauth-authorization-server",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 });

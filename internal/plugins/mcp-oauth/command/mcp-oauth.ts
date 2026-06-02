@@ -9,8 +9,12 @@ import type { OAuthConfig, OAuthProviderConfig, PendingFlow, StoredToken } from 
 import { generateCodeVerifier, generateCodeChallenge, generateState } from "./pkce.js";
 import { discoverAuthServer } from "./discovery.js";
 import { registerClient } from "./registration.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("mcp-oauth");
 
 const FLOW_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const TOKEN_EXCHANGE_TIMEOUT_MS = 15_000;
 const DEFAULT_TOKEN_DIR = "/data/oauth-tokens";
 const DEFAULT_REDIRECT_URI = "http://localhost:3000/oauth/callback";
 
@@ -33,6 +37,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
     if (oauthConfig) {
       this.config = oauthConfig;
     }
+    log.info({ providers: Object.keys(this.config.providers) }, "oauth plugin initialized");
     this.cleanupTimer = setInterval(() => this.cleanupStaleFlows(), 60_000);
   }
 
@@ -61,6 +66,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
       return;
     }
 
+    log.debug({ provider: providerName, chatId: ctx.chatId }, "starting OAuth flow");
     await this.startFlow(providerName, providerConfig, ctx.chatId, ctx.reply);
   }
 
@@ -134,10 +140,17 @@ export class OAuthCommandPlugin implements CommandPlugin {
       }
 
       const authUrl = `${metadata.authorization_endpoint}?${params.toString()}`;
+      log.debug({ provider: name, authUrl }, "OAuth authorization URL generated");
       reply(`Authorize with ${name}:\n${authUrl}\n\nAfter authorizing, paste the callback URL here.`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      reply(`OAuth flow error for ${name}: ${message}`);
+      const isTimeout = err instanceof Error && err.name === "TimeoutError";
+      log.error({ provider: name, error: message, isTimeout }, "OAuth flow failed during setup");
+      if (isTimeout) {
+        reply(`OAuth setup timed out for ${name}. The server at ${config.mcp_url} did not respond in time.\nThis may mean the server doesn't support dynamic client registration. Try configuring a client_id manually.`);
+      } else {
+        reply(`OAuth flow error for ${name}: ${message}`);
+      }
     }
   }
 
@@ -162,14 +175,22 @@ export class OAuthCommandPlugin implements CommandPlugin {
     if (flow.chatId !== chatId) return false;
 
     this.pendingFlows.delete(state);
+    log.debug({ provider: flow.provider }, "received OAuth callback, exchanging code for token");
 
     try {
       const token = await this.exchangeCode(code, flow);
       this.writeToken(flow.provider, token);
+      log.info({ provider: flow.provider }, "OAuth token saved successfully");
       reply(`OAuth complete for ${flow.provider}. Token saved.`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      reply(`Token exchange failed for ${flow.provider}: ${message}`);
+      const isTimeout = err instanceof Error && err.name === "TimeoutError";
+      log.error({ provider: flow.provider, error: message, isTimeout }, "token exchange failed");
+      if (isTimeout) {
+        reply(`Token exchange timed out for ${flow.provider}. The token endpoint did not respond in time.`);
+      } else {
+        reply(`Token exchange failed for ${flow.provider}: ${message}`);
+      }
     }
 
     return true;
@@ -188,10 +209,13 @@ export class OAuthCommandPlugin implements CommandPlugin {
       body.set("client_secret", flow.clientSecret);
     }
 
+    log.debug({ provider: flow.provider, tokenEndpoint: flow.tokenEndpoint }, "exchanging authorization code for token");
+
     const response = await fetch(flow.tokenEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
+      signal: AbortSignal.timeout(TOKEN_EXCHANGE_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -221,6 +245,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
     const dir = dirname(tokenFile);
     mkdirSync(dir, { recursive: true });
     writeFileSync(tokenFile, JSON.stringify(token, null, 2), { mode: 0o600 });
+    log.debug({ provider, tokenFile }, "token written to disk");
   }
 
   private getTokenFile(name: string, config?: OAuthProviderConfig): string {
@@ -233,6 +258,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
     const now = Date.now();
     for (const [state, flow] of this.pendingFlows) {
       if (now - flow.startedAt > FLOW_TIMEOUT_MS) {
+        log.warn({ provider: flow.provider, state }, "cleaning up stale OAuth flow");
         this.pendingFlows.delete(state);
       }
     }

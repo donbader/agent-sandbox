@@ -2,6 +2,11 @@
  * RFC 7591 OAuth Dynamic Client Registration.
  * Registers a new client with the authorization server when no client_id is pre-configured.
  */
+import { createLogger } from "./logger.js";
+
+const log = createLogger("mcp-oauth:registration");
+
+const REGISTRATION_TIMEOUT_MS = 15_000;
 
 export interface ClientRegistrationResponse {
   client_id: string;
@@ -27,10 +32,13 @@ export async function registerClient(
     ...(clientName && { client_name: clientName }),
   };
 
+  log.debug({ registrationEndpoint, clientName }, "starting dynamic client registration");
+
   const response = await fetch(registrationEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(REGISTRATION_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -46,5 +54,6 @@ export async function registerClient(
     throw new Error("Registration response missing client_id");
   }
 
+  log.debug({ clientId: data.client_id }, "dynamic client registration succeeded");
   return data;
 }
