@@ -455,35 +455,47 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, dfAgentStr, "RUN npm run build")
 		assert.Contains(t, dfAgentStr, "COPY --from=channel-manager-build /src/dist/ /opt/channel-manager/dist/")
 		assert.Contains(t, dfAgentStr, "COPY channel-manager-config.json /opt/channel-manager/config.json")
-		assert.Contains(t, dfAgentStr, "COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt")
-		assert.Contains(t, dfAgentStr, "RUN update-ca-certificates")
 
-		// Dockerfile.gateway should exist
-		_, err = os.Stat(filepath.Join(outDir, "Dockerfile.gateway"))
-		assert.NoError(t, err)
+		// Dockerfile.gateway should exist and have shared cert dirs
+		dfGateway, err := os.ReadFile(filepath.Join(outDir, "Dockerfile.gateway"))
+		require.NoError(t, err)
+		dfGatewayStr := string(dfGateway)
+		assert.Contains(t, dfGatewayStr, "mkdir -p /shared/certs /etc/gateway/private")
+		assert.NotContains(t, dfGatewayStr, "COPY certs/ca.crt")
+		assert.NotContains(t, dfGatewayStr, "COPY certs/ca.key")
 
-		// Agent entrypoint should use DNAT and start channel-manager
+		// Agent entrypoint should use DNAT, start channel-manager, and wait for CA cert
 		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
 		require.NoError(t, err)
 		epStr := string(ep)
 		assert.Contains(t, epStr, "nameserver $GATEWAY_IP")
 		assert.Contains(t, epStr, "exec node /opt/channel-manager/dist/index.js")
 		assert.NotContains(t, epStr, "exec su -c")
+		assert.Contains(t, epStr, "waiting for sandbox CA certificate")
+		assert.Contains(t, epStr, "update-ca-certificates")
 
-		// Gateway config should have MITM domains
+		// Gateway config should have MITM domains but no CA paths (runtime-generated)
 		gwCfg, err := os.ReadFile(filepath.Join(outDir, "gateway-config.yaml"))
 		require.NoError(t, err)
 		gwCfgStr := string(gwCfg)
 		assert.Contains(t, gwCfgStr, "mitm_domains:")
 		assert.Contains(t, gwCfgStr, "api.telegram.org")
-		assert.Contains(t, gwCfgStr, "ca_cert: /etc/gateway/ca.crt")
-		assert.Contains(t, gwCfgStr, "ca_key: /etc/gateway/ca.key")
+		assert.NotContains(t, gwCfgStr, "ca_cert:")
+		assert.NotContains(t, gwCfgStr, "ca_key:")
 
-		// CA cert should be generated
+		// CA certs should NOT be generated on disk (runtime-only now)
 		_, err = os.Stat(filepath.Join(outDir, "certs", "ca.crt"))
-		assert.NoError(t, err)
+		assert.ErrorIs(t, err, os.ErrNotExist)
 		_, err = os.Stat(filepath.Join(outDir, "certs", "ca.key"))
-		assert.NoError(t, err)
+		assert.ErrorIs(t, err, os.ErrNotExist)
+
+		// docker-compose.yml should have shared-certs volume and healthcheck
+		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
+		require.NoError(t, err)
+		dcStr := string(dc)
+		assert.Contains(t, dcStr, "shared-certs:/shared/certs")
+		assert.Contains(t, dcStr, "shared-certs:/usr/local/share/ca-certificates:ro")
+		assert.Contains(t, dcStr, "service_healthy")
 
 		// Bridge config should exist with correct content
 		channelCfg, err := os.ReadFile(filepath.Join(outDir, "channel-manager-config.json"))
@@ -501,9 +513,7 @@ func TestGenerator_Run(t *testing.T) {
 		assert.NoError(t, err)
 
 		// docker-compose.yml should have TELEGRAM_BOT_TOKEN
-		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
-		require.NoError(t, err)
-		assert.Contains(t, string(dc), "TELEGRAM_BOT_TOKEN")
+		assert.Contains(t, dcStr, "TELEGRAM_BOT_TOKEN")
 
 		// .env.example should have TELEGRAM_BOT_TOKEN
 		env, err := os.ReadFile(filepath.Join(srcDir, ".env.example"))

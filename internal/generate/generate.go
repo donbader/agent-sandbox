@@ -124,12 +124,7 @@ func (g *Generator) Run() error {
 		}
 	}
 
-	// Generate CA if any feature requires MITM
-	if g.hasMITMDomains() {
-		if _, _, err := GenerateCA(g.OutDir); err != nil {
-			return fmt.Errorf("generating CA: %w", err)
-		}
-	}
+
 
 	if g.ChannelManager {
 		if err := g.writeChannelManagerSource(); err != nil {
@@ -221,8 +216,7 @@ func (g *Generator) writeGatewayDockerfile() error {
 	b.WriteString("COPY gateway-config.yaml /etc/gateway/config.yaml\n")
 
 	if g.hasMITMDomains() {
-		b.WriteString("COPY certs/ca.crt /etc/gateway/ca.crt\n")
-		b.WriteString("COPY certs/ca.key /etc/gateway/ca.key\n")
+		b.WriteString("RUN mkdir -p /shared/certs /etc/gateway/private && chmod 700 /etc/gateway/private\n")
 	}
 
 	b.WriteString("COPY gateway-entrypoint.sh /opt/entrypoint.sh\n")
@@ -253,13 +247,7 @@ func (g *Generator) writeAgentDockerfile() error {
 	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iproute2 iptables ca-certificates && rm -rf /var/lib/apt/lists/*\n")
 	b.WriteString(fmt.Sprintf("RUN useradd -m -s /bin/bash %s\n", g.Runtime.User))
 
-	// Install CA cert if MITM is enabled
-	if g.hasMITMDomains() {
-		b.WriteString("# Install sandbox CA certificate\n")
-		b.WriteString("COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt\n")
-		b.WriteString("RUN update-ca-certificates\n")
-		b.WriteString("ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/sandbox-ca.crt\n")
-	}
+
 
 	// Copy channel-manager dist if enabled
 	if g.ChannelManager {
@@ -402,6 +390,18 @@ func (g *Generator) writeGatewayCompose() error {
 
 	b.WriteString("    restart: unless-stopped\n")
 
+	// Shared certs volume + healthcheck (only when MITM is configured)
+	if g.hasMITMDomains() {
+		b.WriteString("    volumes:\n")
+		b.WriteString("      - shared-certs:/shared/certs\n")
+		b.WriteString("    healthcheck:\n")
+		b.WriteString("      test: [\"CMD\", \"test\", \"-f\", \"/shared/certs/ca.crt\"]\n")
+		b.WriteString("      interval: 1s\n")
+		b.WriteString("      timeout: 1s\n")
+		b.WriteString("      retries: 10\n")
+		b.WriteString("      start_period: 2s\n")
+	}
+
 	// Agent service: internal network only, no secrets
 	b.WriteString(fmt.Sprintf("  %s:\n", g.Config.Name))
 	b.WriteString("    build:\n")
@@ -419,9 +419,18 @@ func (g *Generator) writeGatewayCompose() error {
 	for _, env := range g.collectAgentEnv() {
 		b.WriteString(fmt.Sprintf("      - %s\n", env))
 	}
-	b.WriteString(fmt.Sprintf("    depends_on:\n      - %s-gateway\n", g.Config.Name))
+
+	// depends_on: use healthcheck condition when MITM requires CA readiness
+	if g.hasMITMDomains() {
+		b.WriteString(fmt.Sprintf("    depends_on:\n      %s-gateway:\n        condition: service_healthy\n", g.Config.Name))
+	} else {
+		b.WriteString(fmt.Sprintf("    depends_on:\n      - %s-gateway\n", g.Config.Name))
+	}
 
 	volumes := g.collectVolumes()
+	if g.hasMITMDomains() {
+		volumes = append(volumes, "shared-certs:/usr/local/share/ca-certificates:ro")
+	}
 	if len(volumes) > 0 {
 		b.WriteString("    volumes:\n")
 		for _, v := range volumes {
@@ -577,6 +586,25 @@ func (g *Generator) writeAgentEntrypoint() error {
 		}
 	}
 
+	// Wait for CA cert and install trust (when MITM is configured)
+	if g.hasMITMDomains() {
+		b.WriteString("# Wait for sandbox CA certificate from gateway (shared volume)\n")
+		b.WriteString("echo \"entrypoint: waiting for sandbox CA certificate...\"\n")
+		b.WriteString("timeout=30\n")
+		b.WriteString("elapsed=0\n")
+		b.WriteString("while [ ! -f /usr/local/share/ca-certificates/ca.crt ]; do\n")
+		b.WriteString("  sleep 0.1\n")
+		b.WriteString("  elapsed=$((elapsed + 1))\n")
+		b.WriteString("  if [ \"$elapsed\" -ge \"$((timeout * 10))\" ]; then\n")
+		b.WriteString("    echo \"entrypoint: ERROR — CA certificate not available after ${timeout}s\" >&2\n")
+		b.WriteString("    exit 1\n")
+		b.WriteString("  fi\n")
+		b.WriteString("done\n")
+		b.WriteString("update-ca-certificates 2>/dev/null\n")
+		b.WriteString("export NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/ca.crt\n")
+		b.WriteString("echo \"entrypoint: CA certificate trusted\"\n\n")
+	}
+
 	// Home override: copy files from staging to home
 	if g.hasHomeOverride() {
 		b.WriteString("echo \"entrypoint: applying home override...\"\n")
@@ -623,8 +651,6 @@ func (g *Generator) writeGatewayConfig() error {
 		for _, d := range mitmDomains {
 			b.WriteString(fmt.Sprintf("  - %s\n", d))
 		}
-		b.WriteString("ca_cert: /etc/gateway/ca.crt\n")
-		b.WriteString("ca_key: /etc/gateway/ca.key\n")
 	}
 
 	// Rewriter configuration

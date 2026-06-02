@@ -9,10 +9,18 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/donbader/agent-sandbox/gateway/internal/ca"
 	"github.com/donbader/agent-sandbox/gateway/internal/dns"
 	"github.com/donbader/agent-sandbox/gateway/internal/mitm"
 	"github.com/donbader/agent-sandbox/gateway/internal/proxy"
 	"github.com/donbader/agent-sandbox/gateway/internal/redact"
+)
+
+const (
+	// sharedCertPath is where the CA cert is written for the agent container (shared volume).
+	sharedCertPath = "/shared/certs/ca.crt"
+	// privateKeyPath is where the CA key is stored (gateway-internal, not shared).
+	privateKeyPath = "/etc/gateway/private/ca.key"
 )
 
 func main() {
@@ -65,13 +73,15 @@ func main() {
 	// Start TCP proxy
 	p := proxy.New(cfg)
 
-	// Register MITM handler if configured
-	if len(cfg.MITMDomains) > 0 && cfg.CACertPath != "" && cfg.CAKeyPath != "" {
-		caCert, err := mitm.LoadCA(cfg.CACertPath, cfg.CAKeyPath)
+	// Generate CA and register MITM handler if MITM domains are configured
+	if len(cfg.MITMDomains) > 0 {
+		slog.Info("generating CA keypair for MITM")
+		caCert, err := ca.GenerateAndStore(sharedCertPath, privateKeyPath)
 		if err != nil {
-			slog.Error("load CA", "error", err)
+			slog.Error("generate CA", "error", err)
 			os.Exit(1)
 		}
+		slog.Info("CA certificate written", "cert", sharedCertPath, "key", privateKeyPath)
 
 		// Build rewriters from config
 		rewriters := buildRewriters(cfg.Rewriters)

@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
 	"math/big"
 	"sync"
@@ -102,33 +101,4 @@ func generateCert(domain string, caCert tls.Certificate) (tls.Certificate, error
 		Certificate: [][]byte{certDER},
 		PrivateKey:  key,
 	}, nil
-}
-
-// LoadCA loads a CA certificate and key from PEM files.
-func LoadCA(certPath, keyPath string) (tls.Certificate, error) {
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("load CA keypair: %w", err)
-	}
-	return cert, nil
-}
-
-// EncodeCertPEM encodes a DER certificate to PEM format.
-func EncodeCertPEM(der []byte) []byte {
-	return pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: der,
-	})
-}
-
-// EncodeKeyPEM encodes an ECDSA private key to PEM format.
-func EncodeKeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {
-	der, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return pem.EncodeToMemory(&pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: der,
-	}), nil
 }
