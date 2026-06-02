@@ -31,7 +31,7 @@ func (s *Server) ListenAndServe() error {
 	if err != nil {
 		return fmt.Errorf("dns listen: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	buf := make([]byte, 4096)
 	for {
@@ -54,7 +54,7 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 		slog.Error("dial upstream", "error", err)
 		return
 	}
-	defer upstream.Close()
+	defer func() { _ = upstream.Close() }()
 
 	if _, err := upstream.Write(query); err != nil {
 		slog.Error("write upstream", "error", err)

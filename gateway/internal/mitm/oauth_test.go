@@ -67,7 +67,7 @@ func TestOAuthRewriter_RefreshesExpiredToken(t *testing.T) {
 		assert.Equal(t, "client-id", r.Form.Get("client_id"))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":  "new-access-token",
 			"refresh_token": "new-refresh",
 			"expires_in":    3600,

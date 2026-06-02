@@ -72,7 +72,7 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 	}
 
 	tlsConn := tls.Server(prefixedConn, tlsCfg)
-	defer tlsConn.Close()
+	defer func() { _ = tlsConn.Close() }()
 
 	if err := tlsConn.Handshake(); err != nil {
 		slog.Debug("tls handshake", "host", serverName, "error", err)
@@ -121,10 +121,10 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		// Write response back to client
 		if err := resp.Write(tlsConn); err != nil {
 			slog.Error("write response", "host", serverName, "error", err)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		// Check if connection should be kept alive
 		if req.Close || resp.Close {
