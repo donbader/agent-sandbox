@@ -117,7 +117,7 @@ func composeCmd(dir *string) *cobra.Command {
 				return fmt.Errorf("%s not found — run 'agent-sandbox generate' first", composePath)
 			}
 
-			composeArgs := []string{"-f", composePath}
+			composeArgs := []string{"-f", composePath, "--project-name", "agent-sandbox"}
 			// Auto-inject --env-file if .env exists in project dir
 			envPath := filepath.Join(*dir, ".env")
 			if _, err := os.Stat(envPath); err == nil {
