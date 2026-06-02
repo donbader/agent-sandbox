@@ -349,6 +349,98 @@ describe("StreamController", () => {
     });
   });
 
+  describe("overflow", () => {
+    it("sends new message when content exceeds 4096 chars", async () => {
+      const { splitMessage } = await import("./formatter/telegram.js");
+      vi.mocked(splitMessage).mockImplementation((html: string) => {
+        if (html.length > 4096) {
+          return [html.slice(0, 4096), html.slice(4096)];
+        }
+        return [html];
+      });
+
+      const sc = new StreamController(deps, { bufferMs: 100, throttleMs: 500 });
+      sc.pushText("x".repeat(3000));
+      await vi.advanceTimersByTimeAsync(100); // enter streaming
+
+      // Push more to exceed limit
+      sc.pushText("y".repeat(2000)); // total 5000 > 4096
+      await vi.advanceTimersByTimeAsync(500); // throttle tick
+
+      // Should have: 1 initial send + 1 overflow send
+      expect(deps.sendMessage).toHaveBeenCalledTimes(2);
+      // Should have edited the first message (finalize at split point)
+      expect(deps.editMessage).toHaveBeenCalled();
+
+      // Restore default mock
+      vi.mocked(splitMessage).mockImplementation((html: string) => [html]);
+    });
+  });
+
+  describe("error resilience", () => {
+    it("does not crash when editMessage rejects", async () => {
+      (deps.editMessage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("rate limited"));
+
+      const sc = new StreamController(deps, { bufferMs: 100, throttleMs: 500 });
+      sc.pushText("Hello");
+      await vi.advanceTimersByTimeAsync(100); // enter streaming
+
+      sc.pushText(" world");
+      // Should not throw
+      await vi.advanceTimersByTimeAsync(500);
+
+      // Controller should still be functional
+      sc.pushText(" still working");
+      await vi.advanceTimersByTimeAsync(500);
+      // No crash = success
+    });
+
+    it("does not crash when sendMessage rejects", async () => {
+      (deps.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network error"));
+
+      const sc = new StreamController(deps, { bufferMs: 100, throttleMs: 500 });
+      sc.pushText("Hello");
+
+      // Should not throw when buffer timer fires
+      await vi.advanceTimersByTimeAsync(100);
+
+      // finalize should also not throw
+      await sc.finalize();
+    });
+  });
+
+  describe("guard against messageId null", () => {
+    it("skips tick when sendInitialMessage has not resolved yet", async () => {
+      // Make sendMessage hang (never resolve)
+      let resolveSend!: (id: number) => void;
+      (deps.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise<number>((r) => { resolveSend = r; }),
+      );
+
+      const sc = new StreamController(deps, { bufferMs: 100, throttleMs: 500 });
+      sc.pushText("Hello");
+      await vi.advanceTimersByTimeAsync(100); // enters streaming, sendMessage called but pending
+
+      // Push more content while messageId is still null
+      sc.pushText(" world");
+
+      // Throttle fires, but messageId is null — should not crash
+      await vi.advanceTimersByTimeAsync(500);
+
+      // editMessage should NOT be called (messageId is null)
+      expect(deps.editMessage).not.toHaveBeenCalled();
+
+      // Resolve the initial send
+      resolveSend(42);
+      await vi.advanceTimersByTimeAsync(0); // flush microtask
+
+      // Now push more and throttle again — should edit now
+      sc.pushText(" final");
+      await vi.advanceTimersByTimeAsync(500);
+      expect(deps.editMessage).toHaveBeenCalled();
+    });
+  });
+
   describe("abort", () => {
     it("sends current content and cancels timers", async () => {
       const sc = new StreamController(deps);
