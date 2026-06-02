@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../.build/reviewer/schema.json
+name: reviewer
+runtime: claude-code
+
+features:
+  - plugin: telegram
+    bot_token: "${TELEGRAM_BOT_TOKEN_REVIEWER}"
+    allowed_users: ["@your_username"]

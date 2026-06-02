@@ -91,3 +91,62 @@ func Load(dir string) (*AgentConfig, error) {
 
 	return &cfg, nil
 }
+
+// FleetConfig represents a fleet.yaml file for multi-agent deployments.
+type FleetConfig struct {
+	Agents []string    `yaml:"agents"`
+	Shared SharedBlock `yaml:"shared"`
+}
+
+// SharedBlock holds features shared across all agents.
+type SharedBlock struct {
+	Features []FeatureEntry `yaml:"features"`
+}
+
+// LoadFleet reads and parses a fleet.yaml file from the given directory.
+func LoadFleet(dir string) (*FleetConfig, error) {
+	path := filepath.Join(dir, "fleet.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading fleet.yaml: %w", err)
+	}
+
+	var cfg FleetConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing fleet.yaml: %w", err)
+	}
+
+	if len(cfg.Agents) == 0 {
+		return nil, fmt.Errorf("fleet.yaml: agents list is required")
+	}
+
+	return &cfg, nil
+}
+
+// HasFleetConfig returns true if a fleet.yaml exists in the directory.
+func HasFleetConfig(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "fleet.yaml"))
+	return err == nil
+}
+
+// MergeSharedFeatures combines shared features with agent-specific features.
+// Per-agent features override shared features with the same plugin name.
+func MergeSharedFeatures(shared, agent []FeatureEntry) []FeatureEntry {
+	// Index agent features by plugin name
+	agentPlugins := make(map[string]bool)
+	for _, f := range agent {
+		agentPlugins[f.Plugin] = true
+	}
+
+	// Start with shared features that aren't overridden
+	var merged []FeatureEntry
+	for _, f := range shared {
+		if !agentPlugins[f.Plugin] {
+			merged = append(merged, f)
+		}
+	}
+
+	// Append all agent features
+	merged = append(merged, agent...)
+	return merged
+}

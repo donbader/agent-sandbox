@@ -85,21 +85,22 @@ See [examples/](examples/) for working setups.
 ## Commands
 
 ```bash
+agent-sandbox init              # interactive project scaffold
 agent-sandbox generate          # read config → write .build/ artifacts
+agent-sandbox validate          # check config without generating
+agent-sandbox plugins           # list available plugins
 agent-sandbox compose ...       # docker compose passthrough (up, down, logs, etc.)
+agent-sandbox upgrade           # self-update to latest release
 ```
 
 ## Current Limitations
 
 These features are planned but not yet available:
 
-- `agent-sandbox init` — interactive project scaffold
-- `agent-sandbox validate` — config validation
-- `agent-sandbox plugins` — list available plugins
-- `agent-sandbox upgrade` — self-update
 - Docker API proxy (let agent spin up containers)
 - MCP OAuth credential flow
-- Multi-agent fleet.yaml
+- Streaming reply (edit Telegram message as agent streams)
+- Security hardening (cap_drop, no-new-privileges)
 
 See [Roadmap](docs/roadmap.md) for the full plan.
 

@@ -5,9 +5,8 @@
 ```bash
 agent-sandbox init [--runtime codex]    # interactive scaffold
 agent-sandbox generate                  # read config → write .build/ artifacts
-agent-sandbox validate                  # check config + suggest fixes
-agent-sandbox plugins                   # list available
-agent-sandbox plugins info <name>       # plugin details
+agent-sandbox validate                  # check config + resolve plugins
+agent-sandbox plugins                   # list available plugins
 agent-sandbox upgrade                   # self-update
 agent-sandbox compose ...               # docker compose passthrough
 ```

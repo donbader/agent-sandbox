@@ -1,10 +1,16 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate"
@@ -29,6 +35,10 @@ func main() {
 
 	root.AddCommand(generateCmd(&dir))
 	root.AddCommand(composeCmd(&dir))
+	root.AddCommand(validateCmd(&dir))
+	root.AddCommand(pluginsCmd())
+	root.AddCommand(initCmd())
+	root.AddCommand(upgradeCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -40,70 +50,136 @@ func generateCmd(dir *string) *cobra.Command {
 		Use:   "generate",
 		Short: "Generate .build/ artifacts from agent config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			outDir := filepath.Join(*dir, ".build")
-
-			cfg, err := config.Load(*dir)
-			if err != nil {
-				return err
+			// Detect fleet vs single-agent mode
+			if config.HasFleetConfig(*dir) {
+				return generateFleet(*dir)
 			}
-
-			// Resolve runtime
-			runtime, err := resolve.ResolveRuntime(*dir, cfg.Runtime)
-			if err != nil {
-				return fmt.Errorf("resolving runtime %q: %w", cfg.Runtime, err)
-			}
-
-			// Resolve features
-			var features []*resolve.FeatureContributions
-			hasChannelManager := false
-			for i, entry := range cfg.Features {
-				instanceName := fmt.Sprintf("features[%d]", i)
-				if entry.Name != "" {
-					instanceName = entry.Name
-				}
-				contrib, err := resolve.ResolveFeature(*dir, entry.Plugin, instanceName, entry.Config)
-				if err != nil {
-					return fmt.Errorf("resolving feature %q (plugin %q): %w", instanceName, entry.Plugin, err)
-				}
-				features = append(features, contrib)
-				if contrib.ChannelName != "" {
-					hasChannelManager = true
-				}
-			}
-
-			g := &generate.Generator{
-				Config:   cfg,
-				Runtime:  runtime,
-				Features: features,
-				Gateway:  cfg.GatewayEnabled(),
-				ChannelManager: hasChannelManager,
-				GatewaySpec: generate.GatewaySpec{
-					BuildImage: "golang:1.24-alpine",
-					BinaryPath: "/gateway",
-					ListenPort: 8443,
-					DNSPort:    53,
-				},
-				ChannelManagerSpec: generate.ChannelManagerSpec{
-					BuildImage: "node:22-slim",
-					InstallCmd: "npm install",
-					BuildCmd:   "npm run build",
-					DistDir:    "/src/dist",
-					EntryPoint: "node /opt/channel-manager/dist/index.js",
-				},
-				Dir:    *dir,
-				OutDir: outDir,
-			}
-
-			if err := g.Run(); err != nil {
-				return err
-			}
-
-			fmt.Printf("Generated artifacts in %s\n", outDir)
-			return nil
+			return generateSingle(*dir)
 		},
 	}
 
 	return cmd
+}
+
+func generateSingle(dir string) error {
+	outDir := filepath.Join(dir, ".build")
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		return err
+	}
+
+	if err := generateAgent(dir, outDir, cfg, nil); err != nil {
+		return err
+	}
+
+	fmt.Printf("Generated artifacts in %s\n", outDir)
+	return nil
+}
+
+func generateFleet(dir string) error {
+	fleet, err := config.LoadFleet(dir)
+	if err != nil {
+		return err
+	}
+
+	outDir := filepath.Join(dir, ".build")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return fmt.Errorf("creating output dir: %w", err)
+	}
+
+	// Generate each agent into its own subdirectory
+	var agentNames []string
+	for _, agentName := range fleet.Agents {
+		agentDir := filepath.Join(dir, agentName)
+		agentOutDir := filepath.Join(outDir, agentName)
+
+		cfg, err := config.Load(agentDir)
+		if err != nil {
+			return fmt.Errorf("agent %q: %w", agentName, err)
+		}
+
+		// Merge shared features
+		cfg.Features = config.MergeSharedFeatures(fleet.Shared.Features, cfg.Features)
+
+		if err := generateAgent(agentDir, agentOutDir, cfg, &fleet.Shared); err != nil {
+			return fmt.Errorf("agent %q: %w", agentName, err)
+		}
+		agentNames = append(agentNames, agentName)
+	}
+
+	// Generate combined docker-compose.yml
+	if err := writeFleetCompose(outDir, agentNames); err != nil {
+		return err
+	}
+
+	fmt.Printf("Generated fleet artifacts in %s (%d agents)\n", outDir, len(agentNames))
+	return nil
+}
+
+func generateAgent(dir, outDir string, cfg *config.AgentConfig, _ *config.SharedBlock) error {
+	// Resolve runtime
+	rt, err := resolve.ResolveRuntime(dir, cfg.Runtime)
+	if err != nil {
+		return fmt.Errorf("resolving runtime %q: %w", cfg.Runtime, err)
+	}
+
+	// Resolve features
+	var features []*resolve.FeatureContributions
+	hasChannelManager := false
+	for i, entry := range cfg.Features {
+		instanceName := fmt.Sprintf("features[%d]", i)
+		if entry.Name != "" {
+			instanceName = entry.Name
+		}
+		contrib, err := resolve.ResolveFeature(dir, entry.Plugin, instanceName, entry.Config)
+		if err != nil {
+			return fmt.Errorf("resolving feature %q (plugin %q): %w", instanceName, entry.Plugin, err)
+		}
+		features = append(features, contrib)
+		if contrib.ChannelName != "" {
+			hasChannelManager = true
+		}
+	}
+
+	g := &generate.Generator{
+		Config:         cfg,
+		Runtime:        rt,
+		Features:       features,
+		Gateway:        cfg.GatewayEnabled(),
+		ChannelManager: hasChannelManager,
+		GatewaySpec: generate.GatewaySpec{
+			BuildImage: "golang:1.24-alpine",
+			BinaryPath: "/gateway",
+			ListenPort: 8443,
+			DNSPort:    53,
+		},
+		ChannelManagerSpec: generate.ChannelManagerSpec{
+			BuildImage: "node:22-slim",
+			InstallCmd: "npm install",
+			BuildCmd:   "npm run build",
+			DistDir:    "/src/dist",
+			EntryPoint: "node /opt/channel-manager/dist/index.js",
+		},
+		Dir:    dir,
+		OutDir: outDir,
+	}
+
+	return g.Run()
+}
+
+func writeFleetCompose(outDir string, agents []string) error {
+	var b strings.Builder
+	b.WriteString("# Generated by agent-sandbox (fleet mode)\n")
+	b.WriteString("# Do not edit — regenerate with: agent-sandbox generate\n\n")
+
+	b.WriteString("include:\n")
+	for _, name := range agents {
+		b.WriteString(fmt.Sprintf("  - path: %s/docker-compose.yml\n", name))
+	}
+
+	composePath := filepath.Join(outDir, "docker-compose.yml")
+	return os.WriteFile(composePath, []byte(b.String()), 0644)
 }
 
 func composeCmd(dir *string) *cobra.Command {
@@ -134,4 +210,325 @@ func composeCmd(dir *string) *cobra.Command {
 	}
 
 	return cmd
+}
+
+func validateCmd(dir *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "validate",
+		Short: "Validate agent.yaml config without generating artifacts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(*dir)
+			if err != nil {
+				return err
+			}
+
+			// Resolve runtime
+			_, err = resolve.ResolveRuntime(*dir, cfg.Runtime)
+			if err != nil {
+				return fmt.Errorf("runtime: %w", err)
+			}
+
+			// Resolve each feature
+			for i, entry := range cfg.Features {
+				instanceName := fmt.Sprintf("features[%d]", i)
+				if entry.Name != "" {
+					instanceName = entry.Name
+				}
+				_, err := resolve.ResolveFeature(*dir, entry.Plugin, instanceName, entry.Config)
+				if err != nil {
+					return fmt.Errorf("feature %q (plugin %q): %w", instanceName, entry.Plugin, err)
+				}
+			}
+
+			// Check for .env file if config references env vars
+			envPath := filepath.Join(*dir, ".env")
+			if _, err := os.Stat(envPath); os.IsNotExist(err) {
+				// Only warn — it's not an error to not have .env during validation
+				fmt.Fprintf(os.Stderr, "Warning: no .env file found at %s\n", envPath)
+			}
+
+			fmt.Println("✓ Config is valid")
+			return nil
+		},
+	}
+}
+
+func pluginsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "plugins",
+		Short: "List available plugins",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("Runtime plugins:")
+			fmt.Println("  codex        — OpenAI Codex agent (node:22-slim)")
+			fmt.Println("  claude-code  — Anthropic Claude Code agent (node:22-slim)")
+			fmt.Println("  pi           — Pi coding agent (node:22-slim)")
+			fmt.Println()
+			fmt.Println("Feature plugins:")
+			for name, plugin := range resolve.RegisteredPlugins() {
+				desc := describePlugin(name, plugin)
+				fmt.Printf("  %-14s — %s\n", name, desc)
+			}
+		},
+	}
+}
+
+func describePlugin(name string, plugin resolve.FeaturePlugin) string {
+	descriptions := map[string]string{
+		"custom-runtime": "Custom packages, startup hooks, persistent volumes",
+		"telegram":       "Telegram bot channel via gateway MITM",
+		"github-pat":     "GitHub PAT injection via gateway MITM",
+		"static-header":  "Static header injection for any endpoint",
+		"claude-code":    "Anthropic Claude Code runtime configuration",
+		"pi":             "Pi coding agent runtime configuration",
+	}
+	if desc, ok := descriptions[name]; ok {
+		return desc
+	}
+	return "Feature plugin"
+}
+
+func initCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Initialize a new agent-sandbox project (interactive)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check if agent.yaml already exists
+			if _, err := os.Stat("agent.yaml"); err == nil {
+				return fmt.Errorf("agent.yaml already exists in this directory")
+			}
+
+			reader := bufio.NewReader(os.Stdin)
+
+			// Agent name
+			dirName := filepath.Base(mustCwd())
+			name := prompt(reader, fmt.Sprintf("Agent name [%s]: ", dirName))
+			if name == "" {
+				name = dirName
+			}
+
+			// Runtime selection
+			fmt.Println("\nAvailable runtimes:")
+			fmt.Println("  1) codex       — OpenAI Codex")
+			fmt.Println("  2) claude-code — Anthropic Claude Code")
+			fmt.Println("  3) pi          — Pi coding agent")
+			runtimeChoice := prompt(reader, "Runtime [1]: ")
+			runtime := "codex"
+			switch strings.TrimSpace(runtimeChoice) {
+			case "2":
+				runtime = "claude-code"
+			case "3":
+				runtime = "pi"
+			}
+
+			// Features
+			fmt.Println("\nOptional features (comma-separated numbers, or blank for none):")
+			fmt.Println("  1) github-pat      — GitHub PAT credential injection")
+			fmt.Println("  2) telegram        — Telegram bot channel")
+			fmt.Println("  3) custom-runtime  — Custom packages, hooks, volumes")
+			featureChoice := prompt(reader, "Features []: ")
+
+			var features []string
+			var envVars []string
+			for _, ch := range strings.Split(featureChoice, ",") {
+				switch strings.TrimSpace(ch) {
+				case "1":
+					features = append(features, "github-pat")
+					envVars = append(envVars, "GITHUB_PAT")
+				case "2":
+					features = append(features, "telegram")
+					envVars = append(envVars, "TELEGRAM_BOT_TOKEN")
+				case "3":
+					features = append(features, "custom-runtime")
+				}
+			}
+
+			// Generate agent.yaml
+			var b strings.Builder
+			b.WriteString("# yaml-language-server: $schema=.build/schema.json\n")
+			b.WriteString(fmt.Sprintf("name: %s\n", name))
+			b.WriteString(fmt.Sprintf("runtime: %s\n", runtime))
+
+			if len(features) > 0 {
+				b.WriteString("\nfeatures:\n")
+				for _, f := range features {
+					switch f {
+					case "github-pat":
+						b.WriteString("  - plugin: github-pat\n")
+						b.WriteString("    token: \"${GITHUB_PAT}\"\n")
+					case "telegram":
+						username := prompt(reader, "Telegram username (with @): ")
+						if username == "" {
+							username = "@your_username"
+						}
+						b.WriteString("  - plugin: telegram\n")
+						b.WriteString("    bot_token: \"${TELEGRAM_BOT_TOKEN}\"\n")
+						b.WriteString(fmt.Sprintf("    allowed_users: [\"%s\"]\n", username))
+					case "custom-runtime":
+						b.WriteString("  - plugin: custom-runtime\n")
+						b.WriteString("    commands:\n")
+						b.WriteString("      - \"apt-get install -y ripgrep\"\n")
+					}
+				}
+			}
+
+			if err := os.WriteFile("agent.yaml", []byte(b.String()), 0644); err != nil {
+				return fmt.Errorf("writing agent.yaml: %w", err)
+			}
+
+			// Generate .env if there are env vars
+			if len(envVars) > 0 {
+				var env strings.Builder
+				for _, v := range envVars {
+					env.WriteString(fmt.Sprintf("%s=\n", v))
+				}
+				if err := os.WriteFile(".env", []byte(env.String()), 0644); err != nil {
+					return fmt.Errorf("writing .env: %w", err)
+				}
+				fmt.Println("\nCreated .env — fill in your secrets")
+			}
+
+			fmt.Println("Created agent.yaml")
+			fmt.Println("\nNext steps:")
+			fmt.Println("  agent-sandbox generate")
+			fmt.Println("  agent-sandbox compose up --build -d")
+			return nil
+		},
+	}
+}
+
+func prompt(reader *bufio.Reader, message string) string {
+	fmt.Print(message)
+	line, _ := reader.ReadString('\n')
+	return strings.TrimSpace(line)
+}
+
+func mustCwd() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "agent"
+	}
+	return dir
+}
+
+const upgradeRepo = "donbader/agent-sandbox"
+
+func upgradeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "upgrade",
+		Short: "Self-update to the latest release",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Fetch latest release tag from GitHub
+			latest, err := fetchLatestVersion()
+			if err != nil {
+				return fmt.Errorf("checking for updates: %w", err)
+			}
+
+			current := version
+			if current == latest || "v"+current == latest {
+				fmt.Printf("Already up to date (%s)\n", current)
+				return nil
+			}
+
+			fmt.Printf("Current: %s → Latest: %s\n", current, latest)
+
+			// Determine platform
+			goos := runtime.GOOS
+			goarch := runtime.GOARCH
+
+			// Download new binary
+			filename := fmt.Sprintf("agent-sandbox_%s_%s_%s.tar.gz", strings.TrimPrefix(latest, "v"), goos, goarch)
+			url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", upgradeRepo, latest, filename)
+
+			fmt.Printf("Downloading %s...\n", filename)
+			tmpDir, err := os.MkdirTemp("", "agent-sandbox-upgrade-*")
+			if err != nil {
+				return fmt.Errorf("creating temp dir: %w", err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			tarPath := filepath.Join(tmpDir, filename)
+			if err := downloadFile(url, tarPath); err != nil {
+				return fmt.Errorf("downloading release: %w", err)
+			}
+
+			// Extract
+			extractCmd := exec.Command("tar", "xzf", tarPath, "-C", tmpDir)
+			if err := extractCmd.Run(); err != nil {
+				return fmt.Errorf("extracting archive: %w", err)
+			}
+
+			// Find current binary path
+			execPath, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("finding current binary: %w", err)
+			}
+			execPath, err = filepath.EvalSymlinks(execPath)
+			if err != nil {
+				return fmt.Errorf("resolving binary path: %w", err)
+			}
+
+			// Replace binary
+			newBinary := filepath.Join(tmpDir, "agent-sandbox")
+			if err := os.Rename(newBinary, execPath); err != nil {
+				// Try with sudo if permission denied
+				if os.IsPermission(err) {
+					fmt.Println("Requires elevated permissions...")
+					sudoCmd := exec.Command("sudo", "mv", newBinary, execPath)
+					sudoCmd.Stdin = os.Stdin
+					sudoCmd.Stdout = os.Stdout
+					sudoCmd.Stderr = os.Stderr
+					if err := sudoCmd.Run(); err != nil {
+						return fmt.Errorf("installing binary: %w", err)
+					}
+				} else {
+					return fmt.Errorf("replacing binary: %w", err)
+				}
+			}
+
+			fmt.Printf("Upgraded to %s\n", latest)
+			return nil
+		},
+	}
+}
+
+func fetchLatestVersion() (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", upgradeRepo)
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", err
+	}
+	return release.TagName, nil
+}
+
+func downloadFile(url, dest string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(f, resp.Body)
+	return err
 }

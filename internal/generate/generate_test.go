@@ -423,7 +423,7 @@ func TestGenerator_Run(t *testing.T) {
 				},
 			},
 			Gateway: true,
-			Bridge:  true,
+			ChannelManager:  true,
 			GatewaySpec: GatewaySpec{
 				BuildImage: "golang:1.24-alpine",
 				BinaryPath: "/gateway",

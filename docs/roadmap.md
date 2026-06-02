@@ -155,12 +155,12 @@ agent-sandbox generate && agent-sandbox compose up --build
 agent-sandbox upgrade                   # self-update
 ```
 
-- [ ] `init` command (interactive, detect gh auth, suggest features)
-- [ ] `validate` command (config check + helpful errors)
-- [ ] `plugins` command (list/info)
-- [ ] `upgrade` command (self-update)
-- [ ] fleet.yaml support (multi-agent, shared features)
-- [ ] `examples/multi-agent/` example
+- [x] `init` command (interactive, detect gh auth, suggest features)
+- [x] `validate` command (config check + helpful errors)
+- [x] `plugins` command (list/info)
+- [x] `upgrade` command (self-update)
+- [x] fleet.yaml support (multi-agent, shared features)
+- [x] `examples/multi-agent/` example
 
 ---
 

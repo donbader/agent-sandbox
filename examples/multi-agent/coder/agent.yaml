@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../.build/coder/schema.json
+name: coder
+runtime: codex
+
+features:
+  - plugin: telegram
+    bot_token: "${TELEGRAM_BOT_TOKEN_CODER}"
+    allowed_users: ["@your_username"]
+  - plugin: custom-runtime
+    commands:
+      - "apt-get install -y ripgrep fd-find"
+      - "npm install -g typescript"
+    runtime_volumes:
+      - "coder-home:/home/agent"
