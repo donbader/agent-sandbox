@@ -22,7 +22,7 @@ features:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `mcp_url` | yes | MCP server URL (used for RFC 9728 OAuth discovery) |
-| `client_id` | no | Pre-registered OAuth client ID. Required until DCR is implemented. |
+| `client_id` | no | Pre-registered OAuth client ID. If omitted, uses Dynamic Client Registration (RFC 7591) automatically. |
 | `client_secret` | no | OAuth client secret (use `${ENV_VAR}` for secrets) |
 
 ## How it works
@@ -104,7 +104,6 @@ Written by `/oauth` command, read by gateway OAuthRewriter:
 
 ## Limitations
 
-- **No DCR yet** — Dynamic Client Registration (RFC 7591) is not implemented. You must provide a `client_id` for each provider.
 - **Paste-back UX** — User must manually copy the callback URL from the browser and paste it back. No automatic redirect handling.
 - **Single token per provider** — One token file per provider name. Multiple accounts on the same provider require multiple provider entries with different names.
 
