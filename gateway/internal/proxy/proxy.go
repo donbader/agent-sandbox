@@ -61,14 +61,14 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	slog.Debug("new connection", "remote_addr", clientConn.RemoteAddr())
 
 	// Read the TLS ClientHello to extract SNI
-	clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	buf := make([]byte, 4096)
 	n, err := clientConn.Read(buf)
 	if err != nil {
 		slog.Debug("read client hello", "error", err)
 		return
 	}
-	clientConn.SetReadDeadline(time.Time{})
+	_ = clientConn.SetReadDeadline(time.Time{})
 
 	hello := buf[:n]
 	serverName := extractSNI(hello)
@@ -118,14 +118,14 @@ func pipe(a, b net.Conn) {
 
 	go func() {
 		defer wg.Done()
-		io.Copy(b, a)
-		b.(*net.TCPConn).CloseWrite()
+		_, _ = io.Copy(b, a)
+		_ = b.(*net.TCPConn).CloseWrite()
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(a, b)
-		a.(*net.TCPConn).CloseWrite()
+		_, _ = io.Copy(a, b)
+		_ = a.(*net.TCPConn).CloseWrite()
 	}()
 
 	wg.Wait()

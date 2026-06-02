@@ -62,17 +62,17 @@ func (f *Forwarder) handle(clientConn net.Conn) {
 
 	go func() {
 		defer wg.Done()
-		io.Copy(serverConn, clientConn)
+		_, _ = io.Copy(serverConn, clientConn)
 		if tc, ok := serverConn.(*net.TCPConn); ok {
-			tc.CloseWrite()
+			_ = tc.CloseWrite()
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(clientConn, serverConn)
+		_, _ = io.Copy(clientConn, serverConn)
 		if tc, ok := clientConn.(*net.TCPConn); ok {
-			tc.CloseWrite()
+			_ = tc.CloseWrite()
 		}
 	}()
 

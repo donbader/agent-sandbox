@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	sandbox "github.com/donbader/agent-sandbox"
-	"gopkg.in/yaml.v3"
 )
 
 // FeatureConfig represents a parsed feature.yaml.
@@ -48,11 +47,4 @@ func featureExists(name string) bool {
 	return false
 }
 
-// loadFeatureYAML loads and parses a feature.yaml (for validation).
-func loadFeatureYAML(data []byte) (*FeatureConfig, error) {
-	var fc FeatureConfig
-	if err := yaml.Unmarshal(data, &fc); err != nil {
-		return nil, err
-	}
-	return &fc, nil
-}
+

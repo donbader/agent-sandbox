@@ -114,7 +114,7 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 				Header:     http.Header{"Content-Type": {"text/plain"}},
 				Body:       io.NopCloser(strings.NewReader("gateway: upstream error")),
 			}
-			errResp.Write(tlsConn)
+			_ = errResp.Write(tlsConn)
 			return
 		}
 
