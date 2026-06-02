@@ -1148,7 +1148,10 @@ func (g *Generator) writeCommandPlugins() error {
 		if err != nil {
 			return fmt.Errorf("plugin %q: copying command files: %w", f.Name, err)
 		}
-		plugins = append(plugins, f.Name)
+		// Extract plugin name from expanded path: "internal/plugins/<name>/command" → "<name>"
+		parts := strings.Split(f.CommandPluginDir, "/")
+		pluginName := parts[2] // internal/plugins/<name>/...
+		plugins = append(plugins, pluginName)
 	}
 
 	if len(plugins) == 0 {
