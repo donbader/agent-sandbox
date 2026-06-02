@@ -469,8 +469,7 @@ func TestGenerator_Run(t *testing.T) {
 		require.NoError(t, err)
 		epStr := string(ep)
 		assert.Contains(t, epStr, "nameserver $GATEWAY_IP")
-		assert.Contains(t, epStr, "exec node /opt/channel-manager/dist/index.js")
-		assert.NotContains(t, epStr, "exec su -c")
+		assert.Contains(t, epStr, "exec su -c 'node /opt/channel-manager/dist/index.js' agent")
 		assert.Contains(t, epStr, "waiting for sandbox CA certificate")
 		assert.Contains(t, epStr, "update-ca-certificates")
 

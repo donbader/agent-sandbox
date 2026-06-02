@@ -635,7 +635,7 @@ func (g *Generator) writeAgentEntrypoint() error {
 	// Execute the runtime CMD as agent user
 	if g.ChannelManager {
 		b.WriteString("echo \"entrypoint: starting channel-manager...\"\n")
-		b.WriteString(fmt.Sprintf("exec %s\n", g.ChannelManagerSpec.EntryPoint))
+		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", g.ChannelManagerSpec.EntryPoint, g.Runtime.User))
 	} else {
 		b.WriteString("echo \"entrypoint: starting agent...\"\n")
 		b.WriteString(fmt.Sprintf("exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User))
@@ -1206,13 +1206,10 @@ func (g *Generator) writeChannelConfig() error {
 		}
 	}
 
-	// Build ACP command: run as the agent user via su
-	acpCmd := fmt.Sprintf("su -c '%s' %s", strings.Join(g.Runtime.AcpCmd, " "), g.Runtime.User)
-
-	// Build config map for JSON marshaling
+	// ACP command runs directly (channel-manager already runs as agent user)
 	config := map[string]any{
 		"channel":     channel,
-		"acp_command": []string{"sh", "-c", acpCmd},
+		"acp_command": g.Runtime.AcpCmd,
 	}
 
 	// Pass plugin-specific config to channel-manager (generic — no plugin knowledge here)
