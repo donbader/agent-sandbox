@@ -6,6 +6,7 @@ export default defineConfig({
     include: [
       "src/**/*.test.ts",
       "../internal/plugins/*/channel/**/*.test.ts",
+      "../internal/plugins/*/command/**/*.test.ts",
     ],
   },
   resolve: {

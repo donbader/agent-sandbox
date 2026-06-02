@@ -58,6 +58,7 @@ type FeatureContributions struct {
 	AgentEnv        []string         // environment variables for agent container (dummy values, not secrets)
 	ChannelConfig    map[string]any   // plugin-specific config passed to channel-manager-config.json
 	Rewriters       []RewriterConfig // gateway rewriters to instantiate for this feature
+	CommandPluginDir string          // path to TypeScript command plugin source (copied into channel-manager)
 }
 
 // registry holds registered feature plugins.

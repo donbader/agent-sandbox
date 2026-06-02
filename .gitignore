@@ -22,3 +22,4 @@ Thumbs.db
 # Environment
 .env
 channel-manager/node_modules/
+node_modules/
