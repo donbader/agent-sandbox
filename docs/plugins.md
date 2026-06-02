@@ -111,10 +111,10 @@ features:
   - plugin: mcp-oauth
     providers:
       notion:
-        mcp_url: https://mcp.notion.com/mcp
-        client_id: "your-client-id"
+        mcp_url: https://mcp.notion.com/mcp  # uses Dynamic Client Registration
       slack:
         mcp_url: https://mcp.slack.com/mcp
+        client_id: "pre-registered-id"        # optional — skip if server supports DCR
         client_id: "slack-client-id"
         client_secret: "${SLACK_CLIENT_SECRET}"
     token_dir: /data/oauth-tokens  # optional
