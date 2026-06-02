@@ -95,7 +95,7 @@ features:
 
 ---
 
-### Phase 3: Gateway (Network Enforcement)
+### Phase 3: Gateway (Network Enforcement) ✅
 
 **What works after this phase:**
 ```bash
@@ -112,8 +112,8 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] Default route proxy (IP forwarding via compose sysctls, no iptables on agent side)
 - [x] `RequestHandler` interface in gateway (for feature handlers)
 - [x] Structured logging (slog for Go, pino for TypeScript)
-- [ ] Handler registry generation (active features → imports)
-- [ ] Integration test (verify traffic routes through gateway)
+- [x] Handler registry (config-driven — rewriter types instantiated from gateway-config.yaml)
+- [x] Integration test (verify traffic routes through gateway)
 
 ---
 

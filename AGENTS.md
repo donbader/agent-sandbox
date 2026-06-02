@@ -84,30 +84,11 @@ internal/plugins/<name>/feature.yaml   ← metadata, config schema
 internal/plugins/<name>/plugin.go      ← Go: typed Config struct + Register[C]() call
 ```
 
-External feature plugins live in `ext/plugins/<name>/` with optional gateway/channel code:
-
-```
-ext/plugins/<name>/feature.yaml        ← metadata, config schema, hosts
-ext/plugins/<name>/gateway/            ← optional Go: compiled during Docker build
-ext/plugins/<name>/channel/            ← optional TypeScript: channel implementation (Channel Protocol)
-```
-
 - Each plugin defines a typed Config struct with `yaml` and `schema` tags
-- Plugins register via `init()` → `resolve.Register[C any](name, fn)`
+- Plugins register via `init()` → `resolve.Register[C](name, fn)`
 - Framework handles yaml unmarshaling (map[string]any → typed struct)
 - Schema.json generated from struct tags via reflection (single source of truth)
 - `internal/plugins/register.go` imports all core plugins for side-effect registration
-
-### Plugin Resolution Order
-
-**Runtime plugins:**
-1. `./ext/plugins/<name>/runtime.yaml` — local project directory (user overrides)
-2. Built-in core plugins (embedded in CLI via go:embed from `internal/plugins/`)
-
-**Feature plugins:**
-1. `./ext/plugins/<name>/feature.yaml` — local project directory
-2. Built-in core plugins (embedded in CLI)
-3. (Future: fetched from plugin registry)
 
 ## Testing Guidelines
 

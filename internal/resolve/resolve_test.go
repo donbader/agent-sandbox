@@ -1,8 +1,6 @@
 package resolve
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,27 +8,6 @@ import (
 )
 
 func TestResolveRuntime(t *testing.T) {
-	t.Run("resolves from local plugins dir", func(t *testing.T) {
-		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "ext", "plugins", "custom")
-		require.NoError(t, os.MkdirAll(pluginDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "runtime.yaml"), []byte(`
-name: custom
-base_image: python:3.12-slim
-install:
-  - pip install my-cli
-cmd: ["my-cli", "run"]
-`), 0644))
-
-		rc, err := ResolveRuntime(dir, "custom")
-		require.NoError(t, err)
-		assert.Equal(t, "custom", rc.Name)
-		assert.Equal(t, "python:3.12-slim", rc.BaseImage)
-		assert.Equal(t, []string{"pip install my-cli"}, rc.Install)
-		assert.Equal(t, []string{"my-cli", "run"}, rc.Cmd)
-		assert.Equal(t, "agent", rc.User) // default
-	})
-
 	t.Run("resolves embedded codex", func(t *testing.T) {
 		rc, err := ResolveRuntime("/nonexistent", "codex")
 		require.NoError(t, err)
@@ -39,23 +16,6 @@ cmd: ["my-cli", "run"]
 		assert.Contains(t, rc.Install[len(rc.Install)-1], "codex")
 		assert.Equal(t, []string{"sleep", "infinity"}, rc.Cmd)
 		assert.Equal(t, []string{"codex-acp"}, rc.AcpCmd)
-	})
-
-	t.Run("local overrides embedded", func(t *testing.T) {
-		dir := t.TempDir()
-		pluginDir := filepath.Join(dir, "ext", "plugins", "codex")
-		require.NoError(t, os.MkdirAll(pluginDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "runtime.yaml"), []byte(`
-name: codex
-base_image: node:20-slim
-install:
-  - npm install -g @openai/codex@0.1.0
-cmd: ["codex", "exec", "--full-auto"]
-`), 0644))
-
-		rc, err := ResolveRuntime(dir, "codex")
-		require.NoError(t, err)
-		assert.Equal(t, "node:20-slim", rc.BaseImage) // local override wins
 	})
 
 	t.Run("unknown runtime", func(t *testing.T) {

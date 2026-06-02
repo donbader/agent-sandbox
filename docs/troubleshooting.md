@@ -6,7 +6,7 @@
 
 The CLI can't find a runtime plugin matching your `runtime:` field.
 
-**Fix:** Check spelling in `agent.yaml`. Available built-in runtimes: `codex`, `claude-code`, `pi`. For custom runtimes, use inline definition or place `runtime.yaml` in `ext/plugins/<name>/`.
+**Fix:** Check spelling in `agent.yaml`. Available built-in runtimes: `codex`, `claude-code`, `pi`. For custom runtimes, use the inline definition in agent.yaml.
 
 ### Container won't start: "gateway host not found"
 

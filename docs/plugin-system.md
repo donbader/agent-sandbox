@@ -173,14 +173,11 @@ agent-sandbox generate
 
 ## Plugin Resolution
 
-CLI looks for plugins in this order:
-1. `./plugins/<name>/` — local project directory (user overrides)
-2. Built-in plugins (embedded in CLI via go:embed as YAML/templates)
+CLI resolves plugins from built-in core plugins (embedded in CLI via go:embed):
+- Runtime plugins: `internal/plugins/<name>/runtime.yaml`
+- Feature plugins: registered via `init()` in `internal/plugins/<name>/plugin.go`
 
-This means:
-- CLI ships with default plugin data (embedded)
-- User can override any plugin by placing files in `./plugins/<name>/`
-- Plugin fix = update the yaml/template locally, no CLI upgrade needed
+For custom runtimes not shipped with the CLI, users can define them inline in agent.yaml.
 
 ## Gateway Compilation
 

@@ -18,7 +18,6 @@ var GatewaySource embed.FS
 var ChannelManagerSource embed.FS
 
 // CorePlugins contains the built-in plugin definitions (runtime + core features).
-// Resolution order: local ext/plugins/<name>/ → these embedded defaults.
 //
 //go:embed internal/plugins
 var CorePlugins embed.FS

@@ -32,9 +32,8 @@ agent-sandbox compose up --build -d
 ## Plugin Resolution
 
 CLI resolves plugins in order:
-1. `./plugins/<name>/` — local project directory (user overrides)
-2. Inline definition in agent.yaml (for custom runtimes)
-3. Built-in plugins (embedded in CLI binary as YAML/templates)
+1. Inline definition in agent.yaml (for custom runtimes)
+2. Built-in plugins (embedded in CLI binary as YAML/templates)
 
 ## Generated Dockerfiles (Separate Containers)
 

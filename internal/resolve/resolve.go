@@ -1,11 +1,9 @@
-// Package resolve handles plugin resolution — finding runtime.yaml from local
-// project directory or embedded defaults.
+// Package resolve handles plugin resolution — finding runtime.yaml from
+// embedded defaults.
 package resolve
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	sandbox "github.com/donbader/agent-sandbox"
 	"gopkg.in/yaml.v3"
@@ -23,21 +21,15 @@ type RuntimeConfig struct {
 }
 
 // ResolveRuntime finds and parses a runtime plugin by name.
-// Resolution order: local ./ext/plugins/<name>/runtime.yaml → embedded defaults.
+// Resolution order: embedded defaults (core plugins).
 func ResolveRuntime(projectDir string, name string) (*RuntimeConfig, error) {
-	// 1. Try local ext/plugins directory
-	localPath := filepath.Join(projectDir, "ext", "plugins", name, "runtime.yaml")
-	if data, err := os.ReadFile(localPath); err == nil {
-		return parseRuntime(data, localPath)
-	}
-
-	// 2. Try embedded defaults
+	// Try embedded defaults
 	embeddedPath := fmt.Sprintf("internal/plugins/%s/runtime.yaml", name)
 	if data, err := sandbox.CorePlugins.ReadFile(embeddedPath); err == nil {
 		return parseRuntime(data, embeddedPath)
 	}
 
-	return nil, fmt.Errorf("unknown runtime %q: no runtime.yaml found in ./ext/plugins/%s/ or built-in plugins", name, name)
+	return nil, fmt.Errorf("unknown runtime %q: no runtime.yaml found in built-in plugins", name)
 }
 
 
