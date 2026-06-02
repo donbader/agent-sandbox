@@ -24,6 +24,16 @@ cp .env.example .env
 agent-sandbox compose up --build
 ```
 
+## Usage
+
+Once the containers are running, exec into the agent container as the `agent` user:
+
+```bash
+agent-sandbox -C examples/local-coding compose exec -it --user agent coder codex
+```
+
+> **Note:** The `--user agent` flag is required. Without it, `exec` runs as root and codex won't find its config (which lives at `/home/agent/.codex/`).
+
 ## Architecture
 
 ```

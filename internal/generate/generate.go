@@ -281,6 +281,7 @@ func (g *Generator) writeAgentDockerfile() error {
 	// Copy home override, hooks, entrypoint
 	g.writeCopyStatements(&b)
 
+	b.WriteString(fmt.Sprintf("WORKDIR /home/%s\n", g.Runtime.User))
 	b.WriteString("ENTRYPOINT [\"/opt/entrypoint.sh\"]\n")
 
 	path := filepath.Join(g.OutDir, "Dockerfile.agent")
