@@ -86,7 +86,7 @@ export default function createTelegramChannel(
     const conn = agent.getConnection();
     if (!conn) throw new Error("Agent not connected");
 
-    const result = await conn.newSession({ cwd: "/workspace" });
+    const result = await conn.newSession({ cwd: "/workspace", mcpServers: [] });
     const sessionId = result.sessionId;
     sessions.set(chatId, sessionId);
     log.info({ chatId, sessionId: sessionId.slice(0, 8) }, "created session");
