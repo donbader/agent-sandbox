@@ -1114,6 +1114,10 @@ func (g *Generator) writeCommandPlugins() error {
 
 		commandRoot := f.CommandPluginDir // already expanded to full embedded path by resolver
 
+		// Extract plugin name from expanded path: "internal/plugins/<name>/command" → "<name>"
+		parts := strings.Split(f.CommandPluginDir, "/")
+		pluginName := parts[2] // internal/plugins/<name>/...
+
 		err := fs.WalkDir(sandbox.CorePlugins, commandRoot, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -1139,18 +1143,16 @@ func (g *Generator) writeCommandPlugins() error {
 				return fmt.Errorf("computing relative path for %s: %w", path, relErr)
 			}
 
-			destPath := filepath.Join(destDir, relPath)
+			// Copy into plugin subdirectory: src/command/<plugin-name>/<file>
+			destPath := filepath.Join(destDir, pluginName, relPath)
 			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 				return err
 			}
 			return os.WriteFile(destPath, data, 0644)
 		})
 		if err != nil {
-			return fmt.Errorf("plugin %q: copying command files: %w", f.Name, err)
+			return fmt.Errorf("plugin %q: copying command files: %w", pluginName, err)
 		}
-		// Extract plugin name from expanded path: "internal/plugins/<name>/command" → "<name>"
-		parts := strings.Split(f.CommandPluginDir, "/")
-		pluginName := parts[2] // internal/plugins/<name>/...
 		plugins = append(plugins, pluginName)
 	}
 
@@ -1176,7 +1178,7 @@ func (g *Generator) writeCommandRegistry(commandDir string, plugins []string) er
 	for _, name := range plugins {
 		// Convention: command plugin exports a default createPlugin function
 		varName := strings.ReplaceAll(name, "-", "") + "Plugin"
-		b.WriteString(fmt.Sprintf("import %s from \"./%s.js\";\n", varName, name))
+		b.WriteString(fmt.Sprintf("import %s from \"./%s/%s.js\";\n", varName, name, name))
 	}
 
 	b.WriteString("\nexport const commandPlugins: CommandPlugin[] = [\n")
