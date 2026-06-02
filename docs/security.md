@@ -134,6 +134,12 @@ services:
 
 ### Secrets Isolation
 
+- Gateway holds all real credentials (API tokens, OAuth secrets)
+- Agent container has only dummy/empty values
+- OAuth tokens stored in shared volume (`oauth-tokens`) accessible only to gateway and channel-manager
+- Token files use 0600 permissions and atomic write-rename pattern
+- OAuth refresh requests enforce HTTPS and block private IPs (SSRF protection)
+
 ```
 Gateway container:
   /etc/gateway/config.yaml    root:root       0444  (has credential mappings)

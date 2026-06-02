@@ -220,6 +220,44 @@ During `agent-sandbox generate`, the generator:
 2. In plugin.go: `ChannelName: "<name>"` + `ChannelConfig: map[string]any{...}`
 3. Run `agent-sandbox generate` — channel is automatically assembled
 
+## Command Plugins
+
+Feature plugins can register commands into the channel-manager. Commands are available to users from any channel (Telegram, etc.).
+
+### CommandPlugin Interface
+
+```typescript
+interface CommandPlugin {
+  name: string;
+  commands: Record<string, CommandHandler>;
+  init?(config: Record<string, unknown>): void;
+  onMessage?(text: string, chatId: string, reply: CommandReply): Promise<boolean>;
+  destroy?(): void;
+}
+```
+
+### Adding a Command Plugin
+
+1. Create `internal/plugins/<name>/command/` with TypeScript source
+2. Export a default `CommandPlugin` instance from the main file
+3. In plugin.go: set `CommandPluginDir: "command"`
+4. Pass config via `ChannelConfig: map[string]any{...}`
+5. Run `agent-sandbox generate` — command plugin is automatically wired into channel-manager
+
+The generate step copies command plugin TypeScript files into `channel-manager-src/src/command/` and generates a `commands.gen.ts` registry.
+
+### Example: mcp-oauth
+
+```
+internal/plugins/mcp-oauth/
+  command/
+    oauth-command.ts    ← implements CommandPlugin, exports default
+    discovery.ts        ← RFC 9728 well-known discovery
+    pkce.ts             ← PKCE helpers
+    types.ts            ← shared types
+  plugin.go             ← Go: sets CommandPluginDir + ChannelConfig
+```
+
 ## Custom Runtime (Inline)
 
 For runtimes not shipped with the CLI, users can define inline in agent.yaml:

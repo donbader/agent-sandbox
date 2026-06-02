@@ -102,21 +102,25 @@ features:
 
 The `./home/` override directory (if present) is auto-staged to `/opt/home-override/` and cp'd by a built-in entrypoint hook.
 
-### mcp-oauth (planned)
+### mcp-oauth
 
-Generic OAuth2 plugin for any MCP server:
+OAuth Bearer token injection for remote MCP servers. Interactive setup via `/oauth` command, automatic token refresh at runtime.
 
 ```yaml
 features:
   - plugin: mcp-oauth
-    servers:
-      - url: "https://mcp.notion.com"
-        name: "notion"
-      - url: "https://mcp.linear.app"
-        name: "linear"
+    providers:
+      notion:
+        mcp_url: https://mcp.notion.com/mcp
+        client_id: "your-client-id"
+      slack:
+        mcp_url: https://mcp.slack.com/mcp
+        client_id: "slack-client-id"
+        client_secret: "${SLACK_CLIENT_SECRET}"
+    token_dir: /data/oauth-tokens  # optional
 ```
 
-Handles: dynamic client registration (RFC 7591), authorization flow, token exchange, auto-refresh. User triggers auth via channel command (`/oauth notion`).
+Handles: RFC 9728 discovery, PKCE authorization, token exchange, auto-refresh. User triggers auth via channel command (`/oauth notion`). See [plugin README](../internal/plugins/mcp-oauth/README.md) for full details.
 
 ### telegram
 
