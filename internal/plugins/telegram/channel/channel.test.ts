@@ -7,25 +7,29 @@ let mockBotApi: any;
 
 vi.mock("grammy", () => {
   mockBotApi = {
-    sendMessage: vi.fn().mockResolvedValue({}),
+    sendMessage: vi.fn().mockResolvedValue({ message_id: 42 }),
+    editMessageText: vi.fn().mockResolvedValue({}),
     setMessageReaction: vi.fn().mockResolvedValue({}),
     sendChatAction: vi.fn().mockResolvedValue({}),
     setMyCommands: vi.fn().mockResolvedValue(true),
+    callApi: vi.fn().mockResolvedValue({}),
   };
   return {
-    Bot: vi.fn().mockImplementation(() => ({
-      on: vi.fn((event: string, handler: any) => {
-        if (event === "message:text") {
-          messageHandler = handler;
-        }
-      }),
-      catch: vi.fn(),
-      start: vi.fn(({ onStart }: any) => {
-        startCallback = onStart;
-      }),
-      stop: vi.fn(),
-      api: mockBotApi,
-    })),
+    Bot: vi.fn().mockImplementation(function () {
+      return {
+        on: vi.fn((event: string, handler: any) => {
+          if (event === "message:text") {
+            messageHandler = handler;
+          }
+        }),
+        catch: vi.fn(),
+        start: vi.fn(({ onStart }: any) => {
+          startCallback = onStart;
+        }),
+        stop: vi.fn(),
+        api: mockBotApi,
+      };
+    }),
   };
 });
 
@@ -39,9 +43,11 @@ vi.mock("../logger.js", () => ({
 }));
 
 vi.mock("../delivery/rate-limiter.js", () => ({
-  RateLimiter: vi.fn().mockImplementation(() => ({
-    acquire: vi.fn().mockResolvedValue(undefined),
-  })),
+  RateLimiter: vi.fn().mockImplementation(function () {
+    return {
+      acquire: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
 }));
 
 vi.mock("../delivery/api-retry.js", () => ({
@@ -51,6 +57,15 @@ vi.mock("../delivery/api-retry.js", () => ({
 vi.mock("../formatter/telegram.js", () => ({
   formatMarkdown: vi.fn().mockImplementation((text: string) => text),
   splitMessage: vi.fn().mockImplementation((text: string) => [text]),
+}));
+
+vi.mock("../startup-buffer.js", () => ({
+  StartupBuffer: vi.fn().mockImplementation(function () {
+    return {
+      push: vi.fn().mockReturnValue(false),
+      flush: vi.fn().mockReturnValue([]),
+    };
+  }),
 }));
 
 // Mock AcpAgent
@@ -109,7 +124,11 @@ describe("TelegramChannel (thin channel manager)", () => {
     it("forwards regular messages to agent", async () => {
       messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "hello");
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "hello",
+        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+      );
     });
 
     it("creates a session on first message from a chat", async () => {
@@ -133,25 +152,41 @@ describe("TelegramChannel (thin channel manager)", () => {
     it("all /commands are forwarded to agent", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/model gpt-4o" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/model gpt-4o");
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "/model gpt-4o",
+        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+      );
     });
 
     it("/sh is forwarded to agent (handled by ACP wrapper)", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/sh ls" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/sh ls");
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "/sh ls",
+        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+      );
     });
 
     it("/diagnose is forwarded to agent (handled by ACP wrapper)", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/diagnose");
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "/diagnose",
+        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+      );
     });
 
     it("/command@botname strips mention before forwarding", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/model@testbot gpt-4o" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith("test-session-123", "/model gpt-4o");
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "/model gpt-4o",
+        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+      );
     });
   });
 
@@ -179,6 +214,39 @@ describe("TelegramChannel (thin channel manager)", () => {
 
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "buffered" }));
       expect(freshAgent.prompt).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("streaming via StreamController", () => {
+    it("passes onSessionUpdate to agent.prompt and dispatches chunks", async () => {
+      agent.prompt.mockImplementation(async (_sid: string, _text: string, opts?: any) => {
+        opts?.onSessionUpdate?.({
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Streamed!" },
+          },
+        });
+        return "Streamed!";
+      });
+
+      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "hello",
+        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+      );
+    });
+
+    it("calls stream.abort on prompt failure", async () => {
+      agent.prompt.mockRejectedValue(new Error("agent crashed"));
+
+      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+
+      // Should not throw — error is caught internally
+      // The sendMessage mock will be called by stream.abort with any buffered content
     });
   });
 

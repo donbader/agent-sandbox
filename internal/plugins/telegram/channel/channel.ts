@@ -4,10 +4,10 @@ import type { Channel } from "./types.js";
 import type { AcpAgent, AgentCommand } from "../acp-client.js";
 import { createLogger } from "../logger.js";
 import { StartupBuffer } from "../startup-buffer.js";
-import { safePrompt } from "../safe-prompt.js";
 import { RateLimiter } from "./delivery/rate-limiter.js";
 import { withRetry } from "./delivery/api-retry.js";
 import { formatMarkdown, splitMessage } from "./formatter/telegram.js";
+import { StreamController } from "./stream-controller.js";
 
 const log = createLogger("telegram");
 const DUMMY_TOKEN = "REDACTED_TELEGRAM_TOKEN";
@@ -184,53 +184,93 @@ export default function createTelegramChannel(
     // Typing indicator
     sendTyping(chatId);
 
-    // Command routing — all forwarded to agent (wrapper handles these)
-    if (text.startsWith("/")) {
-      const spaceIdx = text.indexOf(" ");
-      const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
-      // Strip @botname from command
-      const cleanCmd = cmd.split("@")[0];
-      const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
-      // Reconstruct clean command text
-      const cleanText = args ? `/${cleanCmd} ${args}` : `/${cleanCmd}`;
-
-      const sessionId = await getOrCreateSession(chatId);
-      const result = await safePrompt(agent, sessionId, cleanText);
-      sendMessage(chatId, result.ok ? result.response : result.error);
-      return;
-    }
-
-    // Forward to agent
     const sessionId = await getOrCreateSession(chatId);
-    const result = await safePrompt(agent, sessionId, text);
-    sendMessage(chatId, result.ok ? result.response : result.error);
+
+    // Normalize commands
+    const cleanText = text.startsWith("/") ? normalizeCommand(text) : text;
+
+    // Create StreamController for this response
+    const stream = new StreamController(
+      {
+        chatId: Number(chatId),
+        sendMessage: async (html, opts) => {
+          await rateLimiter.acquire(chatId);
+          const msg = await withRetry(async () =>
+            bot.api.sendMessage(Number(chatId), html, {
+              parse_mode: (opts?.parse_mode as any) ?? "HTML",
+              link_preview_options: { is_disabled: true },
+            }),
+          );
+          return msg?.message_id ?? 0;
+        },
+        editMessage: async (msgId, html, opts) => {
+          await rateLimiter.acquire(chatId);
+          await withRetry(async () =>
+            bot.api.editMessageText(Number(chatId), msgId, html, {
+              parse_mode: (opts?.parse_mode as any) ?? "HTML",
+              link_preview_options: { is_disabled: true },
+            }),
+          );
+        },
+        sendDraft: async (draftId, draftText) => {
+          await withRetry(async () =>
+            (bot.api as any).callApi("sendMessageDraft", {
+              chat_id: Number(chatId),
+              draft_id: draftId,
+              text: draftText,
+              parse_mode: "HTML",
+            }),
+          );
+        },
+      },
+      { throttleMs: 1000, bufferMs: 300 },
+    );
+
+    try {
+      await agent.prompt(sessionId, cleanText, {
+        onSessionUpdate(notification: any) {
+          const update = notification.update ?? notification;
+          switch (update.sessionUpdate) {
+            case "agent_thought_chunk":
+              if (update.content?.type === "text") {
+                stream.pushThinking(update.content.text);
+              }
+              break;
+            case "tool_call":
+              stream.toolStart(update.toolCallId, update.title, update.status);
+              break;
+            case "tool_call_update":
+              stream.toolUpdate(
+                update.toolCallId,
+                update.status,
+                update.content,
+              );
+              break;
+            case "agent_message_chunk":
+              if (update.content?.type === "text") {
+                stream.pushText(update.content.text);
+              }
+              break;
+          }
+        },
+      });
+      await stream.finalize();
+    } catch (err) {
+      await stream.abort(err instanceof Error ? err : new Error(String(err)));
+      log.error({ chatId, error: (err as Error).message }, "prompt failed");
+    }
+  }
+
+  /** Normalize a /command@botname into /command args */
+  function normalizeCommand(text: string): string {
+    const spaceIdx = text.indexOf(" ");
+    const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+    const cleanCmd = cmd.split("@")[0];
+    const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+    return args ? `/${cleanCmd} ${args}` : `/${cleanCmd}`;
   }
 
   // --- Platform UX ---
-
-  function sendMessage(chatId: string, text: string): void {
-    const html = formatMarkdown(text);
-    const segments = splitMessage(html);
-
-    for (const segment of segments) {
-      rateLimiter
-        .acquire(chatId)
-        .then(() =>
-          withRetry(async () => {
-            await bot.api.sendMessage(Number(chatId), segment, {
-              parse_mode: "HTML",
-              link_preview_options: { is_disabled: true },
-            });
-          }),
-        )
-        .catch((err) => {
-          log.error(
-            { chatId, error: (err as Error).message },
-            "sendMessage failed",
-          );
-        });
-    }
-  }
 
   function ackMessage(chatId: string, messageId: number): void {
     withRetry(async () => {
