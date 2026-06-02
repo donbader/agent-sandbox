@@ -192,6 +192,12 @@ export class AcpAgent {
       throw new Error("ACP agent not started");
     }
 
+    // Check prompt interceptor (wrapper commands, command plugins)
+    if (this.promptInterceptor) {
+      const intercepted = await this.promptInterceptor(text, sessionId);
+      if (intercepted !== null) return intercepted;
+    }
+
     const chunks: string[] = [];
 
     return new Promise<string>((resolve, reject) => {
@@ -218,6 +224,16 @@ export class AcpAgent {
   /** Whether the agent has an active connection. */
   isReady(): boolean {
     return this.connection !== null;
+  }
+
+  /**
+   * Set a prompt interceptor that can short-circuit prompts before they reach the agent.
+   * Return a string to respond locally, or null to forward to agent.
+   */
+  private promptInterceptor: ((text: string, sessionId: string) => Promise<string | null>) | null = null;
+
+  setPromptInterceptor(fn: (text: string, sessionId: string) => Promise<string | null>): void {
+    this.promptInterceptor = fn;
   }
 
   getConnection(): acp.ClientSideConnection | null {
