@@ -3,6 +3,8 @@ import type { ReactionTypeEmoji } from "@grammyjs/types";
 import type { Channel } from "./types.js";
 import type { AcpAgent, AgentCommand } from "../acp-client.js";
 import { createLogger } from "../logger.js";
+import { StartupBuffer } from "../startup-buffer.js";
+import { safePrompt } from "../safe-prompt.js";
 import { RateLimiter } from "./delivery/rate-limiter.js";
 import { withRetry } from "./delivery/api-retry.js";
 import { formatMarkdown, splitMessage } from "./formatter/telegram.js";
@@ -41,12 +43,11 @@ interface BufferedMessage {
   chatId: string;
   text: string;
   messageId: number;
-  timestamp: number;
 }
 
 /**
  * Telegram channel that talks ACP directly.
- * Handles: platform UX, session mapping, custom commands, message forwarding.
+ * Handles: platform UX, session mapping, message forwarding.
  */
 export default function createTelegramChannel(
   config: Record<string, unknown>,
@@ -73,13 +74,8 @@ export default function createTelegramChannel(
   // Session mapping: chatId → ACP sessionId
   const sessions = new Map<string, string>();
 
-  // Perf tracking: last N response times (ms)
-  const perfHistory: number[] = [];
-  const PERF_MAX = 50;
-
   // Startup buffer: queue messages until agent is ready
-  const buffer: BufferedMessage[] = [];
-  let ready = false;
+  const startupBuffer = new StartupBuffer<BufferedMessage>();
 
   // --- Session management ---
 
@@ -122,34 +118,16 @@ export default function createTelegramChannel(
       // Reconstruct clean command text
       const cleanText = args ? `/${cleanCmd} ${args}` : `/${cleanCmd}`;
 
-      try {
-        const sessionId = await getOrCreateSession(chatId);
-        const t0 = Date.now();
-        const response = await agent.prompt(sessionId, cleanText);
-        const elapsed = Date.now() - t0;
-        perfHistory.push(elapsed);
-        if (perfHistory.length > PERF_MAX) perfHistory.shift();
-        sendMessage(chatId, response);
-      } catch (err: unknown) {
-        log.error({ error: err, chatId }, "agent prompt failed");
-        sendMessage(chatId, "⚠️ Agent unavailable. Try again shortly.");
-      }
+      const sessionId = await getOrCreateSession(chatId);
+      const result = await safePrompt(agent, sessionId, cleanText);
+      sendMessage(chatId, result.ok ? result.response : result.error);
       return;
     }
 
     // Forward to agent
-    try {
-      const sessionId = await getOrCreateSession(chatId);
-      const t0 = Date.now();
-      const response = await agent.prompt(sessionId, text);
-      const elapsed = Date.now() - t0;
-      perfHistory.push(elapsed);
-      if (perfHistory.length > PERF_MAX) perfHistory.shift();
-      sendMessage(chatId, response);
-    } catch (err: unknown) {
-      log.error({ error: err, chatId }, "agent prompt failed");
-      sendMessage(chatId, "⚠️ Agent unavailable. Try again shortly.");
-    }
+    const sessionId = await getOrCreateSession(chatId);
+    const result = await safePrompt(agent, sessionId, text);
+    sendMessage(chatId, result.ok ? result.response : result.error);
   }
 
   // --- Platform UX ---
@@ -212,15 +190,9 @@ export default function createTelegramChannel(
   // --- Startup buffer ---
 
   function flushBuffer(): void {
-    const staleThreshold = Date.now() - 30_000;
-    for (const msg of buffer) {
-      if (msg.timestamp < staleThreshold) {
-        log.debug({ chatId: msg.chatId }, "discarding stale buffered message");
-        continue;
-      }
+    for (const msg of startupBuffer.flush()) {
       processMessage(msg.chatId, msg.text, msg.messageId);
     }
-    buffer.length = 0;
   }
 
   // --- Bot setup ---
@@ -260,8 +232,7 @@ export default function createTelegramChannel(
       ? text
       : (botUsername ? text.replace(new RegExp(`@${botUsername}\\b`, "g"), "").trim() : text);
 
-    if (!ready) {
-      buffer.push({ chatId, text: normalized, messageId, timestamp: Date.now() });
+    if (startupBuffer.push({ chatId, text: normalized, messageId })) {
       return;
     }
 
@@ -283,7 +254,6 @@ export default function createTelegramChannel(
         onStart: (info) => {
           botUsername = info.username;
           log.info({ username: info.username }, "bot connected");
-          ready = true;
           flushBuffer();
           registerBotCommands();
         },
