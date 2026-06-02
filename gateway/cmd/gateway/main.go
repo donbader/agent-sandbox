@@ -128,6 +128,14 @@ func buildRewriters(cfgs []proxy.RewriterConfig) []mitm.Rewriter {
 			}
 			rewriters = append(rewriters, rw)
 			slog.Info("auth-header rewriter enabled", "domains", rc.Domains, "header", rc.Header)
+		case "oauth":
+			rw, err := mitm.NewOAuthRewriter(rc.Domains, rc.TokenFile)
+			if err != nil {
+				slog.Error("oauth rewriter disabled", "domains", rc.Domains, "error", err)
+				continue
+			}
+			rewriters = append(rewriters, rw)
+			slog.Info("oauth rewriter enabled", "domains", rc.Domains, "token_file", rc.TokenFile)
 		default:
 			slog.Warn("unknown rewriter type", "type", rc.Type)
 		}

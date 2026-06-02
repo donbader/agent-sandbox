@@ -647,6 +647,9 @@ func (g *Generator) writeGatewayConfig() error {
 			if rw.ValueFormat != "" {
 				b.WriteString(fmt.Sprintf("    value_format: \"%s\"\n", rw.ValueFormat))
 			}
+			if rw.TokenFile != "" {
+				b.WriteString(fmt.Sprintf("    token_file: %s\n", rw.TokenFile))
+			}
 		}
 	}
 
