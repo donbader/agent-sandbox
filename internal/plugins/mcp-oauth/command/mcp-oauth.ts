@@ -4,7 +4,7 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { CommandPlugin, CommandContext, CommandReply } from "./types.js";
+import type { CommandPlugin, CommandContext, CommandReply } from "../types.js";
 import type { OAuthConfig, OAuthProviderConfig, PendingFlow, StoredToken } from "./types.js";
 import { generateCodeVerifier, generateCodeChallenge, generateState } from "./pkce.js";
 import { discoverAuthServer } from "./discovery.js";
