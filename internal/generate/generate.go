@@ -108,6 +108,10 @@ func (g *Generator) Run() error {
 		return err
 	}
 
+	// Clean output directory to remove stale files from previous generates.
+	if err := os.RemoveAll(g.OutDir); err != nil {
+		return fmt.Errorf("cleaning output dir: %w", err)
+	}
 	if err := os.MkdirAll(g.OutDir, 0755); err != nil {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
