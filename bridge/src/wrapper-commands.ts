@@ -6,7 +6,7 @@
 import { execSync } from "node:child_process";
 import { cpus, totalmem, freemem } from "node:os";
 
-export interface BridgeCommandContext {
+export interface WrapperCommandContext {
   agentCmd: string[];
   perfHistory: number[];
 }
@@ -15,7 +15,7 @@ export interface BridgeCommandContext {
  * Attempt to handle a bridge command.
  * Returns the response string if handled, or null if not a bridge command.
  */
-export function handleBridgeCommand(text: string, ctx: BridgeCommandContext): string | null {
+export function handleWrapperCommand(text: string, ctx: WrapperCommandContext): string | null {
   const trimmed = text.trim();
 
   if (trimmed === "/sh") return "Usage: /sh <command>";
@@ -42,7 +42,7 @@ function handleSh(cmd: string): string {
   }
 }
 
-function handleDiagnose(ctx: BridgeCommandContext): string {
+function handleDiagnose(ctx: WrapperCommandContext): string {
   const lines = ["🔍 Agent Diagnostics:"];
   lines.push(`  PID: ${process.pid}`);
   lines.push(`  Uptime: ${Math.round(process.uptime())}s`);

@@ -1,42 +1,42 @@
 import { describe, it, expect, vi } from "vitest";
-import { handleBridgeCommand, type BridgeCommandContext } from "./bridge-commands.js";
+import { handleWrapperCommand, type WrapperCommandContext } from "./wrapper-commands.js";
 
-const defaultCtx: BridgeCommandContext = {
+const defaultCtx: WrapperCommandContext = {
   agentCmd: ["npx", "codex-acp"],
   perfHistory: [],
 };
 
-describe("handleBridgeCommand", () => {
+describe("handleWrapperCommand", () => {
   describe("/sh", () => {
     it("returns usage when no args", () => {
-      expect(handleBridgeCommand("/sh", defaultCtx)).toBe("Usage: /sh <command>");
+      expect(handleWrapperCommand("/sh", defaultCtx)).toBe("Usage: /sh <command>");
     });
 
     it("executes command and returns output", () => {
-      const result = handleBridgeCommand("/sh echo hello", defaultCtx);
+      const result = handleWrapperCommand("/sh echo hello", defaultCtx);
       expect(result).toBe("hello");
     });
 
     it("returns (no output) for silent commands", () => {
-      const result = handleBridgeCommand("/sh true", defaultCtx);
+      const result = handleWrapperCommand("/sh true", defaultCtx);
       expect(result).toBe("(no output)");
     });
 
     it("returns exit code and stderr on failure", () => {
-      const result = handleBridgeCommand("/sh false", defaultCtx);
+      const result = handleWrapperCommand("/sh false", defaultCtx);
       expect(result).toContain("Exit 1");
     });
 
     it("truncates long output at 4000 chars", () => {
       // Generate output longer than 4000 chars
-      const result = handleBridgeCommand("/sh seq 1 5000", defaultCtx);
+      const result = handleWrapperCommand("/sh seq 1 5000", defaultCtx);
       expect(result!.length).toBeLessThanOrEqual(4000);
     });
   });
 
   describe("/diagnose", () => {
     it("returns diagnostics info", () => {
-      const result = handleBridgeCommand("/diagnose", defaultCtx);
+      const result = handleWrapperCommand("/diagnose", defaultCtx);
       expect(result).toContain("🔍 Agent Diagnostics:");
       expect(result).toContain("PID:");
       expect(result).toContain("Uptime:");
@@ -44,32 +44,32 @@ describe("handleBridgeCommand", () => {
     });
 
     it("includes perf stats when available", () => {
-      const ctx: BridgeCommandContext = {
+      const ctx: WrapperCommandContext = {
         agentCmd: ["npx", "codex-acp"],
         perfHistory: [100, 200, 300],
       };
-      const result = handleBridgeCommand("/diagnose", ctx);
+      const result = handleWrapperCommand("/diagnose", ctx);
       expect(result).toContain("Perf (3 prompts)");
       expect(result).toContain("avg 200ms");
     });
 
     it("omits perf stats when no history", () => {
-      const result = handleBridgeCommand("/diagnose", defaultCtx);
+      const result = handleWrapperCommand("/diagnose", defaultCtx);
       expect(result).not.toContain("Perf");
     });
   });
 
   describe("non-commands", () => {
     it("returns null for regular text", () => {
-      expect(handleBridgeCommand("hello world", defaultCtx)).toBeNull();
+      expect(handleWrapperCommand("hello world", defaultCtx)).toBeNull();
     });
 
     it("returns null for unknown commands", () => {
-      expect(handleBridgeCommand("/model gpt-4o", defaultCtx)).toBeNull();
+      expect(handleWrapperCommand("/model gpt-4o", defaultCtx)).toBeNull();
     });
 
     it("returns null for /new", () => {
-      expect(handleBridgeCommand("/new", defaultCtx)).toBeNull();
+      expect(handleWrapperCommand("/new", defaultCtx)).toBeNull();
     });
   });
 });

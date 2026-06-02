@@ -15,7 +15,7 @@ import type {
   PromptResponse,
   SessionNotification,
 } from "@agentclientprotocol/sdk";
-import { handleBridgeCommand } from "./bridge-commands.js";
+import { handleWrapperCommand } from "./wrapper-commands.js";
 
 // --- Parse args ---
 const args = process.argv.slice(2);
@@ -75,7 +75,7 @@ bridgeInput.on("line", (line) => {
     const text = extractPromptText(params.prompt);
 
     if (text) {
-      const result = handleBridgeCommand(text, { agentCmd, perfHistory });
+      const result = handleWrapperCommand(text, { agentCmd, perfHistory });
       if (result !== null) {
         // Respond locally — send chunk notification + response
         const notification: { jsonrpc: string; method: string; params: SessionNotification } = {
