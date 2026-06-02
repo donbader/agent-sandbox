@@ -10,11 +10,14 @@ import (
 
 // RewriterConfig describes a rewriter to instantiate for a set of domains.
 type RewriterConfig struct {
-	Type        string   `yaml:"type"`                  // "telegram-url" or "auth-header"
+	Type        string   `yaml:"type"`                  // "telegram-url", "auth-header", or "oauth"
 	Domains     []string `yaml:"domains"`               // domains this rewriter applies to
 	EnvVar      string   `yaml:"env_var"`               // environment variable holding the secret
 	Header      string   `yaml:"header,omitempty"`      // header name to inject (auth-header only)
 	ValueFormat string   `yaml:"value_format,omitempty"` // header value format, e.g. "token ${value}"
+
+	// OAuth-specific fields (type "oauth" only)
+	TokenFile string `yaml:"token_file,omitempty"` // path to stored OAuth token JSON file
 }
 
 // Config holds gateway configuration.

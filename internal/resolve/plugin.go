@@ -36,11 +36,14 @@ type FeaturePlugin interface {
 
 // RewriterConfig describes a gateway rewriter to instantiate for a set of domains.
 type RewriterConfig struct {
-	Type        string   // "telegram-url" or "auth-header"
+	Type        string   // "telegram-url", "auth-header", or "oauth"
 	Domains     []string // domains this rewriter applies to
 	EnvVar      string   // environment variable holding the secret
 	Header      string   // header name to inject (auth-header type only)
 	ValueFormat string   // header value format, e.g. "token ${value}" (auth-header type only)
+
+	// OAuth-specific fields (type "oauth" only)
+	TokenFile string // path to stored OAuth token JSON file
 }
 
 // FeatureContributions holds what a feature adds to the build.
@@ -55,6 +58,7 @@ type FeatureContributions struct {
 	AgentEnv        []string         // environment variables for agent container (dummy values, not secrets)
 	ChannelConfig    map[string]any   // plugin-specific config passed to channel-manager-config.json
 	Rewriters       []RewriterConfig // gateway rewriters to instantiate for this feature
+	CommandPluginDir string          // path to TypeScript command plugin source (copied into channel-manager)
 }
 
 // registry holds registered feature plugins.
