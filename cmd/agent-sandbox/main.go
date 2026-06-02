@@ -55,7 +55,7 @@ func generateCmd(dir *string) *cobra.Command {
 
 			// Resolve features
 			var features []*resolve.FeatureContributions
-			hasBridge := false
+			hasChannelManager := false
 			for i, entry := range cfg.Features {
 				instanceName := fmt.Sprintf("features[%d]", i)
 				if entry.Name != "" {
@@ -67,7 +67,7 @@ func generateCmd(dir *string) *cobra.Command {
 				}
 				features = append(features, contrib)
 				if contrib.ChannelName != "" {
-					hasBridge = true
+					hasChannelManager = true
 				}
 			}
 
@@ -76,7 +76,7 @@ func generateCmd(dir *string) *cobra.Command {
 				Runtime:  runtime,
 				Features: features,
 				Gateway:  cfg.GatewayEnabled(),
-				Bridge:   hasBridge,
+				ChannelManager: hasChannelManager,
 				GatewaySpec: generate.GatewaySpec{
 					BuildImage: "golang:1.24-alpine",
 					BinaryPath: "/gateway",
