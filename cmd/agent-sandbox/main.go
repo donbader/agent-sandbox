@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -123,8 +124,15 @@ func generateFleet(dir string) error {
 		return err
 	}
 
-	// Generate fleet-level .env.example (single file at fleet root)
+	// Sort env vars for stable output
+	sort.Strings(allEnvVars)
+
 	if err := writeFleetEnvExample(dir, allEnvVars); err != nil {
+		return err
+	}
+
+	// Generate fleet-level schema for fleet.yaml
+	if err := generate.WriteFleetSchema(outDir); err != nil {
 		return err
 	}
 

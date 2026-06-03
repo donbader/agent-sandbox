@@ -26,6 +26,19 @@ func (g *Generator) writeSchema() error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
+// WriteFleetSchema generates .build/fleet-schema.json — a JSON Schema for fleet.yaml.
+func WriteFleetSchema(outDir string) error {
+	schema := buildFleetSchema()
+
+	data, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling fleet schema: %w", err)
+	}
+
+	path := filepath.Join(outDir, "fleet-schema.json")
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // buildAgentSchema generates a JSON Schema describing agent.yaml format.
 func buildAgentSchema() map[string]any {
 	featureItemSchemas := collectFeatureItemSchemas()
@@ -63,6 +76,42 @@ func buildAgentSchema() map[string]any {
 			},
 		},
 		"required": []string{"name", "runtime"},
+	}
+
+	return schema
+}
+
+// buildFleetSchema generates a JSON Schema describing fleet.yaml format.
+func buildFleetSchema() map[string]any {
+	featureItemSchemas := collectFeatureItemSchemas()
+
+	schema := map[string]any{
+		"$schema": "http://json-schema.org/draft-07/schema#",
+		"title":   "agent-sandbox fleet.yaml",
+		"type":    "object",
+		"properties": map[string]any{
+			"agents": map[string]any{
+				"type":        "array",
+				"description": "List of agent subdirectory names",
+				"items": map[string]any{
+					"type": "string",
+				},
+			},
+			"shared": map[string]any{
+				"type":        "object",
+				"description": "Shared configuration applied to all agents",
+				"properties": map[string]any{
+					"features": map[string]any{
+						"type":        "array",
+						"description": "Feature plugins shared across all agents",
+						"items": map[string]any{
+							"oneOf": featureItemSchemas,
+						},
+					},
+				},
+			},
+		},
+		"required": []string{"agents"},
 	}
 
 	return schema

@@ -98,9 +98,11 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-// mergedEnvVars returns all env vars from config ${VAR} references, deduplicated and in stable order.
+// mergedEnvVars returns all env vars from config ${VAR} references, deduplicated and sorted alphabetically.
 func (g *Generator) mergedEnvVars() []string {
-	return g.scanEnvVars()
+	vars := g.scanEnvVars()
+	sort.Strings(vars)
+	return vars
 }
 
 // writeEnvExample generates .env.example at the project root (next to agent.yaml).
