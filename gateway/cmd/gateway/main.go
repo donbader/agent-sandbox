@@ -112,6 +112,19 @@ func main() {
 	}()
 	slog.Info("proxy listening", "addr", cfg.Listen)
 
+	// Start HTTP proxy if HTTP domains are configured
+	if len(cfg.HTTPDomains) > 0 {
+		rewriters := buildRewriters(cfg.Rewriters)
+		httpProxy := proxy.NewHTTPProxy(cfg.HTTPListen, cfg.HTTPDomains, rewriters)
+		go func() {
+			if err := httpProxy.ListenAndServe(); err != nil {
+				slog.Error("http proxy error", "error", err)
+				os.Exit(1)
+			}
+		}()
+		slog.Info("http proxy listening", "addr", cfg.HTTPListen, "domains", cfg.HTTPDomains)
+	}
+
 	// Start port forwarders
 	for _, pf := range cfg.PortForwards {
 		fwd := proxy.NewForwarder(pf.Listen, pf.Target)

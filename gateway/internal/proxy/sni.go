@@ -48,10 +48,7 @@ func extractSNI(data []byte) string {
 	extensionsLen := int(data[pos])<<8 | int(data[pos+1])
 	pos += 2
 
-	end := pos + extensionsLen
-	if end > len(data) {
-		end = len(data)
-	}
+	end := min(pos+extensionsLen, len(data))
 
 	for pos+4 <= end {
 		extType := int(data[pos])<<8 | int(data[pos+1])

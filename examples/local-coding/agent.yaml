@@ -9,5 +9,11 @@ features:
         headers:
           Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
 
+  - plugin: ssh
+    port: 2222
+    authorized_keys: "./ssh_key.pub"
+
   - plugin: custom-runtime
     home_override: "./home"
+    runtime_volumes:
+      - "agent-home:/home/agent"

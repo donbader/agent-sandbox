@@ -166,10 +166,11 @@ func generateAgent(dir, outDir string, cfg *config.AgentConfig, _ *config.Shared
 		ChannelManager: hasChannelManager,
 		SkipEnvExample: skipEnvExample,
 		GatewaySpec: generate.GatewaySpec{
-			BuildImage: "golang:1.26.4-alpine",
-			BinaryPath: "/gateway",
-			ListenPort: 8443,
-			DNSPort:    53,
+			BuildImage:     "golang:1.26.4-alpine",
+			BinaryPath:     "/gateway",
+			ListenPort:     8443,
+			HTTPListenPort: 8080,
+			DNSPort:        53,
 		},
 		ChannelManagerSpec: generate.ChannelManagerSpec{
 			BuildImage: "node:22-slim",
@@ -283,10 +284,10 @@ func expandFleetComposeFiles(buildDir, composePath string) []string {
 
 	// Parse include entries (format: "  - path/to/docker-compose.yml")
 	var files []string
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "- ") {
-			rel := strings.TrimPrefix(line, "- ")
+		if after, ok := strings.CutPrefix(line, "- "); ok {
+			rel := after
 			rel = strings.TrimSpace(rel)
 			abs := filepath.Join(buildDir, rel)
 			if _, err := os.Stat(abs); err == nil {
@@ -370,6 +371,7 @@ func describePlugin(name string, plugin resolve.FeaturePlugin) string {
 		"claude-code":       "Anthropic Claude Code runtime configuration",
 		"pi":                "Pi coding agent runtime configuration",
 		"mcp-oauth":         "OAuth token injection for remote MCP servers",
+		"ssh":               "SSH server for remote development access",
 	}
 	if desc, ok := descriptions[name]; ok {
 		return desc
@@ -419,7 +421,7 @@ func initCmd() *cobra.Command {
 
 			var features []string
 			var envVars []string
-			for _, ch := range strings.Split(featureChoice, ",") {
+			for ch := range strings.SplitSeq(featureChoice, ",") {
 				switch strings.TrimSpace(ch) {
 				case "1":
 					features = append(features, "github-pat")
@@ -450,13 +452,13 @@ func initCmd() *cobra.Command {
 						if username == "" {
 							username = "@your_username"
 						}
-					b.WriteString("  - plugin: telegram\n")
-					b.WriteString("    access_control:\n")
-					_, _ = fmt.Fprintf(&b, "      allowed_users: [\"%s\"]\n", username)
-				case "custom-runtime":
-					b.WriteString("  - plugin: custom-runtime\n")
-					b.WriteString("    commands:\n")
-					b.WriteString("      - \"apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*\"\n")
+						b.WriteString("  - plugin: telegram\n")
+						b.WriteString("    access_control:\n")
+						_, _ = fmt.Fprintf(&b, "      allowed_users: [\"%s\"]\n", username)
+					case "custom-runtime":
+						b.WriteString("  - plugin: custom-runtime\n")
+						b.WriteString("    commands:\n")
+						b.WriteString("      - \"apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*\"\n")
 					}
 				}
 			}

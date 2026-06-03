@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -254,9 +255,7 @@ func (g *Generator) writeChannelConfig() error {
 
 	// Pass plugin-specific config to channel-manager (generic — no plugin knowledge here)
 	for _, f := range g.Features {
-		for k, v := range f.ChannelConfig {
-			config[k] = v
-		}
+		maps.Copy(config, f.ChannelConfig)
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")

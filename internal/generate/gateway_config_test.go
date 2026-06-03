@@ -180,12 +180,13 @@ func TestBuildGatewayConfigBuilder(t *testing.T) {
 					},
 				},
 			},
-			GatewaySpec: GatewaySpec{ListenPort: 8443, DNSPort: 5353},
+			GatewaySpec: GatewaySpec{ListenPort: 8443, HTTPListenPort: 8080, DNSPort: 5353},
 		}
 
 		gcb := g.buildGatewayConfigBuilder()
 
 		assert.Equal(t, 8443, gcb.ListenPort)
+		assert.Equal(t, 8080, gcb.HTTPListenPort)
 		assert.Equal(t, 5353, gcb.DNSPort)
 		assert.Equal(t, []string{"api.telegram.org"}, gcb.MITMDomains)
 		assert.Len(t, gcb.Rewriters, 1)
@@ -194,5 +195,151 @@ func TestBuildGatewayConfigBuilder(t *testing.T) {
 		assert.Equal(t, "1455", gcb.PortForwards[0].HostPort)
 		assert.Equal(t, "1455", gcb.PortForwards[0].ContainerPort)
 		assert.Equal(t, "coder", gcb.PortForwards[0].AgentName)
+	})
+}
+
+func TestSplitDomainsByScheme(t *testing.T) {
+	t.Run("no scheme defaults to MITM", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{"api.github.com", "api.telegram.org"}},
+			},
+		}
+
+		mitm, httpDomains := g.splitDomainsByScheme()
+
+		assert.Equal(t, []string{"api.github.com", "api.telegram.org"}, mitm)
+		assert.Empty(t, httpDomains)
+	})
+
+	t.Run("http:// scheme goes to HTTP domains", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{"http://host.containers.internal:8000"}},
+			},
+		}
+
+		mitm, httpDomains := g.splitDomainsByScheme()
+
+		assert.Empty(t, mitm)
+		assert.Equal(t, []string{"host.containers.internal:8000"}, httpDomains)
+	})
+
+	t.Run("https:// scheme goes to MITM domains (stripped)", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{"https://api.github.com"}},
+			},
+		}
+
+		mitm, httpDomains := g.splitDomainsByScheme()
+
+		assert.Equal(t, []string{"api.github.com"}, mitm)
+		assert.Empty(t, httpDomains)
+	})
+
+	t.Run("mixed schemes are separated correctly", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{
+					"api.github.com",
+					"http://host.containers.internal:8000",
+					"https://api.telegram.org",
+					"http://host.containers.internal:9000",
+				}},
+			},
+		}
+
+		mitm, httpDomains := g.splitDomainsByScheme()
+
+		assert.Equal(t, []string{"api.github.com", "api.telegram.org"}, mitm)
+		assert.Equal(t, []string{"host.containers.internal:8000", "host.containers.internal:9000"}, httpDomains)
+	})
+}
+
+func TestCollectHTTPPorts(t *testing.T) {
+	t.Run("extracts ports from HTTP domains", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{
+					"http://host.containers.internal:8000",
+					"http://host.containers.internal:9000",
+				}},
+			},
+		}
+
+		ports := g.collectHTTPPorts()
+
+		assert.Equal(t, []string{"8000", "9000"}, ports)
+	})
+
+	t.Run("defaults to port 80 when no port in URL", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{"http://example.com"}},
+			},
+		}
+
+		ports := g.collectHTTPPorts()
+
+		assert.Equal(t, []string{"80"}, ports)
+	})
+
+	t.Run("deduplicates ports", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{
+					"http://host1.internal:8000",
+					"http://host2.internal:8000",
+				}},
+			},
+		}
+
+		ports := g.collectHTTPPorts()
+
+		assert.Equal(t, []string{"8000"}, ports)
+	})
+
+	t.Run("no HTTP domains returns empty", func(t *testing.T) {
+		g := &Generator{
+			Features: []*resolve.FeatureContributions{
+				{MITMDomains: []string{"api.github.com"}},
+			},
+		}
+
+		ports := g.collectHTTPPorts()
+
+		assert.Empty(t, ports)
+	})
+}
+
+func TestGatewayConfigBuilder_HTTPDomains(t *testing.T) {
+	t.Run("renders HTTP domains in config", func(t *testing.T) {
+		gcb := &GatewayConfigBuilder{
+			ListenPort:     8443,
+			HTTPListenPort: 8080,
+			DNSPort:        5353,
+			HTTPDomains:    []string{"host.containers.internal:8000"},
+		}
+
+		content, err := renderTemplate("gateway-config.yaml.tmpl", gcb)
+		require.NoError(t, err)
+
+		assert.Contains(t, content, `http_listen: ":8080"`)
+		assert.Contains(t, content, "http_domains:")
+		assert.Contains(t, content, "  - host.containers.internal:8000")
+	})
+
+	t.Run("omits http_domains when empty", func(t *testing.T) {
+		gcb := &GatewayConfigBuilder{
+			ListenPort:     8443,
+			HTTPListenPort: 8080,
+			DNSPort:        5353,
+		}
+
+		content, err := renderTemplate("gateway-config.yaml.tmpl", gcb)
+		require.NoError(t, err)
+
+		assert.NotContains(t, content, "http_domains:")
 	})
 }

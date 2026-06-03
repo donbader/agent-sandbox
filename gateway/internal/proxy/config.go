@@ -23,6 +23,7 @@ type RewriterConfig struct {
 // Config holds gateway configuration.
 type Config struct {
 	Listen       string           `yaml:"listen"`         // TCP listen address (e.g., ":8443")
+	HTTPListen   string           `yaml:"http_listen"`    // HTTP proxy listen address (e.g., ":8080")
 	DNSListen    string           `yaml:"dns_listen"`     // DNS listen address (e.g., ":53")
 	MITMDomains  []string         `yaml:"mitm_domains"`   // domains to MITM (terminate TLS)
 	HTTPServices []HTTPService    `yaml:"http_services"`  // plain HTTP services to proxy
@@ -66,6 +67,9 @@ func LoadConfig(path string) (*Config, error) {
 
 	if cfg.Listen == "" {
 		cfg.Listen = ":8443"
+	}
+	if cfg.HTTPListen == "" {
+		cfg.HTTPListen = ":8080"
 	}
 	if cfg.DNSListen == "" {
 		cfg.DNSListen = ":53"

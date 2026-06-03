@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,12 +22,12 @@ import (
 
 // StoredToken represents a persisted OAuth token (written by setup, read/updated by this rewriter).
 type StoredToken struct {
-	AccessToken    string  `json:"access_token"`
-	RefreshToken   *string `json:"refresh_token"`
-	ExpiresAt      int64   `json:"expires_at"`
-	TokenEndpoint  string  `json:"token_endpoint"`
-	ClientID       string  `json:"client_id"`
-	ClientSecret   *string `json:"client_secret"`
+	AccessToken   string  `json:"access_token"`
+	RefreshToken  *string `json:"refresh_token"`
+	ExpiresAt     int64   `json:"expires_at"`
+	TokenEndpoint string  `json:"token_endpoint"`
+	ClientID      string  `json:"client_id"`
+	ClientSecret  *string `json:"client_secret"`
 }
 
 // OAuthRewriter injects a Bearer token into requests destined for specific domains.
@@ -36,10 +37,10 @@ type OAuthRewriter struct {
 	domains   []string
 	tokenFile string
 
-	mu           sync.Mutex
-	cachedToken  *StoredToken
-	cachedUntil  time.Time
-	httpClient   *http.Client
+	mu          sync.Mutex
+	cachedToken *StoredToken
+	cachedUntil time.Time
+	httpClient  *http.Client
 }
 
 // NewOAuthRewriter creates a rewriter that reads an OAuth token file and injects
@@ -75,13 +76,7 @@ func (r *OAuthRewriter) RewriteRequest(req *http.Request) bool {
 		host = h
 	}
 
-	matched := false
-	for _, d := range r.domains {
-		if host == d {
-			matched = true
-			break
-		}
-	}
+	matched := slices.Contains(r.domains, host)
 	if !matched {
 		return false
 	}
@@ -134,10 +129,7 @@ func (r *OAuthRewriter) getValidToken() (string, error) {
 	}
 
 	// Cache until 5 minutes before expiry (minimum 60 seconds).
-	ttl := stored.ExpiresAt - now - 300
-	if ttl < 60 {
-		ttl = 60
-	}
+	ttl := max(stored.ExpiresAt-now-300, 60)
 	r.cachedToken = stored
 	r.cachedUntil = time.Now().Add(time.Duration(ttl) * time.Second)
 

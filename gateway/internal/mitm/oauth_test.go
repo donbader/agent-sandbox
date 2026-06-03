@@ -17,7 +17,7 @@ import (
 func TestOAuthRewriter_InjectsBearer(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "test-access-token",
-		RefreshToken:  strPtr("test-refresh"),
+		RefreshToken:  new("test-refresh"),
 		ExpiresAt:     time.Now().Unix() + 3600,
 		TokenEndpoint: "https://example.com/token",
 		ClientID:      "client-id",
@@ -38,7 +38,7 @@ func TestOAuthRewriter_InjectsBearer(t *testing.T) {
 func TestOAuthRewriter_SkipsNonMatchingDomain(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "token",
-		RefreshToken:  strPtr("refresh"),
+		RefreshToken:  new("refresh"),
 		ExpiresAt:     time.Now().Unix() + 3600,
 		TokenEndpoint: "https://example.com/token",
 		ClientID:      "cid",
@@ -77,7 +77,7 @@ func TestOAuthRewriter_RefreshesExpiredToken(t *testing.T) {
 
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "expired-token",
-		RefreshToken:  strPtr("old-refresh"),
+		RefreshToken:  new("old-refresh"),
 		ExpiresAt:     time.Now().Unix() - 100, // Already expired.
 		TokenEndpoint: server.URL,              // https://127.0.0.1:PORT
 		ClientID:      "client-id",
@@ -108,7 +108,7 @@ func TestOAuthRewriter_RefreshesExpiredToken(t *testing.T) {
 func TestOAuthRewriter_RejectsHTTPTokenEndpoint(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "expired-token",
-		RefreshToken:  strPtr("refresh"),
+		RefreshToken:  new("refresh"),
 		ExpiresAt:     time.Now().Unix() - 100, // Expired — triggers refresh.
 		TokenEndpoint: "http://evil.example.com/token",
 		ClientID:      "cid",
@@ -130,7 +130,7 @@ func TestOAuthRewriter_RejectsHTTPTokenEndpoint(t *testing.T) {
 func TestOAuthRewriter_BlocksPrivateIPEndpoint(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "expired-token",
-		RefreshToken:  strPtr("refresh"),
+		RefreshToken:  new("refresh"),
 		ExpiresAt:     time.Now().Unix() - 100, // Expired — triggers refresh.
 		TokenEndpoint: "https://127.0.0.1:9999/token",
 		ClientID:      "cid",
@@ -206,7 +206,7 @@ func TestOAuthRewriter_ErrorsWithoutTokenFile(t *testing.T) {
 func TestOAuthRewriter_HandlesHostWithPort(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "port-token",
-		RefreshToken:  strPtr("refresh"),
+		RefreshToken:  new("refresh"),
 		ExpiresAt:     time.Now().Unix() + 3600,
 		TokenEndpoint: "https://example.com/token",
 		ClientID:      "cid",
@@ -227,7 +227,7 @@ func TestOAuthRewriter_HandlesHostWithPort(t *testing.T) {
 func TestOAuthRewriter_CachesToken(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "cached-token",
-		RefreshToken:  strPtr("refresh"),
+		RefreshToken:  new("refresh"),
 		ExpiresAt:     time.Now().Unix() + 3600,
 		TokenEndpoint: "https://example.com/token",
 		ClientID:      "cid",
@@ -264,6 +264,7 @@ func writeTestToken(t *testing.T, token *StoredToken) string {
 	return path
 }
 
+//go:fix inline
 func strPtr(s string) *string {
-	return &s
+	return new(s)
 }

@@ -40,7 +40,7 @@ func NewDockerfileBuilder(g *Generator, variant string) *DockerfileBuilder {
 		Install:         g.Runtime.Install,
 		HasEntrypoint:   g.needsEntrypoint(),
 		HasHomeOverride: g.hasHomeOverride(),
-		HasHooks:        g.hasHooks(),
+		HasHooks:        g.hasHooks() || g.hasRootHooks(),
 		Cmd:             g.Runtime.Cmd,
 		VolumePaths:     g.collectVolumePaths(),
 	}

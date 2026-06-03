@@ -73,19 +73,22 @@ type HTTPService struct {
 
 // FeatureContributions holds what a feature adds to the build.
 type FeatureContributions struct {
-	Name            string           // plugin name (for diagnostics and logging)
-	Commands        []string         // RUN commands for Dockerfile
-	EntrypointHooks []string         // scripts to run on container start (source paths)
-	Volumes         []string         // named volumes (e.g., "name:/path")
-	HomeOverride    string           // directory to copy into home on start
-	MITMDomains     []string         // domains the gateway should MITM (terminate TLS)
-	ChannelName   string           // channel type (e.g., "telegram")
-	AgentEnv        []string         // environment variables for agent container (dummy values, not secrets)
+	Name             string           // plugin name (for diagnostics and logging)
+	Commands         []string         // RUN commands for Dockerfile
+	EntrypointHooks  []string         // scripts to run on container start (source paths)
+	RootHooks        []string         // scripts to run as root before dropping to agent user (source paths)
+	Volumes          []string         // named volumes (e.g., "name:/path")
+	HomeOverride     string           // directory to copy into home on start
+	MITMDomains      []string         // domains the gateway should MITM (terminate TLS)
+	ChannelName      string           // channel type (e.g., "telegram")
+	AgentEnv         []string         // environment variables for agent container (dummy values, not secrets)
 	ChannelConfig    map[string]any   // plugin-specific config passed to channel-manager-config.json
-	Rewriters       []RewriterConfig // gateway rewriters to instantiate for this feature
-	CommandPluginDir string          // path to TypeScript command plugin source (copied into channel-manager)
-	ExternalNetworks []string        // external Docker networks the gateway should join
-	HTTPServices    []HTTPService    // plain HTTP services to proxy with header injection
+	Rewriters        []RewriterConfig // gateway rewriters to instantiate for this feature
+	CommandPluginDir string           // path to TypeScript command plugin source (copied into channel-manager)
+	ExternalNetworks []string         // external Docker networks the gateway should join
+	HTTPServices     []HTTPService    // plain HTTP services to proxy with header injection
+	Capabilities     []string         // additional Linux capabilities for the agent container (e.g., "SYS_CHROOT")
+	Ports            []string         // host:container port mappings to expose (e.g., "2222:2222")
 }
 
 // registry holds registered feature plugins.

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -54,13 +55,7 @@ func (r *AuthHeaderRewriter) RewriteRequest(req *http.Request) bool {
 		host = h
 	}
 
-	matched := false
-	for _, d := range r.domains {
-		if host == d {
-			matched = true
-			break
-		}
-	}
+	matched := slices.Contains(r.domains, host)
 	if !matched {
 		return false
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"strings"
 	"text/template"
 )
 
@@ -29,14 +30,14 @@ var templateFuncs = template.FuncMap{
 		return fmt.Sprintf("%q", s)
 	},
 	"join": func(sep string, items []string) string {
-		result := ""
+		var result strings.Builder
 		for i, item := range items {
 			if i > 0 {
-				result += sep
+				result.WriteString(sep)
 			}
-			result += item
+			result.WriteString(item)
 		}
-		return result
+		return result.String()
 	},
 }
 

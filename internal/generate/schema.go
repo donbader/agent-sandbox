@@ -3,6 +3,7 @@ package generate
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -89,9 +90,7 @@ func collectFeatureItemSchemas() []any {
 		// Merge plugin-specific properties
 		if pluginSchema != nil {
 			if pluginProps, ok := pluginSchema["properties"].(map[string]any); ok {
-				for k, v := range pluginProps {
-					props[k] = v
-				}
+				maps.Copy(props, pluginProps)
 			}
 			// Carry over plugin-specific required fields
 			if pluginRequired, ok := pluginSchema["required"].([]string); ok {
@@ -101,8 +100,8 @@ func collectFeatureItemSchemas() []any {
 
 		itemSchema := map[string]any{
 			"type":                 "object",
-			"properties":          props,
-			"required":            required,
+			"properties":           props,
+			"required":             required,
 			"additionalProperties": false,
 		}
 
@@ -146,8 +145,7 @@ func structTypeToSchema(t reflect.Type) map[string]any {
 	props := map[string]any{}
 	var required []string
 
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
+	for field := range t.Fields() {
 		yamlTag := field.Tag.Get("yaml")
 		if yamlTag == "" || yamlTag == "-" {
 			continue
