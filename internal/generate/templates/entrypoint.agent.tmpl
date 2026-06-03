@@ -11,13 +11,18 @@ echo "entrypoint: gateway at $GATEWAY_IP"
 
 echo "entrypoint: switching DNS to gateway..."
 echo "nameserver $GATEWAY_IP" > /etc/resolv.conf
+{{ if .HasMITM }}
+echo "entrypoint: clearing /etc/hosts overrides for MITM..."
+cp /etc/hosts /tmp/hosts.bak
+grep -v 'host.containers.internal\|host.docker.internal' /tmp/hosts.bak > /tmp/hosts.new
+cat /tmp/hosts.new > /etc/hosts
+{{ end }}
 
 echo "entrypoint: setting default route via gateway..."
 ip route replace default via $GATEWAY_IP
 {{ range .Ports }}
 iptables -t nat -A PREROUTING -p tcp --dport {{ .ContainerPort }} -j DNAT --to-destination 127.0.0.1:{{ .ContainerPort }}
 {{ end }}{{ end }}{{ if .HasMITM }}
-# Wait for sandbox CA certificate from gateway (shared volume)
 echo "entrypoint: waiting for sandbox CA certificate..."
 timeout=30
 elapsed=0
@@ -38,5 +43,8 @@ if [ -d /opt/home-override ]; then
   cp -rT /opt/home-override /home/{{ .User }}
   chown -R {{ .User }}:{{ .User }} /home/{{ .User }}
 fi
-{{ end }}
+{{ end }}{{ if .HasRootHooks }}
+echo "entrypoint: running root hooks..."
+{{ range .RootHooks }}/opt/hooks/{{ . }}
+{{ end }}{{ end }}
 exec su -c '{{ .UserCommand }}' {{ .User }}

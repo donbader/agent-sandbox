@@ -94,8 +94,26 @@ func init() {
 					contrib.Rewriters = append(contrib.Rewriters, rewriters...)
 				}
 
+			case "http":
+				if port == "" {
+					port = "80"
+				}
+
+				contrib.HTTPServices = append(contrib.HTTPServices, resolve.HTTPService{
+					Host: host,
+					Port: port,
+				})
+
+				if len(svc.Headers) > 0 {
+					rewriters, err := buildRewriters(host, svc.Headers)
+					if err != nil {
+						return nil, fmt.Errorf("external-services: service %q: %w", svc.URL, err)
+					}
+					contrib.Rewriters = append(contrib.Rewriters, rewriters...)
+				}
+
 			default:
-				return nil, fmt.Errorf("external-services: unsupported scheme %q in url %q (use docker:// or https://)", parsed.Scheme, svc.URL)
+				return nil, fmt.Errorf("external-services: unsupported scheme %q in url %q (use http://, https://, or docker://)", parsed.Scheme, svc.URL)
 			}
 		}
 

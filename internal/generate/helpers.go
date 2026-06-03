@@ -2,6 +2,8 @@ package generate
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +55,39 @@ func (g *Generator) hasHooks() bool {
 	return false
 }
 
+func (g *Generator) hasRootHooks() bool {
+	for _, f := range g.Features {
+		if len(f.RootHooks) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// collectCapabilities gathers all capabilities from features, deduped.
+func (g *Generator) collectCapabilities() []string {
+	var caps []string
+	seen := map[string]bool{}
+	for _, f := range g.Features {
+		for _, c := range f.Capabilities {
+			if !seen[c] {
+				seen[c] = true
+				caps = append(caps, c)
+			}
+		}
+	}
+	return caps
+}
+
+// collectFeaturePorts gathers all port mappings from features.
+func (g *Generator) collectFeaturePorts() []string {
+	var ports []string
+	for _, f := range g.Features {
+		ports = append(ports, f.Ports...)
+	}
+	return ports
+}
+
 func (g *Generator) hasHomeOverride() bool {
 	for _, f := range g.Features {
 		if f.HomeOverride != "" {
@@ -62,14 +97,12 @@ func (g *Generator) hasHomeOverride() bool {
 	return false
 }
 
-// hasMITMDomains returns true if any feature contributes MITM domains.
+// hasMITMDomains returns true if any feature contributes domains that require
+// TLS interception (https:// or bare domains without scheme). HTTP-only domains
+// are handled by the HTTP proxy and do not need MITM.
 func (g *Generator) hasMITMDomains() bool {
-	for _, f := range g.Features {
-		if len(f.MITMDomains) > 0 {
-			return true
-		}
-	}
-	return false
+	mitmDomains, _ := g.splitDomainsByScheme()
+	return len(mitmDomains) > 0
 }
 
 // collectMITMDomains gathers all MITM domains from features.
@@ -126,10 +159,20 @@ func (g *Generator) collectVolumePaths() []string {
 }
 
 // collectRewriters gathers all rewriter configs from features.
+// Domains are normalized to strip the scheme but preserve host:port so that
+// the gateway's AuthHeaderRewriter can do port-aware matching (two services
+// on the same host with different ports get distinct rewriters).
 func (g *Generator) collectRewriters() []resolve.RewriterConfig {
 	var rewriters []resolve.RewriterConfig
 	for _, f := range g.Features {
-		rewriters = append(rewriters, f.Rewriters...)
+		for _, rw := range f.Rewriters {
+			normalized := make([]string, 0, len(rw.Domains))
+			for _, d := range rw.Domains {
+				normalized = append(normalized, stripScheme(d))
+			}
+			rw.Domains = normalized
+			rewriters = append(rewriters, rw)
+		}
 	}
 	return rewriters
 }
@@ -177,6 +220,30 @@ func (g *Generator) collectHTTPPorts() []string {
 	return ports
 }
 
+// stripScheme removes the URL scheme from a domain string but preserves the
+// host:port so that port-aware matching works correctly in the gateway.
+// e.g. "http://host.internal:8000" -> "host.internal:8000"
+// e.g. "https://api.github.com" -> "api.github.com"
+func stripScheme(d string) string {
+	if strings.Contains(d, "://") {
+		parsed, err := url.Parse(d)
+		if err == nil {
+			return parsed.Host
+		}
+	}
+	return d
+}
+
+// stripSchemeAndPort extracts the bare hostname from a domain string that may
+// include a scheme and/or port (e.g. "http://host.internal:8000" -> "host.internal").
+func stripSchemeAndPort(d string) string {
+	d = stripScheme(d)
+	if h, _, err := net.SplitHostPort(d); err == nil {
+		return h
+	}
+	return d
+}
+
 // collectAgentEnv gathers agent-side environment variables from features.
 // These are dummy/non-secret values set in the agent container (e.g., GH_TOKEN=dummy).
 func (g *Generator) collectAgentEnv() []string {
@@ -202,16 +269,16 @@ func (g *Generator) needsEntrypoint() bool {
 		return true
 	}
 	for _, f := range g.Features {
-		if len(f.EntrypointHooks) > 0 || f.HomeOverride != "" {
+		if len(f.EntrypointHooks) > 0 || len(f.RootHooks) > 0 || f.HomeOverride != "" {
 			return true
 		}
 	}
 	return false
 }
 
-// copyHooks copies entrypoint hook scripts to .build/hooks/.
+// copyHooks copies entrypoint hook scripts and root hook scripts to .build/hooks/.
 func (g *Generator) copyHooks() error {
-	if !g.hasHooks() {
+	if !g.hasHooks() && !g.hasRootHooks() {
 		return nil
 	}
 
@@ -226,6 +293,17 @@ func (g *Generator) copyHooks() error {
 			data, err := os.ReadFile(srcPath)
 			if err != nil {
 				return fmt.Errorf("reading hook %s: %w", hook, err)
+			}
+			destPath := filepath.Join(hooksDir, filepath.Base(hook))
+			if err := os.WriteFile(destPath, data, 0755); err != nil {
+				return err
+			}
+		}
+		for _, hook := range f.RootHooks {
+			srcPath := filepath.Join(g.Dir, hook)
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return fmt.Errorf("reading root hook %s: %w", hook, err)
 			}
 			destPath := filepath.Join(hooksDir, filepath.Base(hook))
 			if err := os.WriteFile(destPath, data, 0755); err != nil {

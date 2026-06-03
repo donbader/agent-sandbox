@@ -5,9 +5,13 @@ log_level: debug
 features:
   - plugin: external-services
     services:
-      - url: https://agent-gateway.stx-ai.net
+      - url: http://host.containers.internal:8000/v1
         headers:
           Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+
+  - plugin: ssh
+    port: 2222
+    authorized_keys: "./ssh_key.pub"
 
   - plugin: custom-runtime
     home_override: "./home"

@@ -21,6 +21,8 @@ type EntrypointBuilder struct {
 	HasHomeOverride   bool
 	HasHooks          bool
 	Hooks             []string // base filenames only
+	HasRootHooks      bool
+	RootHooks         []string // base filenames only
 	User              string
 	Ports             []PortMapping
 	RuntimeCmd        string
@@ -100,6 +102,14 @@ func (g *Generator) writeAgentEntrypoint() error {
 		}
 	}
 
+	// Collect root hooks (base filenames only)
+	var rootHooks []string
+	for _, f := range g.Features {
+		for _, hook := range f.RootHooks {
+			rootHooks = append(rootHooks, filepath.Base(hook))
+		}
+	}
+
 	// Collect port mappings
 	var ports []PortMapping
 	if g.Gateway && len(g.Runtime.Ports) > 0 {
@@ -116,6 +126,8 @@ func (g *Generator) writeAgentEntrypoint() error {
 		HasHomeOverride: g.hasHomeOverride(),
 		HasHooks:        len(hooks) > 0,
 		Hooks:           hooks,
+		HasRootHooks:    len(rootHooks) > 0,
+		RootHooks:       rootHooks,
 		User:            g.Runtime.User,
 		Ports:           ports,
 		RuntimeCmd:      strings.Join(g.Runtime.Cmd, " "),

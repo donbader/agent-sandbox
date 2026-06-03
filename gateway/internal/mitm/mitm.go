@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -42,12 +43,7 @@ func NewHandler(domains []string, caCert tls.Certificate, rewriters []Rewriter) 
 
 // Matches returns true if the host is in the MITM domain list.
 func (h *Handler) Matches(host string) bool {
-	for _, d := range h.domains {
-		if host == d {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.domains, host)
 }
 
 // Handle terminates TLS, parses HTTP, applies rewriters, and forwards.

@@ -1,5 +1,6 @@
 # Gateway configuration (auto-generated)
 listen: ":{{.ListenPort}}"
+http_listen: ":{{.HTTPListenPort}}"
 dns_listen: ":{{.DNSPort}}"
 {{- if .MITMDomains}}
 mitm_domains:

@@ -24,3 +24,6 @@ Thumbs.db
 channel-manager/node_modules/
 node_modules/
 .worktrees/
+.ssh/
+ssh*key
+bin/agent-sandbox

@@ -3,12 +3,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - ../.env
     cap_drop:
       - ALL
-    restart: unless-stopped
-{{- if .Podman }}
-    userns_mode: keep-id
+{{- if .Capabilities }}
+    cap_add:
+{{- range .Capabilities }}
+      - {{ . }}
 {{- end }}
+{{- end }}
+    restart: unless-stopped
 {{- if .Ports }}
     ports:
 {{- range .Ports }}

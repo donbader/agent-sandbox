@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -46,21 +47,18 @@ func NewAuthHeaderRewriter(domains []string, header, valueFormat, envVar string)
 }
 
 // RewriteRequest injects the configured header if the request host matches one of the
-// configured domains. Returns true if the header was injected.
+// configured domains. Supports both bare hostnames ("api.github.com") and host:port
+// entries ("host.internal:8000") for port-aware matching. Returns true if the header was injected.
 func (r *AuthHeaderRewriter) RewriteRequest(req *http.Request) bool {
 	host := req.Host
-	// Strip port if present (e.g., "api.github.com:443" → "api.github.com")
+	// Extract bare hostname for fallback matching
+	bareHost := host
 	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+		bareHost = h
 	}
 
-	matched := false
-	for _, d := range r.domains {
-		if host == d {
-			matched = true
-			break
-		}
-	}
+	// Match against host:port first, then bare hostname
+	matched := slices.Contains(r.domains, host) || slices.Contains(r.domains, bareHost)
 	if !matched {
 		return false
 	}
