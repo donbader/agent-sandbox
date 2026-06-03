@@ -258,12 +258,12 @@ func TestSplitDomainsByScheme(t *testing.T) {
 }
 
 func TestCollectHTTPPorts(t *testing.T) {
-	t.Run("extracts ports from HTTP domains", func(t *testing.T) {
+	t.Run("extracts ports from HTTP services", func(t *testing.T) {
 		g := &Generator{
 			Features: []*resolve.FeatureContributions{
-				{MITMDomains: []string{
-					"http://host.containers.internal:8000",
-					"http://host.containers.internal:9000",
+				{HTTPServices: []resolve.HTTPService{
+					{Host: "host.containers.internal", Port: "8000"},
+					{Host: "host.containers.internal", Port: "9000"},
 				}},
 			},
 		}
@@ -273,10 +273,12 @@ func TestCollectHTTPPorts(t *testing.T) {
 		assert.Equal(t, []string{"8000", "9000"}, ports)
 	})
 
-	t.Run("defaults to port 80 when no port in URL", func(t *testing.T) {
+	t.Run("defaults to port 80 when no port specified", func(t *testing.T) {
 		g := &Generator{
 			Features: []*resolve.FeatureContributions{
-				{MITMDomains: []string{"http://example.com"}},
+				{HTTPServices: []resolve.HTTPService{
+					{Host: "example.com", Port: ""},
+				}},
 			},
 		}
 
@@ -288,9 +290,9 @@ func TestCollectHTTPPorts(t *testing.T) {
 	t.Run("deduplicates ports", func(t *testing.T) {
 		g := &Generator{
 			Features: []*resolve.FeatureContributions{
-				{MITMDomains: []string{
-					"http://host1.internal:8000",
-					"http://host2.internal:8000",
+				{HTTPServices: []resolve.HTTPService{
+					{Host: "host1.internal", Port: "8000"},
+					{Host: "host2.internal", Port: "8000"},
 				}},
 			},
 		}
@@ -300,7 +302,7 @@ func TestCollectHTTPPorts(t *testing.T) {
 		assert.Equal(t, []string{"8000"}, ports)
 	})
 
-	t.Run("no HTTP domains returns empty", func(t *testing.T) {
+	t.Run("no HTTP services returns empty", func(t *testing.T) {
 		g := &Generator{
 			Features: []*resolve.FeatureContributions{
 				{MITMDomains: []string{"api.github.com"}},
@@ -313,24 +315,27 @@ func TestCollectHTTPPorts(t *testing.T) {
 	})
 }
 
-func TestGatewayConfigBuilder_HTTPDomains(t *testing.T) {
-	t.Run("renders HTTP domains in config", func(t *testing.T) {
+func TestGatewayConfigBuilder_HTTPServices(t *testing.T) {
+	t.Run("renders HTTP services in config", func(t *testing.T) {
 		gcb := &GatewayConfigBuilder{
 			ListenPort:     8443,
 			HTTPListenPort: 8080,
 			DNSPort:        5353,
-			HTTPDomains:    []string{"host.containers.internal:8000"},
+			HTTPServices: []resolve.HTTPService{
+				{Host: "host.containers.internal", Port: "8000"},
+			},
 		}
 
 		content, err := renderTemplate("gateway-config.yaml.tmpl", gcb)
 		require.NoError(t, err)
 
 		assert.Contains(t, content, `http_listen: ":8080"`)
-		assert.Contains(t, content, "http_domains:")
-		assert.Contains(t, content, "  - host.containers.internal:8000")
+		assert.Contains(t, content, "http_services:")
+		assert.Contains(t, content, "host.containers.internal")
+		assert.Contains(t, content, `port: "8000"`)
 	})
 
-	t.Run("omits http_domains when empty", func(t *testing.T) {
+	t.Run("omits http_services when empty", func(t *testing.T) {
 		gcb := &GatewayConfigBuilder{
 			ListenPort:     8443,
 			HTTPListenPort: 8080,
@@ -340,6 +345,6 @@ func TestGatewayConfigBuilder_HTTPDomains(t *testing.T) {
 		content, err := renderTemplate("gateway-config.yaml.tmpl", gcb)
 		require.NoError(t, err)
 
-		assert.NotContains(t, content, "http_domains:")
+		assert.NotContains(t, content, "http_services:")
 	})
 }
