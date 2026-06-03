@@ -1,10 +1,8 @@
+import type { ToolCallContent, ToolCallStatus } from "@agentclientprotocol/sdk";
 import { formatMarkdown, closeOpenTags, splitMessage, MAX_MESSAGE_LENGTH } from "./formatter/telegram.js";
+import { createLogger } from "../logger.js";
 
-/** Typed subset of ACP ToolCallContent for stream rendering. */
-export interface ToolCallContentItem {
-  type: "content" | "diff" | "terminal";
-  content?: { type: string; text: string };
-}
+const log = createLogger("stream-controller");
 
 export interface StreamControllerDeps {
   chatId: number;
@@ -25,7 +23,7 @@ type State = "BUFFERING" | "STREAMING" | "DONE";
 interface ToolEntry {
   id: string;
   title: string;
-  status: "in_progress" | "completed" | "failed";
+  status: ToolCallStatus;
   resultPreview?: string;
 }
 
@@ -89,14 +87,14 @@ export class StreamController {
     this.ensureDraftRefresh();
   }
 
-  toolStart(toolCallId: string, title: string, status?: string): void {
+  toolStart(toolCallId: string, title: string, status?: ToolCallStatus): void {
     if (this.state === "DONE") return;
 
     this.contentDirty = true;
     this.tools.push({
       id: toolCallId,
       title,
-      status: (status as ToolEntry["status"]) || "in_progress",
+      status: status ?? "in_progress",
     });
 
     if (this.state === "BUFFERING") {
@@ -105,20 +103,20 @@ export class StreamController {
     }
   }
 
-  toolUpdate(toolCallId: string, status: string, content?: ToolCallContentItem[]): void {
+  toolUpdate(toolCallId: string, status: ToolCallStatus, content?: ToolCallContent[]): void {
     if (this.state === "DONE") return;
 
     const tool = this.tools.find((t) => t.id === toolCallId);
     if (!tool) return;
 
-    tool.status = status as ToolEntry["status"];
+    tool.status = status ?? tool.status;
     this.contentDirty = true;
 
     if (content && content.length > 0) {
-      const textItem = content.find((c) =>
-        c.type === "content" && c.content?.type === "text",
+      const textItem = content.find((c): c is ToolCallContent & { type: "content" } =>
+        c.type === "content" && c.content.type === "text",
       );
-      if (textItem && textItem.type === "content" && textItem.content?.type === "text") {
+      if (textItem && textItem.content.type === "text") {
         const fullText = textItem.content.text;
         tool.resultPreview = fullText.length > 100 ? fullText.slice(-100) : fullText;
         this.scheduleResultRemoval(tool);
@@ -216,8 +214,8 @@ export class StreamController {
   // --- Private: Message sending ---
 
   private safeAsync(p: Promise<unknown>): void {
-    p.catch(() => {
-      // Swallow — the next tick will retry with accumulated content
+    p.catch((err: unknown) => {
+      log.warn({ error: (err as Error).message ?? err }, "async operation failed");
     });
   }
 

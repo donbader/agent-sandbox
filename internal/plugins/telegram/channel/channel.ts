@@ -1,12 +1,12 @@
 import { Bot } from "grammy";
 import type { Channel } from "./types.js";
 import type { AcpAgent } from "../acp-client.js";
-import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type { SessionNotification, SessionUpdate } from "@agentclientprotocol/sdk";
 import { createLogger } from "../logger.js";
 import { StartupBuffer } from "../startup-buffer.js";
 import { RateLimiter } from "./delivery/rate-limiter.js";
 import { withRetry } from "./delivery/api-retry.js";
-import { StreamController, type ToolCallContentItem } from "./stream-controller.js";
+import { StreamController } from "./stream-controller.js";
 import { SessionManager } from "./session-manager.js";
 import { isAllowed } from "./acl.js";
 import { parseConfig, type TelegramChannelConfig } from "./config.js";
@@ -150,6 +150,7 @@ export class TelegramChannel implements Channel {
         chatId,
         sendMessage: async (html, opts) => {
           await this.rateLimiter.acquire(chatId.toString());
+          log.debug({ chatId, len: html.length }, "telegram:sendMessage");
           const msg = await withRetry(async () =>
             this.bot.api.sendMessage(chatId, html, {
               parse_mode: (opts?.parse_mode as "HTML") ?? "HTML",
@@ -160,6 +161,7 @@ export class TelegramChannel implements Channel {
         },
         editMessage: async (msgId, html, opts) => {
           await this.rateLimiter.acquire(chatId.toString());
+          log.debug({ chatId, msgId, len: html.length }, "telegram:editMessage");
           await withRetry(async () =>
             this.bot.api.editMessageText(chatId, msgId, html, {
               parse_mode: (opts?.parse_mode as "HTML") ?? "HTML",
@@ -168,14 +170,9 @@ export class TelegramChannel implements Channel {
           );
         },
         sendDraft: async (draftId, draftText) => {
+          log.debug({ chatId, draftId, len: draftText.length }, "telegram:sendDraft");
           await withRetry(async () =>
-            (this.bot.api as unknown as { callApi(method: string, params: Record<string, unknown>): Promise<unknown> })
-              .callApi("sendMessageDraft", {
-                chat_id: chatId,
-                draft_id: draftId,
-                text: draftText,
-                parse_mode: "HTML",
-              }),
+            this.bot.api.sendMessageDraft(chatId, draftId, draftText, { parse_mode: "HTML" }),
           );
         },
       },
@@ -186,30 +183,53 @@ export class TelegramChannel implements Channel {
       await this.agent.prompt(sessionId, cleanText, {
         onSessionUpdate: (notification: SessionNotification) => {
           const { update } = notification;
-          switch (update.sessionUpdate) {
-            case "agent_thought_chunk":
-              if (update.content.type === "text") {
-                stream.pushThinking(update.content.text);
-              }
-              break;
-            case "tool_call":
-              stream.toolStart(update.toolCallId, update.title, update.status);
-              break;
-            case "tool_call_update":
-              stream.toolUpdate(update.toolCallId, update.status ?? "in_progress", update.content as ToolCallContentItem[] | undefined ?? undefined);
-              break;
-            case "agent_message_chunk":
-              if (update.content.type === "text") {
-                stream.pushText(update.content.text);
-              }
-              break;
-          }
+          this.handleSessionUpdate(update, stream);
         },
       });
       await stream.finalize();
     } catch (err) {
       await stream.abort(err instanceof Error ? err : new Error(String(err)));
       log.error({ chatId, error: (err as Error).message }, "prompt failed");
+    }
+  }
+
+  // --- ACP session update dispatch ---
+
+  private handleSessionUpdate(update: SessionUpdate, stream: StreamController): void {
+    switch (update.sessionUpdate) {
+      case "agent_thought_chunk":
+        if (update.content.type === "text") {
+          log.debug({ len: update.content.text.length }, "agent_thought_chunk");
+          stream.pushThinking(update.content.text);
+        }
+        break;
+      case "tool_call":
+        log.debug({ toolCallId: update.toolCallId, title: update.title, status: update.status }, "tool_call");
+        stream.toolStart(update.toolCallId, update.title, update.status);
+        break;
+      case "tool_call_update":
+        log.debug({ toolCallId: update.toolCallId, status: update.status }, "tool_call_update");
+        stream.toolUpdate(update.toolCallId, update.status ?? "in_progress", update.content ?? undefined);
+        break;
+      case "agent_message_chunk":
+        if (update.content.type === "text") {
+          log.debug({ len: update.content.text.length }, "agent_message_chunk");
+          stream.pushText(update.content.text);
+        }
+        break;
+      case "user_message_chunk":
+      case "plan":
+      case "available_commands_update":
+      case "current_mode_update":
+      case "config_option_update":
+      case "session_info_update":
+      case "usage_update":
+        // Handled elsewhere or intentionally ignored in Telegram channel
+        break;
+      default: {
+        const _exhaustive: never = update;
+        log.warn({ sessionUpdate: (_exhaustive as SessionUpdate).sessionUpdate }, "unhandled session update type");
+      }
     }
   }
 

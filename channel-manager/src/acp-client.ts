@@ -64,6 +64,22 @@ export class BridgeClient implements acp.Client {
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {
     // Forward to session-specific callback
     const { sessionId, update } = params;
+
+    // Log ALL ACP events with content preview
+    const logData: Record<string, unknown> = { sessionId: sessionId.slice(0, 8), type: update.sessionUpdate };
+    if ("content" in update && update.content && typeof update.content === "object" && "type" in update.content) {
+      const content = update.content as { type: string; text?: string };
+      logData.contentType = content.type;
+      if (content.type === "text" && content.text) {
+        logData.textLen = content.text.length;
+        logData.preview = content.text.slice(0, 80);
+      }
+    }
+    if ("toolCallId" in update) logData.toolCallId = (update as { toolCallId: string }).toolCallId;
+    if ("title" in update) logData.title = (update as { title: string }).title;
+    if ("status" in update) logData.status = (update as { status: string }).status;
+    log.info(logData, "ACP event");
+
     const cb = this.sessionUpdateCallbacks.get(sessionId);
     if (cb) {
       try {
@@ -216,10 +232,12 @@ export class AcpAgent {
    * Sends a prompt to the agent and returns the full response text.
    * Collects all agent_message_chunk updates until the prompt completes.
    */
-  async prompt(sessionId: string, text: string, options?: PromptOptions): Promise<string> {
+   async prompt(sessionId: string, text: string, options?: PromptOptions): Promise<string> {
     if (!this.connection) {
       throw new Error("ACP agent not started");
     }
+
+    log.info({ sessionId: sessionId.slice(0, 8), textLen: text.length, preview: text.slice(0, 100) }, "prompt sent to ACP agent");
 
     // Check prompt interceptor (wrapper commands, command plugins)
     if (this.promptInterceptor) {

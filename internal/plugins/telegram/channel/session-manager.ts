@@ -32,7 +32,7 @@ export class SessionManager {
     const conn = this.agent.getConnection();
     if (!conn) throw new Error("Agent not connected");
 
-    const result = await conn.newSession({ cwd: "/workspace", mcpServers: [] });
+    const result = await conn.newSession({ cwd: "/home/agent", mcpServers: [] });
     const sessionId = result.sessionId;
     this.sessions.set(chatId, sessionId);
     this.evict();
