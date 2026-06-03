@@ -15,6 +15,15 @@ import (
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
 
+const (
+	// sandboxCACertPath is where the gateway's CA certificate is mounted in the agent container.
+	// Used by: docker-compose volume mount, entrypoint CA wait loop, NODE_EXTRA_CA_CERTS export.
+	sandboxCACertPath = "/usr/local/share/ca-certificates/ca.crt"
+
+	// gatewayCertDir is where the gateway writes the CA cert (shared volume source).
+	gatewayCertDir = "/shared/certs"
+)
+
 // Generator produces build artifacts from config and resolved runtime.
 type Generator struct {
 	Config      *config.AgentConfig
@@ -254,6 +263,14 @@ func (g *Generator) writeAgentDockerfile() error {
 	b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends iproute2 iptables ca-certificates && rm -rf /var/lib/apt/lists/*\n")
 	_, _ = fmt.Fprintf(&b, "RUN useradd -m -s /bin/bash %s\n", g.Runtime.User)
 
+	// Pre-create plugin volume directories with correct ownership so Docker
+	// initializes named volumes with the agent user (not root).
+	volumePaths := g.collectVolumePaths()
+	if len(volumePaths) > 0 {
+		_, _ = fmt.Fprintf(&b, "RUN mkdir -p %s && chown -R %s:%s %s\n",
+			strings.Join(volumePaths, " "), g.Runtime.User, g.Runtime.User, strings.Join(volumePaths, " "))
+	}
+
 
 
 	// Runtime install commands (before channel-manager COPY for better layer caching —
@@ -403,7 +420,7 @@ func (g *Generator) writeGatewayCompose() error {
 		b.WriteString("    volumes:\n")
 		b.WriteString("      - shared-certs:/shared/certs\n")
 		b.WriteString("    healthcheck:\n")
-		b.WriteString("      test: [\"CMD\", \"test\", \"-f\", \"/shared/certs/ca.crt\"]\n")
+		_, _ = fmt.Fprintf(&b, "      test: [\"CMD\", \"test\", \"-f\", \"%s/ca.crt\"]\n", gatewayCertDir)
 		b.WriteString("      interval: 1s\n")
 		b.WriteString("      timeout: 1s\n")
 		b.WriteString("      retries: 10\n")
@@ -437,7 +454,7 @@ func (g *Generator) writeGatewayCompose() error {
 
 	volumes := g.collectVolumes()
 	if g.hasMITMDomains() {
-		volumes = append(volumes, "shared-certs:/usr/local/share/ca-certificates:ro")
+		volumes = append(volumes, fmt.Sprintf("shared-certs:%s:ro", filepath.Dir(sandboxCACertPath)))
 	}
 	if len(volumes) > 0 {
 		b.WriteString("    volumes:\n")
@@ -564,9 +581,15 @@ func (g *Generator) writeGatewayEntrypoint() error {
 
 // writeAgentEntrypoint generates .build/entrypoint.sh for the agent container.
 // When Gateway is true, sets up iptables DNAT rules to redirect traffic to the gateway container.
+//
+// Structure: all privileged operations run as root first (networking, CA trust, volume ownership),
+// then a single user switch via 'exec su' runs the rest (home override, hooks, service) as the
+// agent user.
 func (g *Generator) writeAgentEntrypoint() error {
 	var b strings.Builder
 	b.WriteString("#!/bin/bash\nset -e\n\n")
+
+	// === ROOT PHASE: privileged operations ===
 
 	if g.Gateway {
 		// Resolve gateway IP dynamically via Docker DNS (before iptables redirects DNS)
@@ -600,7 +623,7 @@ func (g *Generator) writeAgentEntrypoint() error {
 		b.WriteString("echo \"entrypoint: waiting for sandbox CA certificate...\"\n")
 		b.WriteString("timeout=30\n")
 		b.WriteString("elapsed=0\n")
-		b.WriteString("while [ ! -f /usr/local/share/ca-certificates/ca.crt ]; do\n")
+		b.WriteString("while [ ! -f " + sandboxCACertPath + " ]; do\n")
 		b.WriteString("  sleep 0.1\n")
 		b.WriteString("  elapsed=$((elapsed + 1))\n")
 		b.WriteString("  if [ \"$elapsed\" -ge \"$((timeout * 10))\" ]; then\n")
@@ -609,37 +632,45 @@ func (g *Generator) writeAgentEntrypoint() error {
 		b.WriteString("  fi\n")
 		b.WriteString("done\n")
 		b.WriteString("update-ca-certificates 2>/dev/null\n")
-		b.WriteString("export NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/ca.crt\n")
+		// NODE_EXTRA_CA_CERTS is needed because Node.js bundles its own CA store.
+		// Other runtimes (Go, Python ssl, curl) use the system store via update-ca-certificates.
+		// Exporting this unconditionally is harmless if Node isn't present.
+		_, _ = fmt.Fprintf(&b, "export NODE_EXTRA_CA_CERTS=%s\n", sandboxCACertPath)
 		b.WriteString("echo \"entrypoint: CA certificate trusted\"\n\n")
 	}
 
-	// Home override: copy files from staging to home
+	// Home override: copy files from staging to home (requires root to read /opt/home-override)
 	if g.hasHomeOverride() {
 		b.WriteString("echo \"entrypoint: applying home override...\"\n")
 		_, _ = fmt.Fprintf(&b, "if [ -d /opt/home-override ]; then\n  cp -rT /opt/home-override /home/%s\n  chown -R %s:%s /home/%s\nfi\n\n",
 			g.Runtime.User, g.Runtime.User, g.Runtime.User, g.Runtime.User)
 	}
 
+	// === USER PHASE: everything below runs as the agent user ===
+	// Build the unprivileged command sequence that will exec under 'su'.
+	var userCmds strings.Builder
+
 	// Run entrypoint hooks
 	if g.hasHooks() {
-		b.WriteString("echo \"entrypoint: running hooks...\"\n")
+		userCmds.WriteString("echo \"entrypoint: running hooks...\" && ")
 		for _, f := range g.Features {
 			for _, hook := range f.EntrypointHooks {
 				hookName := filepath.Base(hook)
-				_, _ = fmt.Fprintf(&b, "su -c '/opt/hooks/%s' %s\n", hookName, g.Runtime.User)
+				_, _ = fmt.Fprintf(&userCmds, "/opt/hooks/%s && ", hookName)
 			}
 		}
-		b.WriteString("\n")
 	}
 
-	// Execute the runtime CMD as agent user
+	// Start the service
 	if g.ChannelManager {
-		b.WriteString("echo \"entrypoint: starting channel-manager...\"\n")
-		_, _ = fmt.Fprintf(&b, "exec su -c '%s' %s\n", g.ChannelManagerSpec.EntryPoint, g.Runtime.User)
+		userCmds.WriteString("echo \"entrypoint: starting channel-manager...\" && ")
+		_, _ = fmt.Fprintf(&userCmds, "exec %s", g.ChannelManagerSpec.EntryPoint)
 	} else {
-		b.WriteString("echo \"entrypoint: starting agent...\"\n")
-		_, _ = fmt.Fprintf(&b, "exec su -c '%s' %s\n", strings.Join(g.Runtime.Cmd, " "), g.Runtime.User)
+		userCmds.WriteString("echo \"entrypoint: starting agent...\" && ")
+		_, _ = fmt.Fprintf(&userCmds, "exec %s", strings.Join(g.Runtime.Cmd, " "))
 	}
+
+	_, _ = fmt.Fprintf(&b, "exec su -c '%s' %s\n", userCmds.String(), g.Runtime.User)
 
 	path := filepath.Join(g.OutDir, "entrypoint.sh")
 	return os.WriteFile(path, []byte(b.String()), 0755)
@@ -829,6 +860,20 @@ func (g *Generator) collectNamedVolumes(volumes []string) []string {
 		}
 	}
 	return named
+}
+
+// collectVolumePaths extracts container mount paths from "name:/path" format.
+func (g *Generator) collectVolumePaths() []string {
+	var paths []string
+	for _, f := range g.Features {
+		for _, v := range f.Volumes {
+			parts := strings.SplitN(v, ":", 2)
+			if len(parts) == 2 {
+				paths = append(paths, parts[1])
+			}
+		}
+	}
+	return paths
 }
 
 // scanEnvVars finds all ${VAR} references in the agent config (recursively).
