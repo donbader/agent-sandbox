@@ -36,7 +36,7 @@ features:
     commands:
       - "apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*"
     runtime_volumes:
-      - "agent-home:/home/agent"
+      - "agent-home:{{ .AGENT_HOME }}"
 EOF
 
 # Generate and run

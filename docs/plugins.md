@@ -92,7 +92,7 @@ features:
       - ./scripts/sync-dotfiles.sh
       - ./scripts/setup-git.sh
     runtime_volumes:
-      - "agent-home:/home/agent"
+      - "agent-home:{{ .AGENT_HOME }}"
 ```
 
 | Field | Effect |

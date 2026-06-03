@@ -14,6 +14,34 @@ The schema is generated from plugin struct tags, so it always reflects your acti
 
 > Note: You need to run `agent-sandbox generate` at least once before the schema file exists.
 
+## Working Directory
+
+The `workdir` top-level field sets the agent's working directory inside the container.
+
+```yaml
+name: coder
+runtime: codex
+workdir: "{{ .AGENT_HOME }}/workspace"
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `workdir` | `{{ .AGENT_HOME }}` | The working directory for the agent process |
+
+### Template Variables
+
+The builtin `{{ .AGENT_HOME }}` variable resolves to `/home/<user>` (defaults to `/home/agent`). It can be used in `workdir` and in `runtime_volumes` strings:
+
+```yaml
+workdir: "{{ .AGENT_HOME }}/workspace"
+features:
+  - plugin: custom-runtime
+    runtime_volumes:
+      - "agent-home:{{ .AGENT_HOME }}"
+```
+
+When `workdir` is omitted, it defaults to `{{ .AGENT_HOME }}`.
+
 ## Single Agent
 
 ```
@@ -42,7 +70,7 @@ features:
     entrypoint_hooks:
       - ./scripts/sync-dotfiles.sh
     runtime_volumes:
-      - "agent-home:/home/agent"
+      - "agent-home:{{ .AGENT_HOME }}"
 ```
 
 ## Multi-Agent (Optional)
@@ -68,7 +96,7 @@ Managed by the `custom-runtime` plugin. See [plugins.md](plugins.md#custom-runti
 | Strategy | Config | Behavior |
 |----------|--------|----------|
 | Ephemeral (default) | no plugin or no `runtime_volumes` | Home resets on restart. Auth token persists via small named volume. |
-| Persistent | `runtime_volumes: ["agent-home:/home/agent"]` | Named volume. Runtime state survives restarts. |
+| Persistent | `runtime_volumes: ["agent-home:{{ .AGENT_HOME }}"]` | Named volume. Runtime state survives restarts. |
 | Override | `./home/` dir exists | Files staged to /opt/home-override/, cp'd on every start. |
 | Custom hooks | `entrypoint_hooks: [./scripts/...]` | Scripts run on every start (after override copy). |
 | Custom packages | `commands: ["apt-get install ..."]` | RUN during docker build. |
@@ -90,7 +118,7 @@ features:
   - plugin: custom-runtime
     commands: ["apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*"]
     entrypoint_hooks: [./scripts/setup.sh]
-    runtime_volumes: ["agent-home:/home/agent"]
+    runtime_volumes: ["agent-home:{{ .AGENT_HOME }}"]
   - plugin: external-services
     services:
       - url: "https://agent-gateway.stx-ai.net"
