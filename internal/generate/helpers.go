@@ -98,10 +98,14 @@ func (g *Generator) collectVolumes() []string {
 // collectNamedVolumes extracts volume names from "name:/path" format.
 func (g *Generator) collectNamedVolumes(volumes []string) []string {
 	var named []string
+	seen := map[string]bool{}
 	for _, v := range volumes {
 		parts := strings.SplitN(v, ":", 2)
 		if len(parts) == 2 && !strings.HasPrefix(parts[0], "/") && !strings.HasPrefix(parts[0], ".") {
-			named = append(named, parts[0])
+			if !seen[parts[0]] {
+				seen[parts[0]] = true
+				named = append(named, parts[0])
+			}
 		}
 	}
 	return named
