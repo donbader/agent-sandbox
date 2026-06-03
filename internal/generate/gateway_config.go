@@ -20,6 +20,7 @@ type GatewayConfigBuilder struct {
 	ListenPort   int
 	DNSPort      int
 	MITMDomains  []string
+	HTTPServices []resolve.HTTPService
 	Rewriters    []resolve.RewriterConfig
 	PortForwards []PortForward
 }
@@ -27,10 +28,11 @@ type GatewayConfigBuilder struct {
 // buildGatewayConfigBuilder constructs a GatewayConfigBuilder from the Generator state.
 func (g *Generator) buildGatewayConfigBuilder() *GatewayConfigBuilder {
 	gcb := &GatewayConfigBuilder{
-		ListenPort:  g.GatewaySpec.ListenPort,
-		DNSPort:     g.GatewaySpec.DNSPort,
-		MITMDomains: g.collectMITMDomains(),
-		Rewriters:   g.collectRewriters(),
+		ListenPort:   g.GatewaySpec.ListenPort,
+		DNSPort:      g.GatewaySpec.DNSPort,
+		MITMDomains:  g.collectMITMDomains(),
+		HTTPServices: g.collectHTTPServices(),
+		Rewriters:    g.collectRewriters(),
 	}
 
 	for _, p := range g.Runtime.Ports {

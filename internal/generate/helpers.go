@@ -149,6 +149,15 @@ func (g *Generator) collectExternalNetworks() []string {
 	return networks
 }
 
+// collectHTTPServices gathers HTTP service targets from features.
+func (g *Generator) collectHTTPServices() []resolve.HTTPService {
+	var services []resolve.HTTPService
+	for _, f := range g.Features {
+		services = append(services, f.HTTPServices...)
+	}
+	return services
+}
+
 // collectAgentEnv gathers agent-side environment variables from features.
 // These are dummy/non-secret values set in the agent container (e.g., GH_TOKEN=dummy).
 func (g *Generator) collectAgentEnv() []string {

@@ -3,12 +3,16 @@ package resolve
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// envVarRefPattern matches a ${VAR} reference.
+// envVarRefPattern matches a ${VAR} reference (whole string only).
 var envVarRefPattern = regexp.MustCompile(`^\$\{([A-Z_][A-Z0-9_]*)\}$`)
+
+// envVarInlinePattern matches ${VAR} references anywhere in a string.
+var envVarInlinePattern = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
 
 // ExtractEnvVar extracts the environment variable name from a "${VAR}" reference.
 // Returns the var name and true if the input is a valid reference, or ("", false) otherwise.
@@ -18,6 +22,21 @@ func ExtractEnvVar(ref string) (string, bool) {
 		return "", false
 	}
 	return m[1], true
+}
+
+// FindEnvVarRefs returns all env var names referenced as ${VAR} in the string.
+func FindEnvVarRefs(s string) []string {
+	matches := envVarInlinePattern.FindAllStringSubmatch(s, -1)
+	var refs []string
+	for _, m := range matches {
+		refs = append(refs, m[1])
+	}
+	return refs
+}
+
+// ReplaceEnvVarRef replaces ${envVar} with replacement in s.
+func ReplaceEnvVarRef(s, envVar, replacement string) string {
+	return strings.ReplaceAll(s, "${"+envVar+"}", replacement)
 }
 
 // FeaturePlugin defines the interface that feature plugins implement.
@@ -46,6 +65,12 @@ type RewriterConfig struct {
 	TokenFile string // path to stored OAuth token JSON file
 }
 
+// HTTPService describes a plain HTTP service the gateway should proxy and inject headers into.
+type HTTPService struct {
+	Host string // hostname (Docker DNS or external)
+	Port string // port number (default "80")
+}
+
 // FeatureContributions holds what a feature adds to the build.
 type FeatureContributions struct {
 	Name            string           // plugin name (for diagnostics and logging)
@@ -60,6 +85,7 @@ type FeatureContributions struct {
 	Rewriters       []RewriterConfig // gateway rewriters to instantiate for this feature
 	CommandPluginDir string          // path to TypeScript command plugin source (copied into channel-manager)
 	ExternalNetworks []string        // external Docker networks the gateway should join
+	HTTPServices    []HTTPService    // plain HTTP services to proxy with header injection
 }
 
 // registry holds registered feature plugins.

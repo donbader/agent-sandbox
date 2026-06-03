@@ -13,9 +13,10 @@ import (
 // Proxy is a transparent TCP proxy that intercepts TLS connections,
 // extracts SNI, and either passes through or applies handlers.
 type Proxy struct {
-	config   *Config
-	handlers []RequestHandler
-	listener net.Listener
+	config      *Config
+	handlers    []RequestHandler
+	httpHandler *HTTPHandler
+	listener    net.Listener
 }
 
 // New creates a new proxy with the given config.
@@ -28,6 +29,11 @@ func New(cfg *Config) *Proxy {
 // RegisterHandler adds a request handler for credential injection.
 func (p *Proxy) RegisterHandler(h RequestHandler) {
 	p.handlers = append(p.handlers, h)
+}
+
+// RegisterHTTPHandler sets the HTTP proxy handler for plain HTTP traffic.
+func (p *Proxy) RegisterHTTPHandler(h *HTTPHandler) {
+	p.httpHandler = h
 }
 
 // ListenAndServe starts the proxy listener.
@@ -60,17 +66,30 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 
 	slog.Debug("new connection", "remote_addr", clientConn.RemoteAddr())
 
-	// Read the TLS ClientHello to extract SNI
+	// Read the first bytes to determine protocol (TLS vs HTTP)
 	_ = clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	buf := make([]byte, 4096)
 	n, err := clientConn.Read(buf)
 	if err != nil {
-		slog.Debug("read client hello", "error", err)
+		slog.Debug("read initial data", "error", err)
 		return
 	}
 	_ = clientConn.SetReadDeadline(time.Time{})
 
 	hello := buf[:n]
+
+	// TLS records start with 0x16 (ContentType handshake)
+	if len(hello) > 0 && hello[0] != 0x16 {
+		// Not TLS — handle as plain HTTP
+		if p.httpHandler != nil {
+			slog.Debug("connection detected as HTTP", "remote_addr", clientConn.RemoteAddr())
+			p.httpHandler.Handle(clientConn, hello)
+		} else {
+			slog.Debug("HTTP connection dropped (no handler)", "remote_addr", clientConn.RemoteAddr())
+		}
+		return
+	}
+
 	serverName := extractSNI(hello)
 	if serverName == "" {
 		slog.Debug("no SNI in connection", "remote_addr", clientConn.RemoteAddr())

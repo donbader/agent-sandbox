@@ -22,11 +22,18 @@ type RewriterConfig struct {
 
 // Config holds gateway configuration.
 type Config struct {
-	Listen       string           `yaml:"listen"`        // TCP listen address (e.g., ":8443")
-	DNSListen    string           `yaml:"dns_listen"`    // DNS listen address (e.g., ":53")
-	MITMDomains  []string         `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
-	Rewriters    []RewriterConfig `yaml:"rewriters"`     // rewriters to apply to intercepted requests
-	PortForwards []PortForward    `yaml:"port_forwards"` // TCP port forwards to agent container
+	Listen       string           `yaml:"listen"`         // TCP listen address (e.g., ":8443")
+	DNSListen    string           `yaml:"dns_listen"`     // DNS listen address (e.g., ":53")
+	MITMDomains  []string         `yaml:"mitm_domains"`   // domains to MITM (terminate TLS)
+	HTTPServices []HTTPService    `yaml:"http_services"`  // plain HTTP services to proxy
+	Rewriters    []RewriterConfig `yaml:"rewriters"`      // rewriters to apply to intercepted requests
+	PortForwards []PortForward    `yaml:"port_forwards"`  // TCP port forwards to agent container
+}
+
+// HTTPService describes a plain HTTP service the gateway should proxy.
+type HTTPService struct {
+	Host string `yaml:"host"` // hostname (Docker DNS or external)
+	Port string `yaml:"port"` // port number
 }
 
 // PortForward defines a TCP port forward from the gateway to the agent.

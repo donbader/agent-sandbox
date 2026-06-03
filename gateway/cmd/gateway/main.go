@@ -73,6 +73,9 @@ func main() {
 	// Start TCP proxy
 	p := proxy.New(cfg)
 
+	// Build rewriters from config (shared between MITM and HTTP handlers)
+	rewriters := buildRewriters(cfg.Rewriters)
+
 	// Generate CA and register MITM handler if MITM domains are configured
 	if len(cfg.MITMDomains) > 0 {
 		slog.Info("generating CA keypair for MITM")
@@ -83,12 +86,22 @@ func main() {
 		}
 		slog.Info("CA certificate written", "cert", sharedCertPath, "key", privateKeyPath)
 
-		// Build rewriters from config
-		rewriters := buildRewriters(cfg.Rewriters)
-
 		handler := mitm.NewHandler(cfg.MITMDomains, caCert, rewriters)
 		p.RegisterHandler(handler)
 		slog.Info("mitm enabled", "domains", cfg.MITMDomains)
+	}
+
+	// Register HTTP proxy handler (for plain HTTP services with header injection)
+	{
+		var httpRewriters []proxy.HTTPRewriter
+		for _, rw := range rewriters {
+			httpRewriters = append(httpRewriters, rw)
+		}
+		httpHandler := proxy.NewHTTPHandler(cfg.HTTPServices, httpRewriters)
+		p.RegisterHTTPHandler(httpHandler)
+		if len(cfg.HTTPServices) > 0 {
+			slog.Info("http proxy enabled", "services", cfg.HTTPServices)
+		}
 	}
 
 	go func() {
