@@ -19,7 +19,8 @@ agent-sandbox — an opinionated agent sandbox orchestrator. Deploys AI coding a
 cmd/agent-sandbox/      ← CLI entrypoint (generic template engine)
 internal/
   config/               ← agent.yaml parsing
-  generate/             ← Dockerfile + docker-compose.yml generation
+  generate/             ← Build artifact generation (builder structs + Go templates)
+    templates/          ← Go text/template files for Dockerfiles, compose, entrypoints
   resolve/              ← plugin resolution (local → embedded)
   plugins/              ← core plugins (embedded in CLI)
     codex/              ← runtime.yaml
@@ -30,7 +31,6 @@ gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
 channel-manager/         ← Channel manager TypeScript (ACP client, channel loader, wrapper)
 sdk/                    ← Gateway handler interface (for feature plugins)
 docs/                   ← Design documents
-templates/              ← Dockerfile.tmpl, entrypoint.sh template
 ```
 
 ## Commands
