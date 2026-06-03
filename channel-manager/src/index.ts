@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { AcpAgent } from "./acp-client.js";
 import { handleWrapperCommand } from "./wrapper-commands.js";
 import { createLogger, createPluginLogger } from "./logger.js";
-import type { CommandPlugin } from "./command/types.js";
+import { registerPlugin, handleCommand, handleMessage } from "./command/registry.js";
 
 const log = createLogger("channel-manager");
 
@@ -35,21 +35,20 @@ async function main(): Promise<void> {
   });
 
   // Load command plugins (if any are generated)
-  const commandPlugins: CommandPlugin[] = [];
   try {
-    const { commandPlugins: plugins } = await import("./command/commands.gen.js");
-    for (const plugin of plugins) {
+    const { commandPlugins } = await import("./command/commands.gen.js");
+    for (const plugin of commandPlugins) {
       const pluginLogger = createPluginLogger(`plugin:${plugin.name}`);
       plugin.init?.(config, pluginLogger);
-      commandPlugins.push(plugin);
+      registerPlugin(plugin);
     }
-    log.info({ plugins: commandPlugins.map((p) => p.name) }, "loaded command plugins");
+    log.info({ plugins: commandPlugins.map((p: { name: string }) => p.name) }, "loaded command plugins");
   } catch {
     // No command plugins generated — that's fine
   }
 
   // Set up prompt interceptor: wrapper commands → command plugins → agent
-  agent.setPromptInterceptor(async (text: string, _sessionId: string) => {
+  agent.setPromptInterceptor(async (text: string, sessionId: string) => {
     // 1. Sync wrapper commands (/sh, /diagnose)
     const wrapperResult = handleWrapperCommand(text, {
       agentCmd: config.acp_command,
@@ -58,30 +57,13 @@ async function main(): Promise<void> {
     if (wrapperResult !== null) return wrapperResult;
 
     // 2. Async command plugins (/oauth, etc.)
-    const trimmed = text.trim();
-    if (trimmed.startsWith("/")) {
-      const [cmd, ...args] = trimmed.slice(1).split(/\s+/);
-      for (const plugin of commandPlugins) {
-        if (cmd in plugin.commands) {
-          let response = "";
-          await plugin.commands[cmd]({
-            args: args.join(" "),
-            chatId: _sessionId,
-            reply: (msg: string) => { response = msg; },
-          });
-          return response || null;
-        }
-      }
-    }
+    const commandResult = await handleCommand(text, sessionId, () => {});
+    if (commandResult !== null) return commandResult;
 
     // 3. onMessage interceptors (paste-back)
-    for (const plugin of commandPlugins) {
-      if (plugin.onMessage) {
-        let response = "";
-        const handled = await plugin.onMessage(text, _sessionId, (msg: string) => { response = msg; });
-        if (handled) return response || null;
-      }
-    }
+    let messageResponse = "";
+    const handled = await handleMessage(text, sessionId, (msg: string) => { messageResponse = msg; });
+    if (handled) return messageResponse || null;
 
     return null; // Not intercepted — forward to agent
   });
