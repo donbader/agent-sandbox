@@ -1,3 +1,4 @@
 ssh_key
+ssh_key.pub
 ssh_host_key
 .ssh_host_key
