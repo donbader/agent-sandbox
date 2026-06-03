@@ -16,6 +16,9 @@ on:
       - "LICENSE"
       - ".gitignore"
 
+permissions:
+  contents: read
+
 # Cancel in-progress runs for the same branch/PR — only latest matters.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,7 +32,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       typescript: ${{ steps.filter.outputs.typescript }}
-      examples: ${{ steps.filter.outputs.examples }}
+      artifacts: ${{ steps.filter.outputs.artifacts }}
     steps:
       - uses: actions/checkout@v6
 
@@ -46,7 +49,7 @@ jobs:
               - '.golangci.yml'
             typescript:
               - 'channel-manager/**'
-            examples:
+            artifacts:
               - 'internal/generate/**'
               - 'internal/plugins/**'
               - 'internal/config/**'
@@ -58,12 +61,12 @@ jobs:
               - 'tests/integration/**'
               - 'embed.go'
 
-  go:
-    name: Go (lint, test, build)
+  lint:
+    name: Go (lint)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: changes
-    # Run when Go files change OR when examples need the CLI binary
-    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.examples == 'true'
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.artifacts == 'true'
     steps:
       - uses: actions/checkout@v6
 
@@ -71,10 +74,21 @@ jobs:
         with:
           go-version: "1.26"
 
-      - name: Lint
-        uses: golangci/golangci-lint-action@v9
-        continue-on-error: true
-        id: lint
+      - uses: golangci/golangci-lint-action@v9
+
+  go:
+    name: Go (test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    # Run when Go files change OR when artifacts need the CLI binary
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.artifacts == 'true'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
 
       - name: Test
         run: go test -race ./...
@@ -89,13 +103,10 @@ jobs:
           path: agent-sandbox
           retention-days: 1
 
-      - name: Fail if lint failed
-        if: steps.lint.outcome == 'failure'
-        run: exit 1
-
   typescript:
     name: TypeScript (typecheck, test)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.typescript == 'true'
     defaults:
@@ -122,8 +133,9 @@ jobs:
   examples:
     name: Examples (generate + docker build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [changes, go]
-    if: needs.changes.outputs.examples == 'true'
+    if: needs.changes.outputs.artifacts == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -152,10 +164,14 @@ jobs:
   sandbox:
     name: Sandbox (integration)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [changes, go]
-    if: needs.changes.outputs.examples == 'true'
+    if: needs.changes.outputs.artifacts == 'true'
     steps:
       - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Download CLI binary
         uses: actions/download-artifact@v4
