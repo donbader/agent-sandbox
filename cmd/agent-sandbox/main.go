@@ -231,8 +231,12 @@ func composeCmd(dir *string) *cobra.Command {
 
 			// Load config to get container_runtime override; ignore errors
 			// (fleet mode or missing config still auto-detects from PATH).
+			// Priority: agent.yaml > fleet.yaml shared > auto-detect.
 			var containerRuntime string
-			if cfg, err := config.Load(*dir); err == nil {
+			if fleet, err := config.LoadFleet(*dir); err == nil {
+				containerRuntime = fleet.Shared.ContainerRuntime
+			}
+			if cfg, err := config.Load(*dir); err == nil && cfg.ContainerRuntime != "" {
 				containerRuntime = cfg.ContainerRuntime
 			}
 			rt, err := crt.DetectWithOverride(containerRuntime)

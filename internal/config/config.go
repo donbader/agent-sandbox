@@ -53,11 +53,12 @@ func (f *FeatureEntry) UnmarshalYAML(value *yaml.Node) error {
 
 // AgentConfig represents an agent.yaml file.
 type AgentConfig struct {
-	Name     string         `yaml:"name" schema:"Agent name" required:"true" examples:"my-agent"`
-	Runtime  string         `yaml:"runtime" schema:"Runtime plugin name" required:"true" enum:"codex"`
-	LogLevel string         `yaml:"log_level" schema:"Log verbosity level" default:"info" enum:"info,debug"`
-	Gateway  *bool          `yaml:"gateway" schema:"Enable transparent gateway proxy" default:"true"`
-	Features []FeatureEntry `yaml:"features" schema:"Feature plugins and their configuration"`
+	Name             string         `yaml:"name" schema:"Agent name" required:"true" examples:"my-agent"`
+	Runtime          string         `yaml:"runtime" schema:"Runtime plugin name" required:"true" enum:"codex"`
+	ContainerRuntime string         `yaml:"container_runtime" schema:"Container runtime override" enum:"docker,podman"`
+	LogLevel         string         `yaml:"log_level" schema:"Log verbosity level" default:"info" enum:"info,debug"`
+	Gateway          *bool          `yaml:"gateway" schema:"Enable transparent gateway proxy" default:"true"`
+	Features         []FeatureEntry `yaml:"features" schema:"Feature plugins and their configuration"`
 }
 
 // GatewayEnabled returns whether the gateway should be included.
@@ -100,7 +101,8 @@ type FleetConfig struct {
 
 // SharedBlock holds features shared across all agents.
 type SharedBlock struct {
-	Features []FeatureEntry `yaml:"features"`
+	ContainerRuntime string         `yaml:"container_runtime" schema:"Container runtime override" enum:"docker,podman"`
+	Features         []FeatureEntry `yaml:"features"`
 }
 
 // LoadFleet reads and parses a fleet.yaml file from the given directory.
