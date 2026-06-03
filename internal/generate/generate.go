@@ -131,8 +131,6 @@ func (g *Generator) Run() error {
 		}
 	}
 
-
-
 	if g.ChannelManager {
 		if err := g.writeChannelManagerSource(); err != nil {
 			return err
@@ -177,5 +175,4 @@ func (g *Generator) Run() error {
 
 	return nil
 }
-
 
