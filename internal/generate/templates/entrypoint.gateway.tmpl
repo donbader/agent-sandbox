@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+# Redirect incoming port 443 to proxy (port {{ .GatewayListenPort }})
+iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port {{ .GatewayListenPort }}
+
+# Start gateway
+exec /usr/local/bin/gateway
