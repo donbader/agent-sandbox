@@ -5,6 +5,7 @@ package mitm
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"io"
 	"log/slog"
@@ -102,6 +103,21 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		}
 		slog.Debug("request", "host", serverName, "method", req.Method, "path", originalPath, "rewritten", rewritten)
 
+		// Log request body for LLM API calls (truncated for safety)
+		if strings.Contains(originalPath, "/responses") && req.Body != nil {
+			bodyBytes, readErr := io.ReadAll(req.Body)
+			if readErr == nil {
+				_ = req.Body.Close()
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				// Log the tail to capture reasoning/stream params that appear after input
+				tail := string(bodyBytes)
+				if len(tail) > 500 {
+					tail = "...(head omitted)" + tail[len(tail)-500:]
+				}
+				slog.Debug("request body tail", "host", serverName, "path", originalPath, "len", len(bodyBytes), "tail", tail)
+			}
+		}
+
 		// Forward to real server
 		resp, err := h.forwardRequest(req, serverName)
 		if err != nil {
@@ -118,13 +134,39 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 			return
 		}
 
-		// Write response back to client
-		if err := resp.Write(tlsConn); err != nil {
-			slog.Error("write response", "host", serverName, "error", err)
+		// Log SSE response events for LLM API calls (capture reasoning events)
+		if strings.Contains(originalPath, "/responses") && resp.Body != nil {
+			var respBuf bytes.Buffer
+			resp.Body = io.NopCloser(io.TeeReader(resp.Body, &respBuf))
+			if err := resp.Write(tlsConn); err != nil {
+				slog.Error("write response", "host", serverName, "error", err)
+				_ = resp.Body.Close()
+				return
+			}
 			_ = resp.Body.Close()
-			return
+			// Log raw response (first 1000 chars + last 500 chars)
+			respData := respBuf.String()
+			slog.Debug("response info", "host", serverName, "path", originalPath, "status", resp.StatusCode, "content-type", resp.Header.Get("Content-Type"), "body_len", len(respData))
+			if len(respData) > 0 {
+				head := respData
+				if len(head) > 1000 {
+					head = head[:1000]
+				}
+				slog.Debug("response head", "host", serverName, "data", head)
+				if len(respData) > 1000 {
+					tail := respData[len(respData)-500:]
+					slog.Debug("response tail", "host", serverName, "data", tail)
+				}
+			}
+		} else {
+			// Write response back to client
+			if err := resp.Write(tlsConn); err != nil {
+				slog.Error("write response", "host", serverName, "error", err)
+				_ = resp.Body.Close()
+				return
+			}
+			_ = resp.Body.Close()
 		}
-		_ = resp.Body.Close()
 
 		// Check if connection should be kept alive
 		if req.Close || resp.Close {
