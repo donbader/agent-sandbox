@@ -6,6 +6,7 @@ package mitm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -87,7 +88,11 @@ func (r *OAuthRewriter) RewriteRequest(req *http.Request) bool {
 
 	token, err := r.getValidToken()
 	if err != nil {
-		slog.Error("oauth: failed to get token", "error", err, "host", host)
+		if errors.Is(err, os.ErrNotExist) {
+			slog.Debug("oauth: token file not found (not yet authorized)", "host", host, "file", r.tokenFile)
+		} else {
+			slog.Error("oauth: failed to get token", "error", err, "host", host)
+		}
 		return false
 	}
 
