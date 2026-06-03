@@ -40,8 +40,24 @@ agent-sandbox compose up --build
 ssh -i ssh_key -p 2222 agent@localhost
 ```
 
+### SSH Config (for Zed and other tools)
+
+Add to `~/.ssh/config`:
+
+```
+Host agent-sandbox
+  HostName localhost
+  Port 2222
+  User agent
+  IdentityFile /path/to/examples/local-coding-ssh/ssh_key
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+```
+
+Then connect with `ssh agent-sandbox` or use the host name in Zed's SSH remote connections.
+
 ## What's Included
 
-- **external-services** — gateway intercepts HTTPS requests to `agent-gateway.stx-ai.net` via MITM and injects your real API key.
+- **external-services** — gateway intercepts HTTP requests to `host.containers.internal:8000` and injects your real API key from `.env`.
 - **ssh** — starts an OpenSSH server on port 2222 inside the container, using your generated public key for authentication.
 - **custom-runtime** — overlays codex configuration (model catalog, provider settings) into the agent's home directory.
