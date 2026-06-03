@@ -131,22 +131,27 @@ describe("handleMessage", () => {
 });
 
 describe("initPlugins", () => {
-  it("calls init on all plugins with config", () => {
+  it("calls init on all plugins with config and logger", () => {
     const init1 = vi.fn();
     const init2 = vi.fn();
     registerPlugin({ name: "a", commands: {}, init: init1 });
     registerPlugin({ name: "b", commands: {}, init: init2 });
 
     const config = { key: "value" };
-    initPlugins(config);
+    const mockLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn() };
+    const createLogger = vi.fn(() => mockLogger);
+    initPlugins(config, createLogger);
 
-    expect(init1).toHaveBeenCalledWith(config);
-    expect(init2).toHaveBeenCalledWith(config);
+    expect(createLogger).toHaveBeenCalledWith("a");
+    expect(createLogger).toHaveBeenCalledWith("b");
+    expect(init1).toHaveBeenCalledWith(config, mockLogger);
+    expect(init2).toHaveBeenCalledWith(config, mockLogger);
   });
 
   it("skips plugins without init", () => {
     registerPlugin({ name: "no-init", commands: {} });
+    const createLogger = vi.fn(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn() }));
     // Should not throw
-    expect(() => initPlugins({})).not.toThrow();
+    expect(() => initPlugins({}, createLogger)).not.toThrow();
   });
 });

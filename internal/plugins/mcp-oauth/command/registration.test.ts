@@ -3,9 +3,17 @@ import { registerClient } from "./registration.js";
 
 describe("registerClient", () => {
   const mockFetch = vi.fn();
+  const mockLog = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn(() => mockLog),
+  };
 
   beforeEach(() => {
     mockFetch.mockClear();
+    mockLog.debug.mockClear();
     vi.stubGlobal("fetch", mockFetch);
   });
 
@@ -25,6 +33,7 @@ describe("registerClient", () => {
     const result = await registerClient(
       "https://auth.example.com/register",
       "http://localhost:3000/oauth/callback",
+      mockLog,
       "my-agent",
     );
 
@@ -55,6 +64,7 @@ describe("registerClient", () => {
     const result = await registerClient(
       "https://auth.example.com/register",
       "http://localhost:3000/callback",
+      mockLog,
     );
 
     expect(result.client_id).toBe("cid");
@@ -71,7 +81,7 @@ describe("registerClient", () => {
     });
 
     await expect(
-      registerClient("https://auth.example.com/register", "http://localhost:3000/callback"),
+      registerClient("https://auth.example.com/register", "http://localhost:3000/callback", mockLog),
     ).rejects.toThrow("Dynamic client registration failed (HTTP 400)");
   });
 
@@ -82,7 +92,7 @@ describe("registerClient", () => {
     });
 
     await expect(
-      registerClient("https://auth.example.com/register", "http://localhost:3000/callback"),
+      registerClient("https://auth.example.com/register", "http://localhost:3000/callback", mockLog),
     ).rejects.toThrow("Registration response missing client_id");
   });
 });

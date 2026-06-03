@@ -3,9 +3,7 @@
  * Fetches authorization server metadata from the MCP server's origin.
  */
 import type { AuthorizationServerMetadata } from "./types.js";
-import { createLogger } from "./logger.js";
-
-const log = createLogger("mcp-oauth:discovery");
+import type { PluginLogger } from "../../logger.js";
 
 const DISCOVERY_TIMEOUT_MS = 15_000;
 
@@ -13,7 +11,7 @@ const DISCOVERY_TIMEOUT_MS = 15_000;
  * Discover the OAuth authorization server metadata for an MCP server URL.
  * Fetches {origin}/.well-known/oauth-authorization-server and parses the response.
  */
-export async function discoverAuthServer(mcpUrl: string): Promise<AuthorizationServerMetadata> {
+export async function discoverAuthServer(mcpUrl: string, log: PluginLogger): Promise<AuthorizationServerMetadata> {
   const url = new URL(mcpUrl);
   const wellKnownUrl = `${url.origin}/.well-known/oauth-authorization-server`;
 

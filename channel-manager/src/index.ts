@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { AcpAgent } from "./acp-client.js";
 import { handleWrapperCommand } from "./wrapper-commands.js";
-import { createLogger } from "./logger.js";
+import { createLogger, createPluginLogger } from "./logger.js";
 import type { CommandPlugin } from "./command/types.js";
 
 const log = createLogger("channel-manager");
@@ -39,7 +39,8 @@ async function main(): Promise<void> {
   try {
     const { commandPlugins: plugins } = await import("./command/commands.gen.js");
     for (const plugin of plugins) {
-      plugin.init?.(config);
+      const pluginLogger = createPluginLogger(`plugin:${plugin.name}`);
+      plugin.init?.(config, pluginLogger);
       commandPlugins.push(plugin);
     }
     log.info({ plugins: commandPlugins.map((p) => p.name) }, "loaded command plugins");

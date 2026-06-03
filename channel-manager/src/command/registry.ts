@@ -2,6 +2,7 @@
  * Command plugin registry — routes commands and messages to registered plugins.
  */
 import type { CommandPlugin, CommandReply } from "./types.js";
+import type { PluginLogger } from "../logger.js";
 
 const plugins: CommandPlugin[] = [];
 
@@ -61,12 +62,12 @@ export async function handleMessage(
 }
 
 /**
- * Initialize all registered plugins with config.
+ * Initialize all registered plugins with config and a logger.
  */
-export function initPlugins(config: Record<string, unknown>): void {
+export function initPlugins(config: Record<string, unknown>, createLogger: (name: string) => PluginLogger): void {
   for (const plugin of plugins) {
     if (plugin.init) {
-      plugin.init(config);
+      plugin.init(config, createLogger(plugin.name));
     }
   }
 }

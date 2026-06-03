@@ -5,13 +5,11 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { CommandPlugin, CommandContext, CommandReply } from "../types.js";
+import type { PluginLogger } from "../../logger.js";
 import type { OAuthConfig, OAuthProviderConfig, PendingFlow, StoredToken } from "./types.js";
 import { generateCodeVerifier, generateCodeChallenge, generateState } from "./pkce.js";
 import { discoverAuthServer } from "./discovery.js";
 import { registerClient } from "./registration.js";
-import { createLogger } from "./logger.js";
-
-const log = createLogger("mcp-oauth");
 
 const FLOW_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const TOKEN_EXCHANGE_TIMEOUT_MS = 15_000;
@@ -23,6 +21,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
   commands: Record<string, (ctx: CommandContext) => Promise<void>>;
 
   private config: OAuthConfig = { providers: {} };
+  private log!: PluginLogger;
   private pendingFlows = new Map<string, PendingFlow>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -32,12 +31,13 @@ export class OAuthCommandPlugin implements CommandPlugin {
     };
   }
 
-  init(config: Record<string, unknown>): void {
+  init(config: Record<string, unknown>, logger: PluginLogger): void {
+    this.log = logger;
     const oauthConfig = config["oauth"] as OAuthConfig | undefined;
     if (oauthConfig) {
       this.config = oauthConfig;
     }
-    log.info({ providers: Object.keys(this.config.providers) }, "oauth plugin initialized");
+    this.log.info({ providers: Object.keys(this.config.providers) }, "oauth plugin initialized");
     this.cleanupTimer = setInterval(() => this.cleanupStaleFlows(), 60_000);
   }
 
@@ -66,7 +66,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
       return;
     }
 
-    log.debug({ provider: providerName, chatId: ctx.chatId }, "starting OAuth flow");
+    this.log.debug({ provider: providerName, chatId: ctx.chatId }, "starting OAuth flow");
     await this.startFlow(providerName, providerConfig, ctx.chatId, ctx.reply);
   }
 
@@ -91,8 +91,11 @@ export class OAuthCommandPlugin implements CommandPlugin {
     chatId: string,
     reply: CommandReply,
   ): Promise<void> {
+    const discoveryLog = this.log.child("discovery");
+    const registrationLog = this.log.child("registration");
+
     try {
-      const metadata = await discoverAuthServer(config.mcp_url);
+      const metadata = await discoverAuthServer(config.mcp_url, discoveryLog);
 
       let clientId = config.client_id ?? "";
       let clientSecret = config.client_secret;
@@ -104,7 +107,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
           return;
         }
         reply(`Registering client with ${name}...`);
-        const reg = await registerClient(metadata.registration_endpoint, DEFAULT_REDIRECT_URI, `agent-sandbox-${name}`);
+        const reg = await registerClient(metadata.registration_endpoint, DEFAULT_REDIRECT_URI, registrationLog, `agent-sandbox-${name}`);
         clientId = reg.client_id;
         clientSecret = reg.client_secret;
       }
@@ -140,12 +143,12 @@ export class OAuthCommandPlugin implements CommandPlugin {
       }
 
       const authUrl = `${metadata.authorization_endpoint}?${params.toString()}`;
-      log.debug({ provider: name, authUrl }, "OAuth authorization URL generated");
+      this.log.debug({ provider: name, authUrl }, "OAuth authorization URL generated");
       reply(`Authorize with ${name}:\n${authUrl}\n\nAfter authorizing, paste the callback URL here.`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       const isTimeout = err instanceof Error && err.name === "TimeoutError";
-      log.error({ provider: name, error: message, isTimeout }, "OAuth flow failed during setup");
+      this.log.error({ provider: name, error: message, isTimeout }, "OAuth flow failed during setup");
       if (isTimeout) {
         reply(`OAuth setup timed out for ${name}. The server at ${config.mcp_url} did not respond in time.\nThis may mean the server doesn't support dynamic client registration. Try configuring a client_id manually.`);
       } else {
@@ -175,17 +178,17 @@ export class OAuthCommandPlugin implements CommandPlugin {
     if (flow.chatId !== chatId) return false;
 
     this.pendingFlows.delete(state);
-    log.debug({ provider: flow.provider }, "received OAuth callback, exchanging code for token");
+    this.log.debug({ provider: flow.provider }, "received OAuth callback, exchanging code for token");
 
     try {
       const token = await this.exchangeCode(code, flow);
       this.writeToken(flow.provider, token);
-      log.info({ provider: flow.provider }, "OAuth token saved successfully");
+      this.log.info({ provider: flow.provider }, "OAuth token saved");
       reply(`OAuth complete for ${flow.provider}. Token saved.`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       const isTimeout = err instanceof Error && err.name === "TimeoutError";
-      log.error({ provider: flow.provider, error: message, isTimeout }, "token exchange failed");
+      this.log.error({ provider: flow.provider, error: message, isTimeout }, "token exchange failed");
       if (isTimeout) {
         reply(`Token exchange timed out for ${flow.provider}. The token endpoint did not respond in time.`);
       } else {
@@ -209,7 +212,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
       body.set("client_secret", flow.clientSecret);
     }
 
-    log.debug({ provider: flow.provider, tokenEndpoint: flow.tokenEndpoint }, "exchanging authorization code for token");
+    this.log.debug({ provider: flow.provider, tokenEndpoint: flow.tokenEndpoint }, "exchanging authorization code for token");
 
     const response = await fetch(flow.tokenEndpoint, {
       method: "POST",
@@ -245,7 +248,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
     const dir = dirname(tokenFile);
     mkdirSync(dir, { recursive: true });
     writeFileSync(tokenFile, JSON.stringify(token, null, 2), { mode: 0o600 });
-    log.debug({ provider, tokenFile }, "token written to disk");
+    this.log.debug({ provider, tokenFile }, "token written to disk");
   }
 
   private getTokenFile(name: string, config?: OAuthProviderConfig): string {
@@ -258,7 +261,7 @@ export class OAuthCommandPlugin implements CommandPlugin {
     const now = Date.now();
     for (const [state, flow] of this.pendingFlows) {
       if (now - flow.startedAt > FLOW_TIMEOUT_MS) {
-        log.warn({ provider: flow.provider, state }, "cleaning up stale OAuth flow");
+        this.log.warn({ provider: flow.provider, state }, "cleaning up stale OAuth flow");
         this.pendingFlows.delete(state);
       }
     }
