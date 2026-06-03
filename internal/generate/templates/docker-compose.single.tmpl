@@ -1,0 +1,30 @@
+services:
+  {{ .AgentName }}:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+{{- if .Ports }}
+    ports:
+{{- range .Ports }}
+      - {{ quote . }}
+{{- end }}
+{{- end }}
+{{- if .Volumes }}
+    volumes:
+{{- range .Volumes }}
+      - {{ . }}
+{{- end }}
+{{- end }}
+    environment:
+      - LOG_LEVEL={{ .LogLevel }}
+{{- range .EnvVars }}
+      - {{ . }}=${{"{"}}{{ . }}{{"}"}}
+{{- end }}
+{{- if .NamedVolumes }}
+
+volumes:
+{{- range .NamedVolumes }}
+  {{ . }}:
+{{- end }}
+{{- end }}
