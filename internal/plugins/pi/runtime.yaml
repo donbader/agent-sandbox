@@ -1,5 +1,5 @@
 name: pi
-base_image: node:22-slim
+base_image: node:24-slim
 install:
   - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*
   - --mount=type=cache,target=/root/.npm npm install -g @earendil-works/pi-coding-agent@latest pi-acp@latest

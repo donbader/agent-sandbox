@@ -12,7 +12,7 @@ func TestResolveRuntime(t *testing.T) {
 		rc, err := ResolveRuntime("/nonexistent", "codex")
 		require.NoError(t, err)
 		assert.Equal(t, "codex", rc.Name)
-		assert.Equal(t, "node:22-slim", rc.BaseImage)
+		assert.Equal(t, "node:24-slim", rc.BaseImage)
 		assert.Contains(t, rc.Install[len(rc.Install)-1], "codex")
 		assert.Equal(t, []string{"sleep", "infinity"}, rc.Cmd)
 		assert.Equal(t, []string{"codex-acp"}, rc.AcpCmd)

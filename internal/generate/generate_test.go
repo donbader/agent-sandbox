@@ -121,7 +121,8 @@ func TestGenerator_Run(t *testing.T) {
 		ep, err := os.ReadFile(filepath.Join(outDir, "entrypoint.sh"))
 		require.NoError(t, err)
 		assert.Contains(t, string(ep), "/opt/hooks/setup.sh")
-		assert.Contains(t, string(ep), "exec su -c 'sleep infinity' agent")
+		assert.Contains(t, string(ep), "exec su -c '")
+		assert.Contains(t, string(ep), "exec sleep infinity' agent")
 
 		// Hook should be copied
 		hook, err := os.ReadFile(filepath.Join(outDir, "hooks", "setup.sh"))
@@ -364,7 +365,8 @@ func TestGenerator_Run(t *testing.T) {
 		assert.Contains(t, epStr, "/etc/resolv.conf")
 		assert.NotContains(t, epStr, "--to-port 8443")
 		assert.NotContains(t, epStr, "/usr/local/bin/gateway")
-		assert.Contains(t, epStr, "exec su -c 'sleep infinity' agent")
+		assert.Contains(t, epStr, "exec su -c '")
+		assert.Contains(t, epStr, "exec sleep infinity' agent")
 
 		// docker-compose.yml should have two services with internal network
 		dc, err := os.ReadFile(filepath.Join(outDir, "docker-compose.yml"))
@@ -469,7 +471,8 @@ func TestGenerator_Run(t *testing.T) {
 		require.NoError(t, err)
 		epStr := string(ep)
 		assert.Contains(t, epStr, "nameserver $GATEWAY_IP")
-		assert.Contains(t, epStr, "exec su -c 'node /opt/channel-manager/dist/index.js' agent")
+		assert.Contains(t, epStr, "exec su -c '")
+		assert.Contains(t, epStr, "exec node /opt/channel-manager/dist/index.js' agent")
 		assert.Contains(t, epStr, "waiting for sandbox CA certificate")
 		assert.Contains(t, epStr, "update-ca-certificates")
 
