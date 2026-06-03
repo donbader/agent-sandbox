@@ -4,8 +4,6 @@ package generate
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/resolve"
@@ -178,64 +176,6 @@ func (g *Generator) Run() error {
 	}
 
 	return nil
-}
-
-
-// writeGatewayConfig generates .build/gateway-config.yaml.
-func (g *Generator) writeGatewayConfig() error {
-	var b strings.Builder
-	b.WriteString("# Gateway configuration (auto-generated)\n")
-	_, _ = fmt.Fprintf(&b, "listen: \":%d\"\n", g.GatewaySpec.ListenPort)
-	_, _ = fmt.Fprintf(&b, "dns_listen: \":%d\"\n", g.GatewaySpec.DNSPort)
-
-	// MITM configuration
-	mitmDomains := g.collectMITMDomains()
-	if len(mitmDomains) > 0 {
-		b.WriteString("mitm_domains:\n")
-		for _, d := range mitmDomains {
-			_, _ = fmt.Fprintf(&b, "  - %s\n", d)
-		}
-	}
-
-	// Rewriter configuration
-	rewriters := g.collectRewriters()
-	if len(rewriters) > 0 {
-		b.WriteString("rewriters:\n")
-		for _, rw := range rewriters {
-			_, _ = fmt.Fprintf(&b, "  - type: %s\n", rw.Type)
-			if len(rw.Domains) > 0 {
-				b.WriteString("    domains:\n")
-				for _, d := range rw.Domains {
-					_, _ = fmt.Fprintf(&b, "      - %s\n", d)
-				}
-			}
-			if rw.EnvVar != "" {
-				_, _ = fmt.Fprintf(&b, "    env_var: %s\n", rw.EnvVar)
-			}
-			if rw.Header != "" {
-				_, _ = fmt.Fprintf(&b, "    header: \"%s\"\n", rw.Header)
-			}
-			if rw.ValueFormat != "" {
-				_, _ = fmt.Fprintf(&b, "    value_format: \"%s\"\n", rw.ValueFormat)
-			}
-			if rw.TokenFile != "" {
-				_, _ = fmt.Fprintf(&b, "    token_file: \"%s\"\n", rw.TokenFile)
-			}
-		}
-	}
-
-	// Port forwards: expose runtime ports through gateway to agent
-	if len(g.Runtime.Ports) > 0 {
-		b.WriteString("port_forwards:\n")
-		for _, p := range g.Runtime.Ports {
-			hostPort, containerPort := parsePortMapping(p)
-			_, _ = fmt.Fprintf(&b, "  - listen: \":%s\"\n", hostPort)
-			_, _ = fmt.Fprintf(&b, "    target: \"%s:%s\"\n", g.Config.Name, containerPort)
-		}
-	}
-
-	path := filepath.Join(g.OutDir, "gateway-config.yaml")
-	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
 
