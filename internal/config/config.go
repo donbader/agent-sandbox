@@ -58,6 +58,7 @@ type AgentConfig struct {
 	ContainerRuntime string         `yaml:"container_runtime" schema:"Container runtime override" enum:"docker,podman"`
 	LogLevel         string         `yaml:"log_level" schema:"Log verbosity level" default:"info" enum:"info,debug"`
 	Gateway          *bool          `yaml:"gateway" schema:"Enable transparent gateway proxy" default:"true"`
+	Workdir          string         `yaml:"workdir" schema:"Working directory inside the container" examples:"/workspace"`
 	Features         []FeatureEntry `yaml:"features" schema:"Feature plugins and their configuration"`
 }
 

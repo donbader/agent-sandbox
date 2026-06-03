@@ -21,6 +21,7 @@ type HTTPProxy struct {
 	listenAddr string
 	domains    []string
 	rewriters  []mitm.Rewriter
+	transport  *http.Transport
 }
 
 // NewHTTPProxy creates a new HTTP proxy that intercepts requests for the given
@@ -30,6 +31,13 @@ func NewHTTPProxy(listenAddr string, domains []string, rewriters []mitm.Rewriter
 		listenAddr: listenAddr,
 		domains:    domains,
 		rewriters:  rewriters,
+		transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			DisableCompression:  true,
+			MaxIdleConnsPerHost: 10,
+		},
 	}
 }
 
@@ -47,12 +55,8 @@ func (h *HTTPProxy) ListenAndServe() error {
 // ServeHTTP handles each proxied HTTP request.
 func (h *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	host := req.Host
-	bareHost := host
-	if hostname, _, err := net.SplitHostPort(host); err == nil {
-		bareHost = hostname
-	}
 
-	if !h.matchesDomain(bareHost) {
+	if !h.matchesDomain(host) {
 		slog.Debug("http proxy: domain not matched, passing through", "host", host)
 	}
 
@@ -79,13 +83,7 @@ func (h *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			outReq.URL.Host = target
 			outReq.Host = req.Host
 		},
-		Transport: &http.Transport{
-			DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			DisableCompression:  true,
-			MaxIdleConnsPerHost: 10,
-		},
+		Transport: h.transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			slog.Error("http proxy upstream error", "host", host, "error", err)
 			http.Error(w, fmt.Sprintf("gateway: upstream error: %v", err), http.StatusBadGateway)
@@ -95,16 +93,24 @@ func (h *HTTPProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	proxy.ServeHTTP(w, req)
 }
 
-// matchesDomain checks if the host is in the configured HTTP domain list.
-func (h *HTTPProxy) matchesDomain(host string) bool {
+// matchesDomain checks if the request host is in the configured HTTP domain list.
+// Both sides are normalized to host:port (defaulting to port 80) for comparison.
+func (h *HTTPProxy) matchesDomain(requestHost string) bool {
+	normalized := normalizeHostPort(requestHost)
 	for _, d := range h.domains {
-		dHost := d
-		if hostname, _, err := net.SplitHostPort(d); err == nil {
-			dHost = hostname
-		}
-		if dHost == host {
+		if normalizeHostPort(d) == normalized {
 			return true
 		}
 	}
 	return false
+}
+
+// normalizeHostPort ensures s is in host:port form, defaulting to port 80.
+func normalizeHostPort(s string) string {
+	host, port, err := net.SplitHostPort(s)
+	if err != nil {
+		// No port — default to 80
+		return net.JoinHostPort(s, "80")
+	}
+	return net.JoinHostPort(host, port)
 }

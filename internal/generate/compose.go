@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/donbader/agent-sandbox/internal/runtime"
 )
 
 // ComposeBuilder holds data for rendering docker-compose templates.
@@ -23,14 +21,11 @@ type ComposeBuilder struct {
 	HasMITM          bool
 	GatewayCertDir   string
 	ExternalNetworks []string
-	Podman           bool
 	Capabilities     []string // additional capabilities from features
 }
 
 // buildComposeBuilder constructs a ComposeBuilder from the Generator state.
 func (g *Generator) buildComposeBuilder() *ComposeBuilder {
-	rt := runtime.DetectOrDefault()
-
 	// Merge runtime ports with feature-contributed ports
 	runtimePorts := append([]string{}, g.Runtime.Ports...)
 	featurePorts := g.collectFeaturePorts()
@@ -41,7 +36,6 @@ func (g *Generator) buildComposeBuilder() *ComposeBuilder {
 		Ports:        append(runtimePorts, featurePorts...),
 		AgentPorts:   featurePorts,
 		EnvVars:      g.mergedEnvVars(),
-		Podman:       rt.Runtime == runtime.Podman,
 		Capabilities: g.collectCapabilities(),
 	}
 

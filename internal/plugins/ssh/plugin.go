@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
@@ -39,6 +40,9 @@ func init() {
 		if port == 0 {
 			port = defaultPort
 		}
+		if port < 1 || port > 65535 {
+			return nil, fmt.Errorf("ssh: port must be between 1 and 65535, got %d", port)
+		}
 
 		// Default host_key path if not specified
 		if cfg.HostKey == "" {
@@ -49,6 +53,17 @@ func init() {
 		keyPath := cfg.AuthorizedKeys
 		if !filepath.IsAbs(keyPath) {
 			keyPath = filepath.Join(projectDir, keyPath)
+		}
+		absKeyPath, err := filepath.Abs(keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("ssh: resolving path %q: %w", cfg.AuthorizedKeys, err)
+		}
+		absProject, err := filepath.Abs(projectDir)
+		if err != nil {
+			return nil, fmt.Errorf("ssh: resolving project dir: %w", err)
+		}
+		if !strings.HasPrefix(absKeyPath, absProject+string(filepath.Separator)) && absKeyPath != absProject {
+			return nil, fmt.Errorf("ssh: path %q escapes project directory", cfg.AuthorizedKeys)
 		}
 		if _, err := os.Stat(keyPath); err != nil {
 			return nil, fmt.Errorf("ssh: reading authorized_keys file %q: %w", cfg.AuthorizedKeys, err)
@@ -66,9 +81,20 @@ func init() {
 		if !filepath.IsAbs(hostKeyPath) {
 			hostKeyPath = filepath.Join(projectDir, hostKeyPath)
 		}
-		if _, err := os.Stat(hostKeyPath); os.IsNotExist(err) {
-			if err := generateHostKey(hostKeyPath); err != nil {
-				return nil, fmt.Errorf("ssh: generating host key at %q: %w", cfg.HostKey, err)
+		absHostKeyPath, err := filepath.Abs(hostKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("ssh: resolving path %q: %w", cfg.HostKey, err)
+		}
+		if !strings.HasPrefix(absHostKeyPath, absProject+string(filepath.Separator)) && absHostKeyPath != absProject {
+			return nil, fmt.Errorf("ssh: path %q escapes project directory", cfg.HostKey)
+		}
+		if _, err := os.Stat(hostKeyPath); err != nil {
+			if os.IsNotExist(err) {
+				if err := generateHostKey(hostKeyPath); err != nil {
+					return nil, fmt.Errorf("ssh: generating host key at %q: %w", cfg.HostKey, err)
+				}
+			} else {
+				return nil, fmt.Errorf("ssh: checking host key at %q: %w", cfg.HostKey, err)
 			}
 		}
 

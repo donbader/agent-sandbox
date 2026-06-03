@@ -2,7 +2,6 @@ package generate
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -81,27 +80,6 @@ func (g *Generator) splitDomainsByScheme() (mitmDomains, httpDomains []string) {
 		}
 	}
 	return mitmDomains, httpDomains
-}
-
-// collectHTTPPortsFromDomains extracts port numbers from HTTP domain entries.
-// For entries like "host.containers.internal:8000", returns ["8000"].
-// Entries without an explicit port default to "80".
-func (g *Generator) collectHTTPPortsFromDomains() []string {
-	_, httpDomains := g.splitDomainsByScheme()
-	seen := map[string]bool{}
-	var ports []string
-	for _, d := range httpDomains {
-		_, port, err := net.SplitHostPort(d)
-		if err != nil {
-			// No port — default to 80
-			port = "80"
-		}
-		if !seen[port] {
-			seen[port] = true
-			ports = append(ports, port)
-		}
-	}
-	return ports
 }
 
 // writeGatewayConfig generates .build/gateway-config.yaml using a template.
