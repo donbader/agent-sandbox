@@ -103,6 +103,8 @@ export class AcpAgent {
   private pendingReject: ((err: Error) => void) | null = null;
   private agentCommands: AgentCommand[] = [];
   private commandsListeners: Array<(commands: AgentCommand[]) => void> = [];
+  private _perfHistory: number[] = [];
+  private static readonly PERF_MAX = 50;
 
   constructor(config: AcpAgentConfig) {
     this.config = config;
@@ -113,6 +115,11 @@ export class AcpAgent {
         listener(cmds);
       }
     });
+  }
+
+  /** Recent prompt durations in ms (max 50, for /diagnose perf stats). */
+  get perfHistory(): number[] {
+    return this._perfHistory;
   }
 
   /** Get the current list of agent-declared commands. */
@@ -227,6 +234,7 @@ export class AcpAgent {
     }
 
     const chunks: string[] = [];
+    const startTime = Date.now();
 
     this.acpHandler.setChunkCallback((chunk) => chunks.push(chunk));
     if (options?.onSessionUpdate) {
@@ -247,6 +255,7 @@ export class AcpAgent {
           });
       });
 
+      this.recordPromptDuration(Date.now() - startTime);
       return chunks.join("");
     } finally {
       this.pendingReject = null;
@@ -304,5 +313,12 @@ export class AcpAgent {
       this.proc = null;
     }
     this.connection = null;
+  }
+
+  private recordPromptDuration(ms: number): void {
+    this._perfHistory.push(ms);
+    if (this._perfHistory.length > AcpAgent.PERF_MAX) {
+      this._perfHistory.shift();
+    }
   }
 }
