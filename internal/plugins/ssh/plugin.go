@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/resolve"
 )
@@ -46,17 +45,14 @@ func init() {
 			cfg.HostKey = defaultHostKeyPath
 		}
 
-		// Resolve the authorized_keys file relative to projectDir.
+		// Validate the authorized_keys file exists at generate time.
 		keyPath := cfg.AuthorizedKeys
 		if !filepath.IsAbs(keyPath) {
 			keyPath = filepath.Join(projectDir, keyPath)
 		}
-
-		pubkeyBytes, err := os.ReadFile(keyPath)
-		if err != nil {
+		if _, err := os.Stat(keyPath); err != nil {
 			return nil, fmt.Errorf("ssh: reading authorized_keys file %q: %w", cfg.AuthorizedKeys, err)
 		}
-		pubkey := strings.TrimSpace(string(pubkeyBytes))
 
 		portStr := strconv.Itoa(port)
 
@@ -65,7 +61,7 @@ func init() {
 			return nil, fmt.Errorf("ssh: creating scripts directory: %w", err)
 		}
 
-		// Resolve and auto-generate host key
+		// Resolve and auto-generate host key if absent.
 		hostKeyPath := cfg.HostKey
 		if !filepath.IsAbs(hostKeyPath) {
 			hostKeyPath = filepath.Join(projectDir, hostKeyPath)
@@ -75,28 +71,19 @@ func init() {
 				return nil, fmt.Errorf("ssh: generating host key at %q: %w", cfg.HostKey, err)
 			}
 		}
-		hostKeyBytes, err := os.ReadFile(hostKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("ssh: reading host_key file %q: %w", cfg.HostKey, err)
-		}
-		hostKey := strings.TrimSpace(string(hostKeyBytes))
 
-		hostKeySetup := fmt.Sprintf(`cat > /etc/ssh/ssh_host_ed25519_key << 'HOSTKEY'
-%s
-HOSTKEY
-chmod 600 /etc/ssh/ssh_host_ed25519_key
-ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub`, hostKey)
-
+		// The root hook script copies mounted key files into place.
+		// Keys are bind-mounted at /run/ssh/ from the host.
 		rootHook := fmt.Sprintf(`#!/bin/bash
 set -e
-%s
+cp /run/ssh/host_key /etc/ssh/ssh_host_ed25519_key
+chmod 600 /etc/ssh/ssh_host_ed25519_key
+ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub
 mkdir -p /home/agent/.ssh
-cat > /home/agent/.ssh/authorized_keys << 'PUBKEY'
-%s
-PUBKEY
+cp /run/ssh/authorized_keys /home/agent/.ssh/authorized_keys
 chown -R agent:agent /home/agent/.ssh
 /usr/sbin/sshd -p %s
-`, hostKeySetup, pubkey, portStr)
+`, portStr)
 
 		rootHookPath := filepath.Join(scriptsDir, "ssh-root-setup.sh")
 		if err := os.WriteFile(rootHookPath, []byte(rootHook), 0o755); err != nil {
@@ -115,6 +102,11 @@ chmod 600 /home/agent/.ssh/authorized_keys
 
 		portMapping := fmt.Sprintf("%s:%s", portStr, portStr)
 
+		// Volume mounts: compose file lives in .build/, keys are in project root.
+		// Use relative path from .build/ back to project root.
+		hostKeyVolume := fmt.Sprintf("../%s:/run/ssh/host_key:ro", cfg.HostKey)
+		authKeysVolume := fmt.Sprintf("../%s:/run/ssh/authorized_keys:ro", cfg.AuthorizedKeys)
+
 		return &resolve.FeatureContributions{
 			Name: "ssh",
 			Commands: []string{
@@ -125,6 +117,7 @@ chmod 600 /home/agent/.ssh/authorized_keys
 			},
 			RootHooks:       []string{"scripts/ssh-root-setup.sh"},
 			EntrypointHooks: []string{"scripts/ssh-perms.sh"},
+			Volumes:         []string{hostKeyVolume, authKeysVolume},
 			Capabilities:    []string{"SYS_CHROOT"},
 			Ports:           []string{portMapping},
 		}, nil

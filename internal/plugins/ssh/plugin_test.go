@@ -33,6 +33,10 @@ func TestSSHPlugin_DefaultPort(t *testing.T) {
 	assert.Contains(t, contrib.Commands[0], "openssh-server")
 	assert.Contains(t, contrib.Commands[2], "Port 2222")
 	assert.Contains(t, contrib.Commands[3], "PasswordAuthentication no")
+
+	// Volume mounts for key files (bind mounts from project root via .build/)
+	assert.Contains(t, contrib.Volumes, "../.ssh_host_key:/run/ssh/host_key:ro")
+	assert.Contains(t, contrib.Volumes, "../id_ed25519.pub:/run/ssh/authorized_keys:ro")
 }
 
 func TestSSHPlugin_CustomPort(t *testing.T) {
@@ -71,10 +75,20 @@ func TestSSHPlugin_WritesRootHookScript(t *testing.T) {
 	content, err := os.ReadFile(rootHookPath)
 	require.NoError(t, err)
 
-	assert.Contains(t, string(content), "ssh_host_ed25519_key")
-	assert.Contains(t, string(content), "/usr/sbin/sshd -p 2222")
-	assert.Contains(t, string(content), pubkey)
-	assert.Contains(t, string(content), "chown -R agent:agent /home/agent/.ssh")
+	script := string(content)
+
+	// Script references the mounted paths, not embedded key material
+	assert.Contains(t, script, "cp /run/ssh/host_key /etc/ssh/ssh_host_ed25519_key")
+	assert.Contains(t, script, "cp /run/ssh/authorized_keys /home/agent/.ssh/authorized_keys")
+	assert.Contains(t, script, "/usr/sbin/sshd -p 2222")
+	assert.Contains(t, script, "chown -R agent:agent /home/agent/.ssh")
+	assert.Contains(t, script, "chmod 600 /etc/ssh/ssh_host_ed25519_key")
+	assert.Contains(t, script, "ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key")
+
+	// Must NOT contain any actual key material
+	assert.NotContains(t, script, pubkey)
+	assert.NotContains(t, script, "HOSTKEY")
+	assert.NotContains(t, script, "PUBKEY")
 }
 
 func TestSSHPlugin_WritesPermsHookScript(t *testing.T) {
@@ -116,4 +130,24 @@ func TestSSHPlugin_ErrorsWhenKeyFileNotFound(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading authorized_keys file")
+}
+
+func TestSSHPlugin_VolumeMountsUseRelativePaths(t *testing.T) {
+	projectDir := t.TempDir()
+	pubkeyFile := filepath.Join(projectDir, "ssh_key.pub")
+	require.NoError(t, os.WriteFile(pubkeyFile, []byte("ssh-ed25519 AAAAC3Nz testuser@host\n"), 0o644))
+
+	plugin := resolve.RegisteredPlugins()["ssh"]
+	require.NotNil(t, plugin, "ssh plugin not registered")
+
+	contrib, err := plugin.Resolve(projectDir, map[string]any{
+		"authorized_keys": "ssh_key.pub",
+		"host_key":        "my_host_key",
+	})
+	require.NoError(t, err)
+
+	// Volumes should use relative paths from .build/ to project root
+	require.Len(t, contrib.Volumes, 2)
+	assert.Equal(t, "../my_host_key:/run/ssh/host_key:ro", contrib.Volumes[0])
+	assert.Equal(t, "../ssh_key.pub:/run/ssh/authorized_keys:ro", contrib.Volumes[1])
 }
