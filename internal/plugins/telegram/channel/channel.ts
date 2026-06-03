@@ -1,97 +1,23 @@
 import { Bot } from "grammy";
-import type { ReactionTypeEmoji } from "@grammyjs/types";
 import type { Channel } from "./types.js";
-import type { AcpAgent, AgentCommand } from "../acp-client.js";
+import type { AcpAgent } from "../acp-client.js";
+import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { createLogger } from "../logger.js";
 import { StartupBuffer } from "../startup-buffer.js";
 import { RateLimiter } from "./delivery/rate-limiter.js";
 import { withRetry } from "./delivery/api-retry.js";
-import { formatMarkdown, splitMessage } from "./formatter/telegram.js";
 import { StreamController } from "./stream-controller.js";
+import { SessionManager } from "./session-manager.js";
+import { isAllowed } from "./acl.js";
+import { parseConfig, type TelegramChannelConfig } from "./config.js";
 
 const log = createLogger("telegram");
 const DUMMY_TOKEN = "REDACTED_TELEGRAM_TOKEN";
 
-type ReactionEmoji = ReactionTypeEmoji["emoji"];
-
-const VALID_REACTION_EMOJIS: Set<string> = new Set([
-  "👍",
-  "👎",
-  "❤",
-  "🔥",
-  "🥰",
-  "👏",
-  "😁",
-  "🤔",
-  "🤯",
-  "😱",
-  "🤬",
-  "😢",
-  "🎉",
-  "🤩",
-  "🤮",
-  "💩",
-  "🙏",
-  "👌",
-  "🕊",
-  "🤡",
-  "🥱",
-  "🥴",
-  "😍",
-  "🐳",
-  "❤\u200D🔥",
-  "🌚",
-  "🌭",
-  "💯",
-  "🤣",
-  "⚡",
-  "🍌",
-  "🏆",
-  "💔",
-  "🤨",
-  "😐",
-  "🍓",
-  "🍾",
-  "💋",
-  "🖕",
-  "😈",
-  "😴",
-  "😭",
-  "🤓",
-  "👻",
-  "👨\u200D💻",
-  "👀",
-  "🎃",
-  "🙈",
-  "😇",
-  "😨",
-  "🤝",
-  "✍",
-  "🤗",
-  "🫡",
-  "🎅",
-  "🎄",
-  "☃",
-  "💅",
-  "🤪",
-  "🗿",
-  "🆒",
-  "💘",
-  "🙉",
-  "🦄",
-  "😘",
-  "💊",
-  "🙊",
-  "😎",
-  "👾",
-  "🤷\u200D♂",
-  "🤷",
-  "🤷\u200D♀",
-  "😡",
-]);
-
-function isValidReactionEmoji(emoji: string): emoji is ReactionEmoji {
-  return VALID_REACTION_EMOJIS.has(emoji);
+interface BufferedMessage {
+  chatId: number;
+  text: string;
+  messageId: number;
 }
 
 /** Sanitize a command name for Telegram (lowercase a-z, 0-9, underscore only). */
@@ -102,89 +28,110 @@ function sanitizeCommandName(name: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-interface AccessControl {
-  allowed_users?: string[];
-  require_mention?: boolean;
-  groups?: Record<
-    string,
-    { allowed_users?: string[]; require_mention?: boolean }
-  >;
-}
-
-interface BufferedMessage {
-  chatId: string;
-  text: string;
-  messageId: number;
+/** Normalize a /command@botname into /command args */
+function normalizeCommand(text: string): string {
+  const spaceIdx = text.indexOf(" ");
+  const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+  const cleanCmd = cmd.split("@")[0];
+  const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+  return args ? `/${cleanCmd} ${args}` : `/${cleanCmd}`;
 }
 
 /**
- * Telegram channel that talks ACP directly.
- * Handles: platform UX, session mapping, message forwarding.
+ * Telegram channel — connects to Telegram via grammY and routes messages
+ * through ACP to the agent.
  */
-export default function createTelegramChannel(
-  config: Record<string, unknown>,
-  agent: AcpAgent,
-): Channel {
-  const acl = (config?.access_control as AccessControl) ?? {};
-  const ackRaw = config?.ack_emoji;
-  let ackEmoji: ReactionEmoji | null;
-  if (ackRaw === undefined) {
-    ackEmoji = "👀";
-  } else if (typeof ackRaw === "string" && isValidReactionEmoji(ackRaw)) {
-    ackEmoji = ackRaw;
-  } else if (!ackRaw) {
-    ackEmoji = null;
-  } else {
-    log.warn({ ack_emoji: ackRaw }, "invalid ack_emoji, falling back to 👀");
-    ackEmoji = "👀";
+export class TelegramChannel implements Channel {
+  private bot: Bot;
+  private agent: AcpAgent;
+  private config: TelegramChannelConfig;
+  private sessions: SessionManager;
+  private rateLimiter = new RateLimiter(100);
+  private startupBuffer = new StartupBuffer<BufferedMessage>();
+  private botUsername: string | null = null;
+
+  constructor(rawConfig: Record<string, unknown>, agent: AcpAgent) {
+    this.config = parseConfig(rawConfig);
+    this.agent = agent;
+    this.bot = new Bot(DUMMY_TOKEN);
+    this.sessions = new SessionManager(agent);
+
+    this.setupBot();
+    this.setupCommandSync();
   }
 
-  const bot = new Bot(DUMMY_TOKEN);
-  const rateLimiter = new RateLimiter(100);
-  let botUsername: string | null = null;
-
-  // Session mapping: chatId → ACP sessionId
-  const sessions = new Map<string, string>();
-
-  // Startup buffer: queue messages until agent is ready
-  const startupBuffer = new StartupBuffer<BufferedMessage>();
-
-  // --- Session management ---
-
-  async function getOrCreateSession(chatId: string): Promise<string> {
-    const existing = sessions.get(chatId);
-    if (existing) return existing;
-
-    const conn = agent.getConnection();
-    if (!conn) throw new Error("Agent not connected");
-
-    const result = await conn.newSession({ cwd: "/workspace", mcpServers: [] });
-    const sessionId = result.sessionId;
-    sessions.set(chatId, sessionId);
-    log.info({ chatId, sessionId: sessionId.slice(0, 8) }, "created session");
-    return sessionId;
+  async start(): Promise<void> {
+    log.info("starting bot (long polling)");
+    this.bot.start({
+      onStart: (info) => {
+        this.botUsername = info.username;
+        log.info({ username: info.username }, "bot connected");
+        this.flushBuffer();
+        this.registerBotCommands();
+      },
+    });
   }
 
-  // --- Commands ---
-  // None — all commands handled by ACP wrapper on agent side.
-  // Channel is a pure platform adapter.
+  stop(): void {
+    this.bot.stop();
+  }
+
+  // --- Bot setup ---
+
+  private setupBot(): void {
+    this.bot.catch((err) => {
+      log.error({ error: err.message ?? err }, "bot error");
+    });
+
+    this.bot.on("message:text", async (ctx) => {
+      const chatId = ctx.chat.id;
+      const username = ctx.from?.username ? `@${ctx.from.username}` : null;
+      const text = ctx.message.text;
+      const messageId = ctx.message.message_id;
+      const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+
+      // ACL check
+      if (!isAllowed(
+        { chatId, username, isGroup, text, botUsername: this.botUsername },
+        this.config.accessControl,
+      )) {
+        return;
+      }
+
+      // Strip @botname from message text
+      const normalized = text.startsWith("/")
+        ? text
+        : this.botUsername
+          ? text.replace(new RegExp(`@${this.botUsername}\\b`, "g"), "").trim()
+          : text;
+
+      if (this.startupBuffer.push({ chatId, text: normalized, messageId })) {
+        return;
+      }
+
+      this.processMessage(chatId, normalized, messageId);
+    });
+  }
+
+  private setupCommandSync(): void {
+    this.agent.onCommandsUpdate(() => {
+      log.info("agent commands updated, re-registering bot menu");
+      this.registerBotCommands();
+    });
+  }
 
   // --- Message handling ---
 
-  async function processMessage(
-    chatId: string,
-    text: string,
-    messageId: number,
-  ): Promise<void> {
+  private async processMessage(chatId: number, text: string, messageId: number): Promise<void> {
     // Ack
-    if (ackEmoji) {
-      ackMessage(chatId, messageId);
+    if (this.config.ackEmoji) {
+      this.ackMessage(chatId, messageId);
     }
 
     // Typing indicator
-    sendTyping(chatId);
+    this.sendTyping(chatId);
 
-    const sessionId = await getOrCreateSession(chatId);
+    const sessionId = await this.sessions.getOrCreate(chatId);
 
     // Normalize commands
     const cleanText = text.startsWith("/") ? normalizeCommand(text) : text;
@@ -192,34 +139,35 @@ export default function createTelegramChannel(
     // Create StreamController for this response
     const stream = new StreamController(
       {
-        chatId: Number(chatId),
+        chatId,
         sendMessage: async (html, opts) => {
-          await rateLimiter.acquire(chatId);
+          await this.rateLimiter.acquire(chatId.toString());
           const msg = await withRetry(async () =>
-            bot.api.sendMessage(Number(chatId), html, {
-              parse_mode: (opts?.parse_mode as any) ?? "HTML",
+            this.bot.api.sendMessage(chatId, html, {
+              parse_mode: (opts?.parse_mode as "HTML") ?? "HTML",
               link_preview_options: { is_disabled: true },
             }),
           );
           return msg?.message_id ?? 0;
         },
         editMessage: async (msgId, html, opts) => {
-          await rateLimiter.acquire(chatId);
+          await this.rateLimiter.acquire(chatId.toString());
           await withRetry(async () =>
-            bot.api.editMessageText(Number(chatId), msgId, html, {
-              parse_mode: (opts?.parse_mode as any) ?? "HTML",
+            this.bot.api.editMessageText(chatId, msgId, html, {
+              parse_mode: (opts?.parse_mode as "HTML") ?? "HTML",
               link_preview_options: { is_disabled: true },
             }),
           );
         },
         sendDraft: async (draftId, draftText) => {
           await withRetry(async () =>
-            (bot.api as any).callApi("sendMessageDraft", {
-              chat_id: Number(chatId),
-              draft_id: draftId,
-              text: draftText,
-              parse_mode: "HTML",
-            }),
+            (this.bot.api as unknown as { callApi(method: string, params: Record<string, unknown>): Promise<unknown> })
+              .callApi("sendMessageDraft", {
+                chat_id: chatId,
+                draft_id: draftId,
+                text: draftText,
+                parse_mode: "HTML",
+              }),
           );
         },
       },
@@ -227,12 +175,12 @@ export default function createTelegramChannel(
     );
 
     try {
-      await agent.prompt(sessionId, cleanText, {
-        onSessionUpdate(notification: any) {
-          const update = notification.update ?? notification;
+      await this.agent.prompt(sessionId, cleanText, {
+        onSessionUpdate: (notification: SessionNotification) => {
+          const { update } = notification;
           switch (update.sessionUpdate) {
             case "agent_thought_chunk":
-              if (update.content?.type === "text") {
+              if (update.content.type === "text") {
                 stream.pushThinking(update.content.text);
               }
               break;
@@ -240,14 +188,10 @@ export default function createTelegramChannel(
               stream.toolStart(update.toolCallId, update.title, update.status);
               break;
             case "tool_call_update":
-              stream.toolUpdate(
-                update.toolCallId,
-                update.status,
-                update.content,
-              );
+              stream.toolUpdate(update.toolCallId, update.status, update.content);
               break;
             case "agent_message_chunk":
-              if (update.content?.type === "text") {
+              if (update.content.type === "text") {
                 stream.pushText(update.content.text);
               }
               break;
@@ -261,39 +205,28 @@ export default function createTelegramChannel(
     }
   }
 
-  /** Normalize a /command@botname into /command args */
-  function normalizeCommand(text: string): string {
-    const spaceIdx = text.indexOf(" ");
-    const cmd = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
-    const cleanCmd = cmd.split("@")[0];
-    const args = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
-    return args ? `/${cleanCmd} ${args}` : `/${cleanCmd}`;
-  }
-
   // --- Platform UX ---
 
-  function ackMessage(chatId: string, messageId: number): void {
+  private ackMessage(chatId: number, messageId: number): void {
     withRetry(async () => {
-      await bot.api.setMessageReaction(Number(chatId), messageId, [
-        { type: "emoji", emoji: ackEmoji! },
+      await this.bot.api.setMessageReaction(chatId, messageId, [
+        { type: "emoji", emoji: this.config.ackEmoji! },
       ]);
     }).catch((err) => {
-      log.debug(
-        { chatId, error: (err as Error).message },
-        "ack reaction failed",
-      );
+      log.debug({ chatId, error: (err as Error).message }, "ack reaction failed");
     });
   }
 
-  function sendTyping(chatId: string): void {
-    bot.api.sendChatAction(Number(chatId), "typing").catch(() => {});
+  private sendTyping(chatId: number): void {
+    this.bot.api.sendChatAction(chatId, "typing").catch((err) => {
+      log.debug({ chatId, error: (err as Error).message }, "typing indicator failed");
+    });
   }
 
-  function registerBotCommands(): void {
-    // Only agent-declared commands (channel has no custom commands)
+  private registerBotCommands(): void {
     const commands: Array<{ command: string; description: string }> = [];
 
-    for (const agentCmd of agent.getAgentCommands()) {
+    for (const agentCmd of this.agent.getAgentCommands()) {
       const sanitized = sanitizeCommandName(agentCmd.name);
       if (sanitized && sanitized.length <= 32) {
         commands.push({
@@ -303,9 +236,9 @@ export default function createTelegramChannel(
       }
     }
 
-    if (commands.length === 0) return; // Don't register empty list
+    if (commands.length === 0) return;
 
-    bot.api
+    this.bot.api
       .setMyCommands(commands)
       .then(() => {
         log.info({ count: commands.length }, "registered bot commands");
@@ -317,82 +250,19 @@ export default function createTelegramChannel(
 
   // --- Startup buffer ---
 
-  function flushBuffer(): void {
-    for (const msg of startupBuffer.flush()) {
-      processMessage(msg.chatId, msg.text, msg.messageId);
+  private flushBuffer(): void {
+    for (const msg of this.startupBuffer.flush()) {
+      this.processMessage(msg.chatId, msg.text, msg.messageId);
     }
   }
+}
 
-  // --- Bot setup ---
-
-  bot.catch((err) => {
-    log.error({ error: err.message ?? err }, "bot error");
-  });
-
-  bot.on("message:text", async (ctx) => {
-    const chatId = ctx.chat.id.toString();
-    const username = ctx.from?.username ? `@${ctx.from.username}` : null;
-    const text = ctx.message.text;
-    const messageId = ctx.message.message_id;
-    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
-
-    // ACL checks
-    const groupAcl = acl.groups?.[chatId];
-    const allowedUsers = groupAcl?.allowed_users ?? acl.allowed_users;
-    const requireMention =
-      groupAcl?.require_mention ?? acl.require_mention ?? false;
-
-    if (allowedUsers?.length && username) {
-      if (!allowedUsers.includes(username)) {
-        log.debug({ username, chatId }, "ignoring unauthorized user");
-        return;
-      }
-    }
-
-    // Mention check for groups
-    if (isGroup && requireMention && botUsername) {
-      if (!text.includes(`@${botUsername}`)) {
-        return;
-      }
-    }
-
-    // Strip @botname from message text
-    const normalized = text.startsWith("/")
-      ? text
-      : botUsername
-        ? text.replace(new RegExp(`@${botUsername}\\b`, "g"), "").trim()
-        : text;
-
-    if (startupBuffer.push({ chatId, text: normalized, messageId })) {
-      return;
-    }
-
-    processMessage(chatId, normalized, messageId);
-  });
-
-  // Re-register bot commands when agent declares its commands
-  agent.onCommandsUpdate(() => {
-    log.info("agent commands updated, re-registering bot menu");
-    registerBotCommands();
-  });
-
-  // --- Channel interface ---
-
-  return {
-    async start(): Promise<void> {
-      log.info("starting bot (long polling)");
-      bot.start({
-        onStart: (info) => {
-          botUsername = info.username;
-          log.info({ username: info.username }, "bot connected");
-          flushBuffer();
-          registerBotCommands();
-        },
-      });
-    },
-
-    stop(): void {
-      bot.stop();
-    },
-  };
+/**
+ * Factory function for channel-manager plugin registry.
+ */
+export default function createTelegramChannel(
+  config: Record<string, unknown>,
+  agent: AcpAgent,
+): Channel {
+  return new TelegramChannel(config, agent);
 }

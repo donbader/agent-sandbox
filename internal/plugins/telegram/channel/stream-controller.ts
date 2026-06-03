@@ -1,5 +1,11 @@
 import { formatMarkdown, closeOpenTags, splitMessage, MAX_MESSAGE_LENGTH } from "./formatter/telegram.js";
 
+/** Typed subset of ACP ToolCallContent for stream rendering. */
+export interface ToolCallContentItem {
+  type: "content" | "diff" | "terminal";
+  content?: { type: string; text: string };
+}
+
 export interface StreamControllerDeps {
   chatId: number;
   sendMessage(text: string, opts?: { parse_mode?: string }): Promise<number>;
@@ -99,7 +105,7 @@ export class StreamController {
     }
   }
 
-  toolUpdate(toolCallId: string, status: string, content?: any[]): void {
+  toolUpdate(toolCallId: string, status: string, content?: ToolCallContentItem[]): void {
     if (this.state === "DONE") return;
 
     const tool = this.tools.find((t) => t.id === toolCallId);
@@ -108,11 +114,11 @@ export class StreamController {
     tool.status = status as ToolEntry["status"];
 
     if (content && content.length > 0) {
-      const textItem = content.find((c: any) =>
+      const textItem = content.find((c) =>
         c.type === "content" && c.content?.type === "text",
       );
-      if (textItem) {
-        const fullText = textItem.content.text as string;
+      if (textItem && textItem.type === "content" && textItem.content?.type === "text") {
+        const fullText = textItem.content.text;
         tool.resultPreview = fullText.length > 100 ? fullText.slice(-100) : fullText;
       }
     }
