@@ -77,13 +77,9 @@ func init() {
 					contrib.Rewriters = append(contrib.Rewriters, rewriters...)
 				}
 
-			case "https":
-				if port == "" {
-					port = "443"
-				}
-
-				// HTTPS services need MITM for header injection
-				contrib.MITMDomains = append(contrib.MITMDomains, host)
+		case "https":
+			// HTTPS services need MITM for header injection
+			contrib.MITMDomains = append(contrib.MITMDomains, host)
 
 				// Add rewriters for headers
 				if len(svc.Headers) > 0 {
