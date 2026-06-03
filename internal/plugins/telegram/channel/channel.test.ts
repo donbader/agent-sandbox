@@ -56,7 +56,9 @@ vi.mock("../delivery/api-retry.js", () => ({
 
 vi.mock("../formatter/telegram.js", () => ({
   formatMarkdown: vi.fn().mockImplementation((text: string) => text),
+  closeOpenTags: vi.fn().mockImplementation((text: string) => text),
   splitMessage: vi.fn().mockImplementation((text: string) => [text]),
+  MAX_MESSAGE_LENGTH: 4096,
 }));
 
 vi.mock("../startup-buffer.js", () => ({
@@ -108,7 +110,7 @@ function makeCtx(opts: {
   };
 }
 
-describe("TelegramChannel (thin channel manager)", () => {
+describe("TelegramChannel behavior", () => {
   let agent: ReturnType<typeof createMockAgent>;
 
   beforeEach(async () => {
@@ -116,12 +118,15 @@ describe("TelegramChannel (thin channel manager)", () => {
     agent = createMockAgent();
     const ch = createTelegramChannel({}, agent as any);
     await ch.start();
-    // Simulate bot connected
     startCallback?.({ username: "testbot" });
   });
 
-  describe("message forwarding", () => {
-    it("forwards regular messages to agent", async () => {
+  // -------------------------------------------------------------------------
+  // Message Delivery — user messages reach agent, agent responses reach user
+  // -------------------------------------------------------------------------
+
+  describe("message delivery", () => {
+    it("delivers a plain text message to the agent", async () => {
       messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
       expect(agent.prompt).toHaveBeenCalledWith(
@@ -131,94 +136,169 @@ describe("TelegramChannel (thin channel manager)", () => {
       );
     });
 
-    it("creates a session on first message from a chat", async () => {
-      messageHandler!(makeCtx({ chatId: "456", username: "bob", text: "hi" }));
-      await vi.waitFor(() => expect(agent._connection.newSession).toHaveBeenCalled());
-    });
-
-    it("reuses session for same chat", async () => {
-      messageHandler!(makeCtx({ chatId: "789", username: "carol", text: "first" }));
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
-
-      messageHandler!(makeCtx({ chatId: "789", username: "carol", text: "second" }));
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
-
-      // newSession should only be called once
-      expect(agent._connection.newSession).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("custom commands", () => {
-    it("all /commands are forwarded to agent", async () => {
+    it("delivers /command with args to agent", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/model gpt-4o" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
       expect(agent.prompt).toHaveBeenCalledWith(
         "test-session-123",
         "/model gpt-4o",
-        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+        expect.any(Object),
       );
     });
 
-    it("/sh is forwarded to agent (handled by ACP wrapper)", async () => {
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/sh ls" }));
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith(
-        "test-session-123",
-        "/sh ls",
-        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
-      );
-    });
-
-    it("/diagnose is forwarded to agent (handled by ACP wrapper)", async () => {
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/diagnose" }));
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-      expect(agent.prompt).toHaveBeenCalledWith(
-        "test-session-123",
-        "/diagnose",
-        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
-      );
-    });
-
-    it("/command@botname strips mention before forwarding", async () => {
+    it("strips @botname from /command@bot before forwarding", async () => {
       messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "/model@testbot gpt-4o" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
       expect(agent.prompt).toHaveBeenCalledWith(
         "test-session-123",
         "/model gpt-4o",
-        expect.objectContaining({ onSessionUpdate: expect.any(Function) }),
+        expect.any(Object),
       );
     });
-  });
 
-  describe("access control", () => {
-    it("ignores unauthorized users", async () => {
-      // Create a new channel with ACL
-      const ch = createTelegramChannel(
-        { access_control: { allowed_users: ["@alice"] } },
-        agent as any
-      );
+    it("sends ack emoji reaction on message receipt", async () => {
+      const ch = createTelegramChannel({ ack_emoji: "👀" }, agent as any);
       await ch.start();
       startCallback?.({ username: "testbot" });
 
-      messageHandler!(makeCtx({ chatId: "100", username: "bob", text: "hi" }));
-      expect(agent.prompt).not.toHaveBeenCalled();
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "hi", messageId: 7 }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+
+      expect(mockBotApi.setMessageReaction).toHaveBeenCalledWith(100, 7, [
+        { type: "emoji", emoji: "👀" },
+      ]);
+    });
+
+    it("sends typing indicator while processing", async () => {
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "hi" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+      expect(mockBotApi.sendChatAction).toHaveBeenCalledWith(100, "typing");
     });
   });
 
-  describe("startup buffer", () => {
-    it("buffers messages before bot is ready", async () => {
-      const freshAgent = createMockAgent();
-      const ch = createTelegramChannel({}, freshAgent as any);
-      // Call start but don't trigger startCallback — bot not connected yet
+  // -------------------------------------------------------------------------
+  // Concurrency — same-chat serialized, cross-chat parallel
+  // -------------------------------------------------------------------------
+
+  describe("concurrency", () => {
+    it("serializes prompts from the same chat", async () => {
+      let resolveFirst: () => void;
+      const firstPrompt = new Promise<void>((r) => { resolveFirst = r; });
+
+      const promptOrder: string[] = [];
+      agent.prompt.mockImplementation(async (_sid: string, text: string) => {
+        promptOrder.push(text);
+        if (text === "first") await firstPrompt;
+        return "done";
+      });
+
+      messageHandler!(makeCtx({ chatId: "999", username: "alice", text: "first" }));
+      messageHandler!(makeCtx({ chatId: "999", username: "alice", text: "second" }));
+
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
+      expect(promptOrder).toEqual(["first"]);
+
+      resolveFirst!();
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
+      expect(promptOrder).toEqual(["first", "second"]);
+    });
+
+    it("allows concurrent prompts from different chats", async () => {
+      let resolveFirst: () => void;
+      const firstPrompt = new Promise<void>((r) => { resolveFirst = r; });
+
+      const promptOrder: string[] = [];
+      agent.prompt.mockImplementation(async (_sid: string, text: string) => {
+        promptOrder.push(text);
+        if (text === "chat-a") await firstPrompt;
+        return "done";
+      });
+
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "chat-a" }));
+      messageHandler!(makeCtx({ chatId: "200", username: "bob", text: "chat-b" }));
+
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
+      expect(promptOrder).toContain("chat-a");
+      expect(promptOrder).toContain("chat-b");
+
+      resolveFirst!();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Error Recovery — bot stays alive after failures
+  // -------------------------------------------------------------------------
+
+  describe("error recovery", () => {
+    it("continues serving after agent prompt rejects", async () => {
+      agent.prompt.mockRejectedValueOnce(new Error("agent crashed"));
+
+      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "crash me" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
+
+      // Bot still works — send another message
+      agent.prompt.mockResolvedValue("recovered");
+      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "still alive?" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
+    });
+
+    it("continues serving after ack reaction fails", async () => {
+      mockBotApi.setMessageReaction.mockRejectedValueOnce(new Error("reaction failed"));
+
+      const ch = createTelegramChannel({ ack_emoji: "👀" }, agent as any);
       await ch.start();
+      startCallback?.({ username: "testbot" });
 
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "buffered" }));
-      expect(freshAgent.prompt).not.toHaveBeenCalled();
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "hi" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+
+      // Prompt still reached agent despite ack failure
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "hi",
+        expect.any(Object),
+      );
+    });
+
+    it("continues serving after typing indicator fails", async () => {
+      mockBotApi.sendChatAction.mockRejectedValueOnce(new Error("typing failed"));
+
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "hi" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
+
+      expect(agent.prompt).toHaveBeenCalledWith(
+        "test-session-123",
+        "hi",
+        expect.any(Object),
+      );
+    });
+
+    it("queued message still runs after previous message errors", async () => {
+      const promptOrder: string[] = [];
+      agent.prompt
+        .mockImplementationOnce(async (_sid: string, text: string) => {
+          promptOrder.push(text);
+          throw new Error("first failed");
+        })
+        .mockImplementationOnce(async (_sid: string, text: string) => {
+          promptOrder.push(text);
+          return "ok";
+        });
+
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "will-fail" }));
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "should-still-run" }));
+
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
+      expect(promptOrder).toEqual(["will-fail", "should-still-run"]);
     });
   });
 
-  describe("streaming via StreamController", () => {
-    it("passes onSessionUpdate to agent.prompt and dispatches chunks", async () => {
+  // -------------------------------------------------------------------------
+  // Streaming — progressive response delivery
+  // -------------------------------------------------------------------------
+
+  describe("streaming", () => {
+    it("passes onSessionUpdate to agent for stream events", async () => {
       agent.prompt.mockImplementation(async (_sid: string, _text: string, opts?: any) => {
         opts?.onSessionUpdate?.({
           update: {
@@ -239,107 +319,106 @@ describe("TelegramChannel (thin channel manager)", () => {
       );
     });
 
-    it("calls stream.abort on prompt failure", async () => {
-      agent.prompt.mockRejectedValue(new Error("agent crashed"));
-
-      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "hello" }));
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
-
-      // Should not throw — error is caught internally
-      // The sendMessage mock will be called by stream.abort with any buffered content
-    });
-
-    it("sends thinking content via sendMessageDraft callApi", async () => {
+    it("sends thinking draft via callApi for thinking chunks", async () => {
       agent.prompt.mockImplementation(async (_sid: string, _text: string, opts?: any) => {
-        // Simulate thinking chunks arriving before text response
         opts?.onSessionUpdate?.({
           update: {
             sessionUpdate: "agent_thought_chunk",
-            content: { type: "text", text: "Let me analyze this..." },
+            content: { type: "text", text: "Let me analyze..." },
           },
         });
         opts?.onSessionUpdate?.({
           update: {
             sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: "Here's the answer." },
+            content: { type: "text", text: "Done." },
           },
         });
         return "done";
       });
 
-      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "think about this" }));
+      messageHandler!(makeCtx({ chatId: "123", username: "alice", text: "think" }));
       await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
 
-      // Verify sendMessageDraft was called via callApi
       expect(mockBotApi.callApi).toHaveBeenCalledWith("sendMessageDraft", {
         chat_id: 123,
         draft_id: 1,
-        text: "🧠 Let me analyze this...",
+        text: "🧠 Let me analyze...",
         parse_mode: "HTML",
       });
     });
   });
 
-  describe("per-chat prompt queue", () => {
-    it("serializes prompts from the same chat", async () => {
-      let resolveFirst: () => void;
-      const firstPrompt = new Promise<void>((r) => { resolveFirst = r; });
+  // -------------------------------------------------------------------------
+  // Access Control — unauthorized users are rejected
+  // -------------------------------------------------------------------------
 
-      let promptOrder: string[] = [];
-      agent.prompt.mockImplementation(async (_sid: string, text: string) => {
-        promptOrder.push(text);
-        if (text === "first") await firstPrompt;
-        return "done";
-      });
+  describe("access control", () => {
+    it("rejects unauthorized users", async () => {
+      const ch = createTelegramChannel(
+        { access_control: { allowed_users: ["@alice"] } },
+        agent as any,
+      );
+      await ch.start();
+      startCallback?.({ username: "testbot" });
 
-      // Fire two messages rapidly on the same chat
-      messageHandler!(makeCtx({ chatId: "999", username: "alice", text: "first" }));
-      messageHandler!(makeCtx({ chatId: "999", username: "alice", text: "second" }));
-
-      // Wait for first prompt to be called
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
-
-      // Second should NOT have started yet (queue serializes)
-      expect(promptOrder).toEqual(["first"]);
-
-      // Resolve first prompt
-      resolveFirst!();
-
-      // Now second should proceed
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
-      expect(promptOrder).toEqual(["first", "second"]);
+      messageHandler!(makeCtx({ chatId: "100", username: "bob", text: "hi" }));
+      expect(agent.prompt).not.toHaveBeenCalled();
     });
 
-    it("allows concurrent prompts from different chats", async () => {
-      let resolveFirst: () => void;
-      const firstPrompt = new Promise<void>((r) => { resolveFirst = r; });
+    it("allows authorized users", async () => {
+      const ch = createTelegramChannel(
+        { access_control: { allowed_users: ["@alice"] } },
+        agent as any,
+      );
+      await ch.start();
+      startCallback?.({ username: "testbot" });
 
-      let promptOrder: string[] = [];
-      agent.prompt.mockImplementation(async (_sid: string, text: string) => {
-        promptOrder.push(text);
-        if (text === "chat-a") await firstPrompt;
-        return "done";
-      });
-
-      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "chat-a" }));
-      messageHandler!(makeCtx({ chatId: "200", username: "bob", text: "chat-b" }));
-
-      // Both should start since they are different chats
-      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
-      expect(promptOrder).toContain("chat-a");
-      expect(promptOrder).toContain("chat-b");
-
-      resolveFirst!();
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "hi" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalled());
     });
   });
 
-  describe("bot menu registration", () => {
+  // -------------------------------------------------------------------------
+  // Session Lifecycle — reuse, creation, startup buffering
+  // -------------------------------------------------------------------------
+
+  describe("session lifecycle", () => {
+    it("creates a session on first message from a chat", async () => {
+      messageHandler!(makeCtx({ chatId: "456", username: "bob", text: "hi" }));
+      await vi.waitFor(() => expect(agent._connection.newSession).toHaveBeenCalled());
+    });
+
+    it("reuses session for subsequent messages from same chat", async () => {
+      messageHandler!(makeCtx({ chatId: "789", username: "carol", text: "first" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
+
+      messageHandler!(makeCtx({ chatId: "789", username: "carol", text: "second" }));
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
+
+      expect(agent._connection.newSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("buffers messages before bot is connected", async () => {
+      const freshAgent = createMockAgent();
+      const ch = createTelegramChannel({}, freshAgent as any);
+      await ch.start();
+      // Don't trigger startCallback — bot not connected yet
+
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "buffered" }));
+      expect(freshAgent.prompt).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Bot Commands — menu registration from agent-declared commands
+  // -------------------------------------------------------------------------
+
+  describe("bot commands", () => {
     it("does not register commands if agent has none", () => {
-      // Agent has no commands declared yet
       expect(mockBotApi.setMyCommands).not.toHaveBeenCalled();
     });
 
-    it("registers when agent commands update", () => {
+    it("registers bot menu when agent commands update", () => {
       agent.getAgentCommands.mockReturnValue([
         { name: "model", description: "Switch model" },
         { name: "new", description: "New conversation" },
@@ -349,9 +428,13 @@ describe("TelegramChannel (thin channel manager)", () => {
         { name: "new", description: "New conversation" },
       ]);
       expect(mockBotApi.setMyCommands).toHaveBeenCalled();
-      const calls = mockBotApi.setMyCommands.mock.calls[0][0];
-      expect(calls.some((c: any) => c.command === "model")).toBe(true);
-      expect(calls.some((c: any) => c.command === "new")).toBe(true);
+      const commands = mockBotApi.setMyCommands.mock.calls[0][0];
+      expect(commands).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ command: "model" }),
+          expect.objectContaining({ command: "new" }),
+        ]),
+      );
     });
   });
 });
