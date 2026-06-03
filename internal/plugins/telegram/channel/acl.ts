@@ -35,9 +35,9 @@ export function isAllowed(ctx: MessageContext, acl: AccessControlConfig): boolea
   const allowedUsers = groupAcl?.allowed_users ?? acl.allowed_users;
   const requireMention = groupAcl?.require_mention ?? acl.require_mention ?? false;
 
-  // User allowlist check
-  if (allowedUsers?.length && ctx.username) {
-    if (!allowedUsers.includes(ctx.username)) {
+  // User allowlist check — deny if allowlist is configured but user has no username or isn't in list
+  if (allowedUsers?.length) {
+    if (!ctx.username || !allowedUsers.includes(ctx.username)) {
       log.debug({ username: ctx.username, chatId: ctx.chatId }, "ignoring unauthorized user");
       return false;
     }

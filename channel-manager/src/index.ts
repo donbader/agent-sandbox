@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     // 1. Sync wrapper commands (/sh, /diagnose)
     const wrapperResult = handleWrapperCommand(text, {
       agentCmd: config.acp_command,
-      perfHistory: [],
+      perfHistory: agent.perfHistory,
     });
     if (wrapperResult !== null) return wrapperResult;
 
