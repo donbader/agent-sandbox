@@ -213,7 +213,7 @@ func enrichFromTags(prop map[string]any, field reflect.StructField) {
 
 // parseDefault converts a string default value to the appropriate Go type.
 func parseDefault(val string, t reflect.Type) any {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	switch t.Kind() {
@@ -230,7 +230,7 @@ func parseDefault(val string, t reflect.Type) any {
 // typeToSchema converts a reflect.Type to a JSON Schema property definition.
 func typeToSchema(t reflect.Type) map[string]any {
 	// Dereference pointer
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		return typeToSchema(t.Elem())
 	}
 

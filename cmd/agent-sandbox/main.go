@@ -191,7 +191,7 @@ func writeFleetCompose(outDir string, agents []string) error {
 
 	b.WriteString("include:\n")
 	for _, name := range agents {
-		b.WriteString(fmt.Sprintf("  - path: %s/docker-compose.yml\n", name))
+		_, _ = fmt.Fprintf(&b, "  - path: %s/docker-compose.yml\n", name)
 	}
 
 	composePath := filepath.Join(outDir, "docker-compose.yml")
@@ -209,7 +209,7 @@ func writeFleetEnvExample(dir string, envVars []string) error {
 	b.WriteString("# Environment variables for agent-sandbox fleet\n")
 	b.WriteString("# Copy to .env and fill in values\n\n")
 	for _, v := range envVars {
-		b.WriteString(fmt.Sprintf("%s=\n", v))
+		_, _ = fmt.Fprintf(&b, "%s=\n", v)
 	}
 
 	path := filepath.Join(dir, ".env.example")
@@ -379,8 +379,8 @@ func initCmd() *cobra.Command {
 			// Generate agent.yaml
 			var b strings.Builder
 			b.WriteString("# yaml-language-server: $schema=.build/schema.json\n")
-			b.WriteString(fmt.Sprintf("name: %s\n", name))
-			b.WriteString(fmt.Sprintf("runtime: %s\n", runtime))
+			_, _ = fmt.Fprintf(&b, "name: %s\n", name)
+			_, _ = fmt.Fprintf(&b, "runtime: %s\n", runtime)
 
 			if len(features) > 0 {
 				b.WriteString("\nfeatures:\n")
