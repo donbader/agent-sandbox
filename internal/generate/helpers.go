@@ -158,6 +158,25 @@ func (g *Generator) collectHTTPServices() []resolve.HTTPService {
 	return services
 }
 
+// collectHTTPPorts gathers deduplicated ports from HTTP services for iptables rules.
+func (g *Generator) collectHTTPPorts() []string {
+	var ports []string
+	seen := map[string]bool{}
+	for _, f := range g.Features {
+		for _, svc := range f.HTTPServices {
+			port := svc.Port
+			if port == "" {
+				port = "80"
+			}
+			if !seen[port] {
+				seen[port] = true
+				ports = append(ports, port)
+			}
+		}
+	}
+	return ports
+}
+
 // collectAgentEnv gathers agent-side environment variables from features.
 // These are dummy/non-secret values set in the agent container (e.g., GH_TOKEN=dummy).
 func (g *Generator) collectAgentEnv() []string {

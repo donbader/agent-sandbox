@@ -27,6 +27,7 @@ type EntrypointBuilder struct {
 	ChannelManager    bool
 	CMEntryPoint      string
 	GatewayListenPort int
+	HTTPPorts         []string // additional ports to redirect to proxy (for HTTP services)
 	CACertPath        string
 	UserCommand       string // pre-computed command sequence for exec su -c
 }
@@ -77,6 +78,7 @@ func (g *Generator) writeGatewayEntrypoint() error {
 	b := &EntrypointBuilder{
 		Variant:           "gateway",
 		GatewayListenPort: g.GatewaySpec.ListenPort,
+		HTTPPorts:         g.collectHTTPPorts(),
 	}
 
 	content, err := b.Render()
