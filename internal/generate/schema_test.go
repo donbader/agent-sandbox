@@ -1,6 +1,8 @@
 package generate
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -184,4 +186,50 @@ func TestCollectFeatureItemSchemas(t *testing.T) {
 		assert.Equal(t, map[string]any{"type": "string"}, cmdProp["items"])
 		assert.Equal(t, "Additional RUN commands for the Dockerfile", cmdProp["description"])
 	})
+}
+
+func TestBuildFleetSchema(t *testing.T) {
+	schema := buildFleetSchema()
+
+	t.Run("has correct title and type", func(t *testing.T) {
+		assert.Equal(t, "agent-sandbox fleet.yaml", schema["title"])
+		assert.Equal(t, "object", schema["type"])
+	})
+
+	t.Run("has agents property as string array", func(t *testing.T) {
+		props, _ := schema["properties"].(map[string]any)
+		agents, _ := props["agents"].(map[string]any)
+		assert.Equal(t, "array", agents["type"])
+		items, _ := agents["items"].(map[string]any)
+		assert.Equal(t, "string", items["type"])
+	})
+
+	t.Run("has shared.features with oneOf items", func(t *testing.T) {
+		props, _ := schema["properties"].(map[string]any)
+		shared, _ := props["shared"].(map[string]any)
+		assert.Equal(t, "object", shared["type"])
+		sharedProps, _ := shared["properties"].(map[string]any)
+		features, _ := sharedProps["features"].(map[string]any)
+		assert.Equal(t, "array", features["type"])
+		items, _ := features["items"].(map[string]any)
+		oneOf, _ := items["oneOf"].([]any)
+		assert.NotEmpty(t, oneOf)
+	})
+
+	t.Run("agents is required", func(t *testing.T) {
+		required, _ := schema["required"].([]string)
+		assert.Contains(t, required, "agents")
+	})
+}
+
+func TestWriteFleetSchema(t *testing.T) {
+	outDir := t.TempDir()
+	err := WriteFleetSchema(outDir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "fleet-schema.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "agent-sandbox fleet.yaml")
+	assert.Contains(t, string(data), "agents")
+	assert.Contains(t, string(data), "shared")
 }
