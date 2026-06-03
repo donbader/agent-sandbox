@@ -81,7 +81,7 @@ export class BridgeClient implements acp.Client {
     } else if (update.sessionUpdate === "available_commands_update") {
       const agentCommands: AgentCommand[] = update.availableCommands.map((c) => ({
         name: c.name,
-        description: c.description,
+        description: c.description ?? "",
         inputHint: c.input?.hint,
       }));
       log.info({ count: agentCommands.length }, "received agent commands");

@@ -16,6 +16,9 @@ export default defineConfig({
       // For testing, we map these imports to their actual locations.
       "../startup-buffer.js": path.resolve(__dirname, "src/startup-buffer.ts"),
       "../safe-prompt.js": path.resolve(__dirname, "src/safe-prompt.ts"),
+      "../logger.js": path.resolve(__dirname, "src/logger.ts"),
+      "../acp-client.js": path.resolve(__dirname, "src/acp-client.ts"),
+      "../../logger.js": path.resolve(__dirname, "src/logger.ts"),
     },
   },
 });
