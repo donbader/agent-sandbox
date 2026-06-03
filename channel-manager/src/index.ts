@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { AcpAgent } from "./acp-client.js";
-import { handleWrapperCommand } from "./wrapper-commands.js";
+import { handleWrapperCommand, WRAPPER_COMMANDS } from "./wrapper-commands.js";
 import { createLogger, createPluginLogger } from "./logger.js";
 import { registerPlugin, handleCommand, handleMessage } from "./command/registry.js";
 
@@ -40,17 +40,27 @@ async function main(): Promise<void> {
   });
 
   // Load command plugins (if any are generated)
+  const pluginCommandNames: Array<{ name: string; description: string }> = [];
   try {
     const { commandPlugins } = await import("./command/commands.gen.js");
     for (const plugin of commandPlugins) {
       const pluginLogger = createPluginLogger(`plugin:${plugin.name}`);
       plugin.init?.(config, pluginLogger);
       registerPlugin(plugin);
+      for (const cmdName of Object.keys(plugin.commands)) {
+        pluginCommandNames.push({ name: cmdName, description: `${plugin.name} plugin command` });
+      }
     }
     log.info({ plugins: commandPlugins.map((p: { name: string }) => p.name) }, "loaded command plugins");
   } catch {
     // No command plugins generated — that's fine
   }
+
+  // Register static commands (wrapper + plugin) so channels can expose them in menus
+  agent.registerStaticCommands([
+    ...WRAPPER_COMMANDS.map((c) => ({ name: c.name, description: c.description })),
+    ...pluginCommandNames,
+  ]);
 
   // Set up prompt interceptor: wrapper commands → command plugins → agent
   agent.setPromptInterceptor(async (text: string, sessionId: string) => {

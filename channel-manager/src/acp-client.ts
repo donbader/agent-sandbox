@@ -118,6 +118,7 @@ export class AcpAgent {
   private acpHandler: BridgeClient;
   private pendingReject: ((err: Error) => void) | null = null;
   private agentCommands: AgentCommand[] = [];
+  private staticCommands: AgentCommand[] = [];
   private commandsListeners: Array<(commands: AgentCommand[]) => void> = [];
   private _perfHistory: number[] = [];
   private _perfIndex = 0;
@@ -129,8 +130,9 @@ export class AcpAgent {
     this.acpHandler = new BridgeClient();
     this.acpHandler.setCommandsCallback((cmds) => {
       this.agentCommands = cmds;
+      const all = this.getAgentCommands();
       for (const listener of this.commandsListeners) {
-        listener(cmds);
+        listener(all);
       }
     });
   }
@@ -146,7 +148,17 @@ export class AcpAgent {
 
   /** Get the current list of agent-declared commands. */
   getAgentCommands(): AgentCommand[] {
-    return this.agentCommands;
+    return [...this.staticCommands, ...this.agentCommands];
+  }
+
+  /** Register static commands (wrapper + plugin) that are always available. */
+  registerStaticCommands(commands: AgentCommand[]): void {
+    this.staticCommands = commands;
+    // Notify listeners immediately so channels can register on startup
+    const all = this.getAgentCommands();
+    for (const listener of this.commandsListeners) {
+      listener(all);
+    }
   }
 
   /** Register a listener for when agent commands change. */

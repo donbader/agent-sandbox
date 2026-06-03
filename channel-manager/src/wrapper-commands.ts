@@ -12,6 +12,12 @@ export interface WrapperCommandContext {
   cwd: string;
 }
 
+/** Metadata for wrapper commands, used for bot menu registration. */
+export const WRAPPER_COMMANDS = [
+  { name: "sh", description: "Run a shell command in the container" },
+  { name: "diagnose", description: "Show agent diagnostics and performance stats" },
+] as const;
+
 /**
  * Attempt to handle a wrapper command.
  * Returns the response string if handled, or null if not a wrapper command.

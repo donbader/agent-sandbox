@@ -4,6 +4,7 @@ import { handleWrapperCommand, type WrapperCommandContext } from "./wrapper-comm
 const defaultCtx: WrapperCommandContext = {
   agentCmd: ["npx", "codex-acp"],
   perfHistory: [],
+  cwd: "/workspace",
 };
 
 describe("handleWrapperCommand", () => {
@@ -47,6 +48,7 @@ describe("handleWrapperCommand", () => {
       const ctx: WrapperCommandContext = {
         agentCmd: ["npx", "codex-acp"],
         perfHistory: [100, 200, 300],
+        cwd: "/workspace",
       };
       const result = handleWrapperCommand("/diagnose", ctx);
       expect(result).toContain("Perf (3 prompts)");

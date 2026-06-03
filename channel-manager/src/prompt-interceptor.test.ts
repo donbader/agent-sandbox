@@ -7,7 +7,7 @@ import { handleWrapperCommand } from "./wrapper-commands.js";
  */
 
 describe("prompt interceptor logic", () => {
-  const wrapperCtx = { agentCmd: ["codex", "exec"], perfHistory: [] as number[] };
+  const wrapperCtx = { agentCmd: ["codex", "exec"], perfHistory: [] as number[], cwd: "/workspace" };
 
   // Simulates the interceptor logic from index.ts
   async function simulateInterceptor(
