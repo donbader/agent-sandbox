@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -24,8 +25,9 @@ func ScanConfigEnvVars(features []config.FeatureEntry) []string {
 		if entry.Name != "" {
 			source = entry.Name
 		}
-		for key, v := range entry.Config {
-			scanValueWithSource(v, envVarPattern, sources, &order,
+		keys := sortedKeys(entry.Config)
+		for _, key := range keys {
+			scanValueWithSource(entry.Config[key], envVarPattern, sources, &order,
 				fmt.Sprintf("feature:%s.%s", source, key))
 		}
 	}
@@ -43,8 +45,9 @@ func (g *Generator) scanEnvVars() []string {
 		if entry.Name != "" {
 			source = entry.Name
 		}
-		for key, v := range entry.Config {
-			scanValueWithSource(v, envVarPattern, sources, &order,
+		keys := sortedKeys(entry.Config)
+		for _, key := range keys {
+			scanValueWithSource(entry.Config[key], envVarPattern, sources, &order,
 				fmt.Sprintf("feature:%s.%s", source, key))
 		}
 	}
@@ -78,10 +81,21 @@ func scanValueWithSource(v any, pattern *regexp.Regexp, sources map[string][]str
 			scanValueWithSource(item, pattern, sources, order, source)
 		}
 	case map[string]any:
-		for k, item := range val {
-			scanValueWithSource(item, pattern, sources, order, source+"."+k)
+		keys := sortedKeys(val)
+		for _, k := range keys {
+			scanValueWithSource(val[k], pattern, sources, order, source+"."+k)
 		}
 	}
+}
+
+// sortedKeys returns the keys of a map[string]any in sorted order for deterministic output.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // mergedEnvVars returns all env vars from config ${VAR} references, deduplicated and in stable order.

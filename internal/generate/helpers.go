@@ -44,15 +44,6 @@ func copyDir(src, dst string) error {
 	})
 }
 
-func (g *Generator) hasFeatureCommands() bool {
-	for _, f := range g.Features {
-		if len(f.Commands) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func (g *Generator) hasHooks() bool {
 	for _, f := range g.Features {
 		if len(f.EntrypointHooks) > 0 {
