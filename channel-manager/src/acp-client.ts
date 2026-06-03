@@ -62,9 +62,9 @@ export class BridgeClient implements acp.Client {
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {
-    // Forward to session-specific callback before specific handling
-    const sessionId = (params as any).sessionId as string | undefined;
-    const cb = sessionId ? this.sessionUpdateCallbacks.get(sessionId) : undefined;
+    // Forward to session-specific callback
+    const { sessionId, update } = params;
+    const cb = this.sessionUpdateCallbacks.get(sessionId);
     if (cb) {
       try {
         cb(params);
@@ -73,27 +73,19 @@ export class BridgeClient implements acp.Client {
       }
     }
 
-    const { update } = params;
     if (
       update.sessionUpdate === "agent_message_chunk" &&
       update.content.type === "text"
     ) {
       this.chunkCallback?.(update.content.text);
     } else if (update.sessionUpdate === "available_commands_update") {
-      const cmds = (update as any).availableCommands as Array<{
-        name: string;
-        description?: string;
-        input?: { hint?: string } | null;
-      }>;
-      if (Array.isArray(cmds)) {
-        const agentCommands: AgentCommand[] = cmds.map((c) => ({
-          name: c.name,
-          description: c.description ?? "",
-          inputHint: c.input?.hint,
-        }));
-        log.info({ count: agentCommands.length }, "received agent commands");
-        this.commandsCallback?.(agentCommands);
-      }
+      const agentCommands: AgentCommand[] = update.availableCommands.map((c) => ({
+        name: c.name,
+        description: c.description,
+        inputHint: c.input?.hint,
+      }));
+      log.info({ count: agentCommands.length }, "received agent commands");
+      this.commandsCallback?.(agentCommands);
     }
   }
 }
