@@ -57,6 +57,7 @@ type AgentConfig struct {
 	Runtime  string         `yaml:"runtime" schema:"Runtime plugin name" required:"true" enum:"codex,claude-code,pi"`
 	LogLevel string         `yaml:"log_level" schema:"Log verbosity level" default:"info" enum:"info,debug"`
 	Gateway  *bool          `yaml:"gateway" schema:"Enable transparent gateway proxy" default:"true"`
+	Workdir  string         `yaml:"workdir" schema:"Working directory for the agent. Supports {{ .AGENT_HOME }} template variable." examples:"{{ .AGENT_HOME }}/workspace"`
 	Features []FeatureEntry `yaml:"features" schema:"Feature plugins and their configuration"`
 }
 
