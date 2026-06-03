@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=.build/schema.json
+# yaml-language-server: $schema=.build/fleet-schema.json
 agents:
   - coder
   - reviewer
