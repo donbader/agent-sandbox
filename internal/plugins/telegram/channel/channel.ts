@@ -49,6 +49,7 @@ export class TelegramChannel implements Channel {
   private rateLimiter = new RateLimiter(100);
   private startupBuffer = new StartupBuffer<BufferedMessage>();
   private botUsername: string | null = null;
+  private chatQueues = new Map<number, Promise<void>>();
 
   constructor(rawConfig: Record<string, unknown>, agent: AcpAgent) {
     this.config = parseConfig(rawConfig);
@@ -122,7 +123,14 @@ export class TelegramChannel implements Channel {
 
   // --- Message handling ---
 
-  private async processMessage(chatId: number, text: string, messageId: number): Promise<void> {
+  private processMessage(chatId: number, text: string, messageId: number): void {
+    // Serialize prompts per chat to prevent interleaved responses
+    const prev = this.chatQueues.get(chatId) ?? Promise.resolve();
+    const next = prev.then(() => this.processMessageInner(chatId, text, messageId)).catch(() => {});
+    this.chatQueues.set(chatId, next);
+  }
+
+  private async processMessageInner(chatId: number, text: string, messageId: number): Promise<void> {
     // Ack
     if (this.config.ackEmoji) {
       this.ackMessage(chatId, messageId);
@@ -208,11 +216,9 @@ export class TelegramChannel implements Channel {
   // --- Platform UX ---
 
   private ackMessage(chatId: number, messageId: number): void {
-    withRetry(async () => {
-      await this.bot.api.setMessageReaction(chatId, messageId, [
-        { type: "emoji", emoji: this.config.ackEmoji! },
-      ]);
-    }).catch((err) => {
+    this.bot.api.setMessageReaction(chatId, messageId, [
+      { type: "emoji", emoji: this.config.ackEmoji! },
+    ]).catch((err) => {
       log.debug({ chatId, error: (err as Error).message }, "ack reaction failed");
     });
   }

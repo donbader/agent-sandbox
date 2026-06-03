@@ -1,14 +1,2 @@
 name: telegram
 description: Telegram bot channel — connects the agent to Telegram via the channel manager.
-
-config_schema:
-  properties:
-    allowed_chat_ids:
-      type: array
-      items:
-        type: string
-      description: Telegram chat IDs allowed to interact with this agent (use ${VAR} for env var references)
-    ack_emoji:
-      type: string
-      description: Emoji reaction to acknowledge received messages (e.g. "👀", "👍"). Set to empty string to disable.
-      default: "👀"
