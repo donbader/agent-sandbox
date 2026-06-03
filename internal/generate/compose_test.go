@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -120,6 +121,10 @@ func TestComposeBuilder_Gateway(t *testing.T) {
 		assert.Contains(t, content, "shared-certs:/usr/local/share/ca-certificates:ro")
 		assert.Contains(t, content, "service_healthy")
 		assert.Contains(t, content, "TELEGRAM_BOT_TOKEN")
+
+		// Verify shared-certs is not duplicated in named volumes
+		assert.Equal(t, 1, strings.Count(content, "  shared-certs:"),
+			"shared-certs should appear exactly once in named volumes section")
 	})
 
 	t.Run("without MITM uses simple depends_on", func(t *testing.T) {
