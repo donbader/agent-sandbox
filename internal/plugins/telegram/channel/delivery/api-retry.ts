@@ -2,10 +2,23 @@
  * Retry wrapper for Telegram Bot API calls.
  * Handles 429 rate limits, transient network errors, and bot-blocked scenarios.
  */
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("api-retry");
 
 export interface RetryOptions {
   maxRetries?: number;
   baseDelay?: number;
+}
+
+/** Shape of grammY/Telegram API errors with response metadata. */
+interface TelegramApiError {
+  message?: string;
+  code?: string;
+  response?: {
+    error_code?: number;
+    parameters?: { retry_after?: number };
+  };
 }
 
 export async function withRetry<T>(
@@ -19,11 +32,11 @@ export async function withRetry<T>(
     try {
       return await fn();
     } catch (err: unknown) {
-      const error = err as any;
+      const error = err as TelegramApiError;
 
       // 403 Forbidden (bot blocked) — don't retry
       if (error?.response?.error_code === 403) {
-        console.warn(`[telegram] bot blocked or forbidden: ${error.message}`);
+        log.warn({ error: error.message }, "bot blocked or forbidden");
         return undefined as T;
       }
 
@@ -31,8 +44,9 @@ export async function withRetry<T>(
       if (error?.response?.error_code === 429) {
         const retryAfter = error.response.parameters?.retry_after ?? 5;
         if (attempt < maxRetries) {
-          console.warn(
-            `[telegram] rate limited, waiting ${retryAfter}s (attempt ${attempt + 1}/${maxRetries})`,
+          log.warn(
+            { retryAfter, attempt: attempt + 1, maxRetries },
+            "rate limited, waiting",
           );
           await sleep(retryAfter * 1000);
           continue;
@@ -43,8 +57,9 @@ export async function withRetry<T>(
       // Transient network errors — exponential backoff
       if (isTransientError(error) && attempt < maxRetries) {
         const delay = baseDelay * Math.pow(2, attempt);
-        console.warn(
-          `[telegram] transient error, retrying in ${delay}ms: ${error.message}`,
+        log.warn(
+          { delay, error: error.message, attempt: attempt + 1, maxRetries },
+          "transient error, retrying",
         );
         await sleep(delay);
         continue;
@@ -57,7 +72,7 @@ export async function withRetry<T>(
   throw new Error("withRetry: exhausted retries");
 }
 
-function isTransientError(err: any): boolean {
+function isTransientError(err: TelegramApiError): boolean {
   const code = err?.code;
   if (
     code === "ECONNRESET" ||
