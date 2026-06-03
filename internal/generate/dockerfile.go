@@ -17,6 +17,8 @@ type DockerfileBuilder struct {
 	HasHooks        bool
 	Cmd             []string
 	VolumePaths     []string
+	Workdir         string
+	AgentHome       string
 
 	// Gateway variant fields
 	GatewayBuildImage string
@@ -43,6 +45,8 @@ func NewDockerfileBuilder(g *Generator, variant string) *DockerfileBuilder {
 		HasHooks:        g.hasHooks(),
 		Cmd:             g.Runtime.Cmd,
 		VolumePaths:     g.collectVolumePaths(),
+		Workdir:         g.Workdir,
+		AgentHome:       g.AgentHome,
 	}
 
 	for _, f := range g.Features {

@@ -27,7 +27,10 @@ RUN chmod +x /opt/entrypoint.sh
 
 {{ end -}}
 USER {{ .User }}
-WORKDIR /home/{{ .User }}
+{{ if ne .Workdir .AgentHome -}}
+RUN mkdir -p {{ .Workdir }} && chown {{ .User }}:{{ .User }} {{ .Workdir }}
+{{ end -}}
+WORKDIR {{ .Workdir }}
 
 {{ if .HasEntrypoint -}}
 ENTRYPOINT ["/opt/entrypoint.sh"]

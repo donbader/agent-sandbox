@@ -37,5 +37,8 @@ RUN chmod +x /opt/hooks/*
 {{ end -}}
 COPY entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
-WORKDIR /home/{{ .User }}
+{{ if ne .Workdir .AgentHome -}}
+RUN mkdir -p {{ .Workdir }} && chown {{ .User }}:{{ .User }} {{ .Workdir }}
+{{ end -}}
+WORKDIR {{ .Workdir }}
 ENTRYPOINT ["/opt/entrypoint.sh"]
