@@ -3,7 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    cap_drop:
+      - ALL
     restart: unless-stopped
+{{- if .Podman }}
+    userns_mode: keep-id
+{{- end }}
 {{- if .Ports }}
     ports:
 {{- range .Ports }}

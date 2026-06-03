@@ -16,6 +16,7 @@ import (
 	"github.com/donbader/agent-sandbox/internal/generate"
 	_ "github.com/donbader/agent-sandbox/internal/plugins" // register core feature plugins
 	"github.com/donbader/agent-sandbox/internal/resolve"
+	crt "github.com/donbader/agent-sandbox/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -191,7 +192,7 @@ func writeFleetCompose(outDir string, agents []string) error {
 
 	b.WriteString("include:\n")
 	for _, name := range agents {
-		_, _ = fmt.Fprintf(&b, "  - path: %s/docker-compose.yml\n", name)
+		_, _ = fmt.Fprintf(&b, "  - %s/docker-compose.yml\n", name)
 	}
 
 	composePath := filepath.Join(outDir, "docker-compose.yml")
@@ -219,22 +220,36 @@ func writeFleetEnvExample(dir string, envVars []string) error {
 func composeCmd(dir *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "compose",
-		Short:              "Docker compose passthrough (auto-injects -f .build/docker-compose.yml)",
+		Short:              "Container compose passthrough (auto-injects -f .build/docker-compose.yml)",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			composePath := filepath.Join(*dir, ".build", "docker-compose.yml")
+			buildDir := filepath.Join(*dir, ".build")
+			composePath := filepath.Join(buildDir, "docker-compose.yml")
 			if _, err := os.Stat(composePath); os.IsNotExist(err) {
 				return fmt.Errorf("%s not found — run 'agent-sandbox generate' first", composePath)
 			}
 
-			composeArgs := []string{"-f", composePath, "--project-name", "agent-sandbox"}
+			rt, err := crt.Detect()
+			if err != nil {
+				return err
+			}
+
+			// Fleet mode: expand sub-compose files as multiple -f flags
+			// instead of relying on the `include` directive (not supported by podman-compose)
+			composeFiles := expandFleetComposeFiles(buildDir, composePath)
+
+			var composeArgs []string
+			for _, f := range composeFiles {
+				composeArgs = append(composeArgs, "-f", f)
+			}
+			composeArgs = append(composeArgs, "--project-name", "agent-sandbox")
 			// Auto-inject --env-file if .env exists in project dir
 			envPath := filepath.Join(*dir, ".env")
 			if _, err := os.Stat(envPath); err == nil {
 				composeArgs = append(composeArgs, "--env-file", envPath)
 			}
 			composeArgs = append(composeArgs, args...)
-			c := exec.Command("docker", append([]string{"compose"}, composeArgs...)...)
+			c := exec.Command(rt.ComposeCmd[0], append(rt.ComposeCmd[1:], composeArgs...)...)
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
@@ -244,6 +259,40 @@ func composeCmd(dir *string) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// expandFleetComposeFiles checks if the compose file is a fleet umbrella
+// (contains only include directives). If so, returns the individual sub-compose
+// file paths. Otherwise returns the single compose file path.
+func expandFleetComposeFiles(buildDir, composePath string) []string {
+	data, err := os.ReadFile(composePath)
+	if err != nil {
+		return []string{composePath}
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "include:") {
+		return []string{composePath}
+	}
+
+	// Parse include entries (format: "  - path/to/docker-compose.yml")
+	var files []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "- ") {
+			rel := strings.TrimPrefix(line, "- ")
+			rel = strings.TrimSpace(rel)
+			abs := filepath.Join(buildDir, rel)
+			if _, err := os.Stat(abs); err == nil {
+				files = append(files, abs)
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		return []string{composePath}
+	}
+	return files
 }
 
 func validateCmd(dir *string) *cobra.Command {

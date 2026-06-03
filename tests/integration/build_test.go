@@ -10,12 +10,14 @@ import (
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate"
+	"github.com/donbader/agent-sandbox/internal/runtime"
 	"github.com/donbader/agent-sandbox/plugins/codex"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCodexImage_Builds(t *testing.T) {
 	outDir := t.TempDir()
+	rt := runtime.DetectOrDefault()
 
 	g := &generate.Generator{
 		Config: &config.AgentConfig{
@@ -29,27 +31,28 @@ func TestCodexImage_Builds(t *testing.T) {
 
 	require.NoError(t, g.Run())
 
-	// Verify docker build succeeds
-	cmd := exec.Command("docker", "build", "-t", "agent-sandbox-test-codex", outDir)
+	// Verify container build succeeds
+	cmd := exec.Command(rt.Binary, "build", "-t", "agent-sandbox-test-codex", outDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
-	require.NoError(t, err, "docker build failed")
+	require.NoError(t, err, "container build failed")
 
 	// Cleanup image
 	t.Cleanup(func() {
-		cleanup := exec.Command("docker", "rmi", "agent-sandbox-test-codex")
+		cleanup := exec.Command(rt.Binary, "rmi", "agent-sandbox-test-codex")
 		_ = cleanup.Run()
 	})
 
 	// Verify codex is installed
-	out, err := exec.Command("docker", "run", "--rm", "agent-sandbox-test-codex", "codex", "--version").CombinedOutput()
+	out, err := exec.Command(rt.Binary, "run", "--rm", "agent-sandbox-test-codex", "codex", "--version").CombinedOutput()
 	require.NoError(t, err, "codex --version failed: %s", string(out))
 	t.Logf("codex version: %s", string(out))
 }
 
 func TestCodexImage_AgentUser(t *testing.T) {
 	outDir := t.TempDir()
+	rt := runtime.DetectOrDefault()
 
 	g := &generate.Generator{
 		Config: &config.AgentConfig{
@@ -63,21 +66,21 @@ func TestCodexImage_AgentUser(t *testing.T) {
 
 	require.NoError(t, g.Run())
 
-	cmd := exec.Command("docker", "build", "-t", "agent-sandbox-test-user", outDir)
+	cmd := exec.Command(rt.Binary, "build", "-t", "agent-sandbox-test-user", outDir)
 	require.NoError(t, cmd.Run())
 
 	t.Cleanup(func() {
-		cleanup := exec.Command("docker", "rmi", "agent-sandbox-test-user")
+		cleanup := exec.Command(rt.Binary, "rmi", "agent-sandbox-test-user")
 		_ = cleanup.Run()
 	})
 
 	// Verify runs as agent user
-	out, err := exec.Command("docker", "run", "--rm", "agent-sandbox-test-user", "whoami").CombinedOutput()
+	out, err := exec.Command(rt.Binary, "run", "--rm", "agent-sandbox-test-user", "whoami").CombinedOutput()
 	require.NoError(t, err)
 	require.Contains(t, string(out), "agent")
 
 	// Verify workdir is /home/agent
-	out, err = exec.Command("docker", "run", "--rm", "agent-sandbox-test-user", "pwd").CombinedOutput()
+	out, err = exec.Command(rt.Binary, "run", "--rm", "agent-sandbox-test-user", "pwd").CombinedOutput()
 	require.NoError(t, err)
 	require.Contains(t, string(out), "/home/agent")
 }
