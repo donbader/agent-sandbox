@@ -24,10 +24,11 @@ func TestEntrypointBuilder_Gateway(t *testing.T) {
 
 func TestEntrypointBuilder_AgentWithGateway(t *testing.T) {
 	b := &EntrypointBuilder{
-		Variant:    "agent",
-		HasGateway: true,
-		User:       "agent",
-		RuntimeCmd: "sleep infinity",
+		Variant:           "agent",
+		HasGateway:        true,
+		GatewayListenPort: 8443,
+		User:              "agent",
+		RuntimeCmd:        "sleep infinity",
 	}
 
 	content, err := b.Render()
@@ -37,7 +38,8 @@ func TestEntrypointBuilder_AgentWithGateway(t *testing.T) {
 	assert.Contains(t, content, "getent hosts $GATEWAY_HOST")
 	assert.Contains(t, content, "nameserver $GATEWAY_IP")
 	assert.Contains(t, content, "/etc/resolv.conf")
-	assert.NotContains(t, content, "--to-port 8443")
+	assert.Contains(t, content, "redirecting traffic to gateway proxy")
+	assert.Contains(t, content, "iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:8443")
 	assert.NotContains(t, content, "/usr/local/bin/gateway")
 	assert.Contains(t, content, "exec su -c '")
 	assert.Contains(t, content, "exec sleep infinity' agent")
@@ -45,13 +47,14 @@ func TestEntrypointBuilder_AgentWithGateway(t *testing.T) {
 
 func TestEntrypointBuilder_AgentWithChannelManager(t *testing.T) {
 	b := &EntrypointBuilder{
-		Variant:        "agent",
-		HasGateway:     true,
-		HasMITM:        true,
-		User:           "agent",
-		ChannelManager: true,
-		CMEntryPoint:   "node /opt/channel-manager/dist/index.js",
-		CACertPath:     sandboxCACertPath,
+		Variant:           "agent",
+		HasGateway:        true,
+		HasMITM:           true,
+		GatewayListenPort: 8443,
+		User:              "agent",
+		ChannelManager:    true,
+		CMEntryPoint:      "node /opt/channel-manager/dist/index.js",
+		CACertPath:        sandboxCACertPath,
 	}
 
 	content, err := b.Render()
@@ -97,8 +100,9 @@ func TestEntrypointBuilder_AgentWithHomeOverride(t *testing.T) {
 
 func TestEntrypointBuilder_AgentWithPorts(t *testing.T) {
 	b := &EntrypointBuilder{
-		Variant:    "agent",
-		HasGateway: true,
+		Variant:           "agent",
+		HasGateway:        true,
+		GatewayListenPort: 8443,
 		Ports: []PortMapping{
 			{HostPort: "1455", ContainerPort: "1455"},
 			{HostPort: "8080", ContainerPort: "3000"},
@@ -112,6 +116,24 @@ func TestEntrypointBuilder_AgentWithPorts(t *testing.T) {
 
 	assert.Contains(t, content, "--dport 1455 -j DNAT --to-destination 127.0.0.1:1455")
 	assert.Contains(t, content, "--dport 3000 -j DNAT --to-destination 127.0.0.1:3000")
+}
+
+func TestEntrypointBuilder_AgentWithHTTPPorts(t *testing.T) {
+	b := &EntrypointBuilder{
+		Variant:           "agent",
+		HasGateway:        true,
+		GatewayListenPort: 8443,
+		HTTPPorts:         []string{"8765", "9090"},
+		User:              "agent",
+		RuntimeCmd:        "sleep infinity",
+	}
+
+	content, err := b.Render()
+	require.NoError(t, err)
+
+	assert.Contains(t, content, "iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:8443")
+	assert.Contains(t, content, "iptables -t nat -A OUTPUT -p tcp --dport 8765 -j DNAT --to-destination $GATEWAY_IP:8443")
+	assert.Contains(t, content, "iptables -t nat -A OUTPUT -p tcp --dport 9090 -j DNAT --to-destination $GATEWAY_IP:8443")
 }
 
 func TestEntrypointBuilder_UserCommandFormat(t *testing.T) {

@@ -14,6 +14,12 @@ echo "nameserver $GATEWAY_IP" > /etc/resolv.conf
 
 echo "entrypoint: setting default route via gateway..."
 ip route replace default via $GATEWAY_IP
+
+echo "entrypoint: redirecting traffic to gateway proxy..."
+iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination $GATEWAY_IP:{{ .GatewayListenPort }}
+{{- range .HTTPPorts }}
+iptables -t nat -A OUTPUT -p tcp --dport {{ . }} -j DNAT --to-destination $GATEWAY_IP:{{ $.GatewayListenPort }}
+{{- end }}
 {{ range .Ports }}
 iptables -t nat -A PREROUTING -p tcp --dport {{ .ContainerPort }} -j DNAT --to-destination 127.0.0.1:{{ .ContainerPort }}
 {{ end }}{{ end }}{{ if .HasMITM }}

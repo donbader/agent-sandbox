@@ -110,17 +110,19 @@ func (g *Generator) writeAgentEntrypoint() error {
 	}
 
 	b := &EntrypointBuilder{
-		Variant:         "agent",
-		HasGateway:      g.Gateway,
-		HasMITM:         g.hasMITMDomains(),
-		HasHomeOverride: g.hasHomeOverride(),
-		HasHooks:        len(hooks) > 0,
-		Hooks:           hooks,
-		User:            g.Runtime.User,
-		Ports:           ports,
-		RuntimeCmd:      strings.Join(g.Runtime.Cmd, " "),
-		ChannelManager:  g.ChannelManager,
-		CACertPath:      sandboxCACertPath,
+		Variant:           "agent",
+		HasGateway:        g.Gateway,
+		HasMITM:           g.hasMITMDomains(),
+		HasHomeOverride:   g.hasHomeOverride(),
+		HasHooks:          len(hooks) > 0,
+		Hooks:             hooks,
+		User:              g.Runtime.User,
+		Ports:             ports,
+		RuntimeCmd:        strings.Join(g.Runtime.Cmd, " "),
+		ChannelManager:    g.ChannelManager,
+		CACertPath:        sandboxCACertPath,
+		GatewayListenPort: g.GatewaySpec.ListenPort,
+		HTTPPorts:         g.collectHTTPPorts(),
 	}
 
 	if g.ChannelManager {
