@@ -219,7 +219,19 @@ export class AcpAgent {
     // Check prompt interceptor (wrapper commands, command plugins)
     if (this.promptInterceptor) {
       const intercepted = await this.promptInterceptor(text, sessionId);
-      if (intercepted !== null) return intercepted;
+      if (intercepted !== null) {
+        // Emit as agent_message_chunk so channel stream controllers render it.
+        if (options?.onSessionUpdate) {
+          options.onSessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: intercepted },
+            },
+          } as acp.SessionNotification);
+        }
+        return intercepted;
+      }
     }
 
     const chunks: string[] = [];

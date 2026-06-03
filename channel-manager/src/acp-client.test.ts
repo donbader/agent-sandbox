@@ -529,3 +529,104 @@ describe("AcpAgent.prompt() with PromptOptions", () => {
     expect(onSessionUpdate).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// AcpAgent — prompt interceptor
+// ---------------------------------------------------------------------------
+
+describe("AcpAgent prompt interceptor", () => {
+  function createConnectedAgent(): AcpAgent {
+    const agent = new AcpAgent({ cmd: ["echo", "hi"], cwd: "/tmp" });
+    // Bypass start() by injecting a mock connection
+    (agent as any).connection = { prompt: vi.fn() };
+    return agent;
+  }
+
+  it("returns intercepted string when interceptor returns non-null", async () => {
+    const agent = createConnectedAgent();
+    agent.setPromptInterceptor(async () => "intercepted response");
+
+    const result = await agent.prompt("sess-1", "/oauth notion");
+    expect(result).toBe("intercepted response");
+  });
+
+  it("emits agent_message_chunk via onSessionUpdate when intercepted", async () => {
+    const agent = createConnectedAgent();
+    agent.setPromptInterceptor(async () => "OAuth URL here");
+
+    const onSessionUpdate = vi.fn();
+    const result = await agent.prompt("sess-1", "/oauth notion", { onSessionUpdate });
+
+    expect(result).toBe("OAuth URL here");
+    expect(onSessionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "OAuth URL here" },
+        },
+      }),
+    );
+  });
+
+  it("does not emit onSessionUpdate when no callback provided", async () => {
+    const agent = createConnectedAgent();
+    agent.setPromptInterceptor(async () => "response");
+
+    // Should not throw even without onSessionUpdate
+    const result = await agent.prompt("sess-1", "/test");
+    expect(result).toBe("response");
+  });
+
+  it("forwards to agent when interceptor returns null", async () => {
+    const agent = createConnectedAgent();
+    const mockPrompt = vi.fn().mockResolvedValue(undefined);
+    (agent as any).connection = { prompt: mockPrompt };
+    agent.setPromptInterceptor(async () => null);
+
+    const onSessionUpdate = vi.fn();
+
+    // Simulate agent sending a message chunk during prompt
+    mockPrompt.mockImplementation(async () => {
+      const acpHandler = (agent as any).acpHandler as BridgeClient;
+      await acpHandler.sessionUpdate({
+        sessionId: "sess-1",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "agent reply" } },
+      } as any);
+    });
+
+    const result = await agent.prompt("sess-1", "normal message", { onSessionUpdate });
+    expect(result).toBe("agent reply");
+    expect(mockPrompt).toHaveBeenCalled();
+  });
+
+  it("passes sessionId to interceptor", async () => {
+    const agent = createConnectedAgent();
+    const interceptor = vi.fn().mockResolvedValue("ok");
+    agent.setPromptInterceptor(interceptor);
+
+    await agent.prompt("my-session", "/oauth notion");
+    expect(interceptor).toHaveBeenCalledWith("/oauth notion", "my-session");
+  });
+
+  it("does not call onSessionUpdate when interceptor returns null (forwarded to agent)", async () => {
+    const agent = createConnectedAgent();
+    const mockPrompt = vi.fn().mockResolvedValue(undefined);
+    (agent as any).connection = { prompt: mockPrompt };
+    agent.setPromptInterceptor(async () => null);
+
+    const onSessionUpdate = vi.fn();
+    await agent.prompt("sess-1", "hello", { onSessionUpdate });
+
+    // onSessionUpdate should NOT have been called with our synthetic chunk
+    // (it may be called via the normal ACP flow, but not the interceptor path)
+    expect(onSessionUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "hello" },
+        }),
+      }),
+    );
+  });
+});
