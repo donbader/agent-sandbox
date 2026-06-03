@@ -8,17 +8,18 @@ import (
 
 // ComposeBuilder holds data for rendering docker-compose templates.
 type ComposeBuilder struct {
-	Variant        string   // "single", "gateway"
-	AgentName      string
-	GatewayName    string
-	LogLevel       string
-	Ports          []string
-	Volumes        []string
-	NamedVolumes   []string
-	EnvVars        []string
-	AgentEnv       []string
-	HasMITM        bool
-	GatewayCertDir string
+	Variant          string   // "single", "gateway"
+	AgentName        string
+	GatewayName      string
+	LogLevel         string
+	Ports            []string
+	Volumes          []string
+	NamedVolumes     []string
+	EnvVars          []string
+	AgentEnv         []string
+	HasMITM          bool
+	GatewayCertDir   string
+	ExternalNetworks []string
 }
 
 // buildComposeBuilder constructs a ComposeBuilder from the Generator state.
@@ -36,6 +37,7 @@ func (g *Generator) buildComposeBuilder() *ComposeBuilder {
 		cb.AgentEnv = g.collectAgentEnv()
 		cb.HasMITM = g.hasMITMDomains()
 		cb.GatewayCertDir = gatewayCertDir
+		cb.ExternalNetworks = g.collectExternalNetworks()
 
 		// Agent volumes: feature volumes + shared-certs (when MITM)
 		volumes := g.collectVolumes()

@@ -6,6 +6,9 @@ services:
     networks:
       internal:
       default:
+{{- range .ExternalNetworks }}
+      {{ . }}:
+{{- end }}
     cap_add:
       - NET_ADMIN
     sysctls:
@@ -67,6 +70,10 @@ services:
 networks:
   internal:
     internal: true
+{{- range .ExternalNetworks }}
+  {{ . }}:
+    external: true
+{{- end }}
 {{- if .NamedVolumes }}
 
 volumes:

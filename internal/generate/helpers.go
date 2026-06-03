@@ -134,6 +134,21 @@ func (g *Generator) collectRewriters() []resolve.RewriterConfig {
 	return rewriters
 }
 
+// collectExternalNetworks gathers deduplicated external network names from features.
+func (g *Generator) collectExternalNetworks() []string {
+	var networks []string
+	seen := map[string]bool{}
+	for _, f := range g.Features {
+		for _, n := range f.ExternalNetworks {
+			if !seen[n] {
+				seen[n] = true
+				networks = append(networks, n)
+			}
+		}
+	}
+	return networks
+}
+
 // collectAgentEnv gathers agent-side environment variables from features.
 // These are dummy/non-secret values set in the agent container (e.g., GH_TOKEN=dummy).
 func (g *Generator) collectAgentEnv() []string {
