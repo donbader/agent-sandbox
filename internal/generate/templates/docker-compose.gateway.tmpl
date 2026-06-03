@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gateway
+    env_file:
+      - ../.env
     networks:
       internal:
       default:
