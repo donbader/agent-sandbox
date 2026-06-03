@@ -28,17 +28,18 @@ export interface PluginLogger {
 
 /** Create a PluginLogger backed by pino, with child() support for sub-components. */
 export function createPluginLogger(component: string): PluginLogger {
-  function wrap(pinoLogger: pino.Logger, comp: string): PluginLogger {
+  function wrap(comp: string): PluginLogger {
+    // Always create from root logger to avoid duplicate component bindings.
+    const pinoChild = logger.child({ component: comp });
     return {
-      debug(data, msg) { pinoLogger.debug(data, msg); },
-      info(data, msg) { pinoLogger.info(data, msg); },
-      warn(data, msg) { pinoLogger.warn(data, msg); },
-      error(data, msg) { pinoLogger.error(data, msg); },
+      debug(data, msg) { pinoChild.debug(data, msg); },
+      info(data, msg) { pinoChild.info(data, msg); },
+      warn(data, msg) { pinoChild.warn(data, msg); },
+      error(data, msg) { pinoChild.error(data, msg); },
       child(subcomponent: string) {
-        const childComp = `${comp}:${subcomponent}`;
-        return wrap(pinoLogger.child({ component: childComp }), childComp);
+        return wrap(`${comp}:${subcomponent}`);
       },
     };
   }
-  return wrap(logger.child({ component }), component);
+  return wrap(component);
 }
