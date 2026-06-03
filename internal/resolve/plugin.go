@@ -59,6 +59,7 @@ type FeatureContributions struct {
 	ChannelConfig    map[string]any   // plugin-specific config passed to channel-manager-config.json
 	Rewriters       []RewriterConfig // gateway rewriters to instantiate for this feature
 	CommandPluginDir string          // path to TypeScript command plugin source (copied into channel-manager)
+	ExternalNetworks []string        // external Docker networks the gateway should join
 }
 
 // registry holds registered feature plugins.
