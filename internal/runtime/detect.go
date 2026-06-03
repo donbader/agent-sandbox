@@ -3,7 +3,6 @@ package runtime
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 )
 
@@ -22,20 +21,27 @@ type Detected struct {
 	ComposeCmd []string
 }
 
-// Detect probes the system for an available container runtime.
-// It checks the CONTAINER_RUNTIME env var first, then probes PATH
-// (podman preferred over docker). Returns an error if no runtime is found.
-func Detect() (*Detected, error) {
-	if envVal := os.Getenv("CONTAINER_RUNTIME"); envVal != "" {
-		return detectFromEnv(envVal)
+// DetectWithOverride returns the detected runtime. If override is "docker" or
+// "podman", that value is used directly (after verifying the binary exists on
+// PATH). Otherwise it falls back to PATH auto-detection (podman preferred over
+// docker). Returns an error if no runtime is found.
+func DetectWithOverride(override string) (*Detected, error) {
+	if override != "" {
+		return resolveOverride(override)
 	}
 	return detectFromPath()
 }
 
-// DetectOrDefault returns the detected runtime, falling back to Docker
-// defaults if detection fails. Useful for non-critical paths like tests.
+// DetectOrDefault returns the detected runtime via PATH auto-detection,
+// falling back to Docker defaults if detection fails.
 func DetectOrDefault() *Detected {
-	d, err := Detect()
+	return DetectOrDefaultWithOverride("")
+}
+
+// DetectOrDefaultWithOverride is like DetectOrDefault but accepts an override
+// value that takes precedence over PATH detection.
+func DetectOrDefaultWithOverride(override string) *Detected {
+	d, err := DetectWithOverride(override)
 	if err != nil {
 		return &Detected{
 			Runtime:    Docker,
@@ -46,20 +52,20 @@ func DetectOrDefault() *Detected {
 	return d
 }
 
-func detectFromEnv(val string) (*Detected, error) {
+func resolveOverride(val string) (*Detected, error) {
 	switch Runtime(val) {
 	case Docker:
 		if _, err := exec.LookPath("docker"); err != nil {
-			return nil, fmt.Errorf("CONTAINER_RUNTIME set to %q but binary not found on PATH", val)
+			return nil, fmt.Errorf("container_runtime set to %q but binary not found on PATH", val)
 		}
 		return buildDetected(Docker), nil
 	case Podman:
 		if _, err := exec.LookPath("podman"); err != nil {
-			return nil, fmt.Errorf("CONTAINER_RUNTIME set to %q but binary not found on PATH", val)
+			return nil, fmt.Errorf("container_runtime set to %q but binary not found on PATH", val)
 		}
 		return buildDetected(Podman), nil
 	default:
-		return nil, fmt.Errorf("unsupported CONTAINER_RUNTIME value %q: must be \"docker\" or \"podman\"", val)
+		return nil, fmt.Errorf("unsupported container_runtime value %q: must be \"docker\" or \"podman\"", val)
 	}
 }
 

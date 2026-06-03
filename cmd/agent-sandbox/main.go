@@ -229,7 +229,13 @@ func composeCmd(dir *string) *cobra.Command {
 				return fmt.Errorf("%s not found — run 'agent-sandbox generate' first", composePath)
 			}
 
-			rt, err := crt.Detect()
+			// Load config to get container_runtime override; ignore errors
+			// (fleet mode or missing config still auto-detects from PATH).
+			var containerRuntime string
+			if cfg, err := config.Load(*dir); err == nil {
+				containerRuntime = cfg.ContainerRuntime
+			}
+			rt, err := crt.DetectWithOverride(containerRuntime)
 			if err != nil {
 				return err
 			}
