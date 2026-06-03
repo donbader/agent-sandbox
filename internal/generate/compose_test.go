@@ -160,4 +160,18 @@ func TestComposeBuilder_Gateway(t *testing.T) {
 
 		assert.Contains(t, content, "GH_TOKEN=dummy")
 	})
+
+	t.Run("external networks collected from features", func(t *testing.T) {
+		g := &Generator{
+			Config:  &config.AgentConfig{Name: "coder"},
+			Runtime: &resolve.RuntimeConfig{},
+			Features: []*resolve.FeatureContributions{
+				{ExternalNetworks: []string{"rkgw-external", "my-db-net"}},
+			},
+			Gateway: true,
+		}
+
+		cb := g.buildComposeBuilder()
+		assert.Equal(t, []string{"rkgw-external", "my-db-net"}, cb.ExternalNetworks)
+	})
 }
