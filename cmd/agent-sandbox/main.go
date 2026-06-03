@@ -37,6 +37,7 @@ func main() {
 	root.AddCommand(generateCmd(&dir))
 	root.AddCommand(composeCmd(&dir))
 	root.AddCommand(validateCmd(&dir))
+	root.AddCommand(auditCmd(&dir))
 	root.AddCommand(pluginsCmd())
 	root.AddCommand(initCmd())
 	root.AddCommand(upgradeCmd())
