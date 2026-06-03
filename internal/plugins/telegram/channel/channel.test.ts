@@ -280,6 +280,59 @@ describe("TelegramChannel (thin channel manager)", () => {
     });
   });
 
+  describe("per-chat prompt queue", () => {
+    it("serializes prompts from the same chat", async () => {
+      let resolveFirst: () => void;
+      const firstPrompt = new Promise<void>((r) => { resolveFirst = r; });
+
+      let promptOrder: string[] = [];
+      agent.prompt.mockImplementation(async (_sid: string, text: string) => {
+        promptOrder.push(text);
+        if (text === "first") await firstPrompt;
+        return "done";
+      });
+
+      // Fire two messages rapidly on the same chat
+      messageHandler!(makeCtx({ chatId: "999", username: "alice", text: "first" }));
+      messageHandler!(makeCtx({ chatId: "999", username: "alice", text: "second" }));
+
+      // Wait for first prompt to be called
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1));
+
+      // Second should NOT have started yet (queue serializes)
+      expect(promptOrder).toEqual(["first"]);
+
+      // Resolve first prompt
+      resolveFirst!();
+
+      // Now second should proceed
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
+      expect(promptOrder).toEqual(["first", "second"]);
+    });
+
+    it("allows concurrent prompts from different chats", async () => {
+      let resolveFirst: () => void;
+      const firstPrompt = new Promise<void>((r) => { resolveFirst = r; });
+
+      let promptOrder: string[] = [];
+      agent.prompt.mockImplementation(async (_sid: string, text: string) => {
+        promptOrder.push(text);
+        if (text === "chat-a") await firstPrompt;
+        return "done";
+      });
+
+      messageHandler!(makeCtx({ chatId: "100", username: "alice", text: "chat-a" }));
+      messageHandler!(makeCtx({ chatId: "200", username: "bob", text: "chat-b" }));
+
+      // Both should start since they are different chats
+      await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(2));
+      expect(promptOrder).toContain("chat-a");
+      expect(promptOrder).toContain("chat-b");
+
+      resolveFirst!();
+    });
+  });
+
   describe("bot menu registration", () => {
     it("does not register commands if agent has none", () => {
       // Agent has no commands declared yet
