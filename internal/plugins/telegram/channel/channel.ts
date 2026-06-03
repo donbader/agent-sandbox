@@ -6,7 +6,7 @@ import { createLogger } from "../logger.js";
 import { StartupBuffer } from "../startup-buffer.js";
 import { RateLimiter } from "./delivery/rate-limiter.js";
 import { withRetry } from "./delivery/api-retry.js";
-import { StreamController } from "./stream-controller.js";
+import { StreamController, type ToolCallContentItem } from "./stream-controller.js";
 import { SessionManager } from "./session-manager.js";
 import { isAllowed } from "./acl.js";
 import { parseConfig, type TelegramChannelConfig } from "./config.js";
@@ -188,7 +188,7 @@ export class TelegramChannel implements Channel {
               stream.toolStart(update.toolCallId, update.title, update.status);
               break;
             case "tool_call_update":
-              stream.toolUpdate(update.toolCallId, update.status, update.content);
+              stream.toolUpdate(update.toolCallId, update.status ?? "in_progress", update.content as ToolCallContentItem[] | undefined ?? undefined);
               break;
             case "agent_message_chunk":
               if (update.content.type === "text") {

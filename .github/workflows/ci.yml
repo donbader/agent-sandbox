@@ -35,8 +35,15 @@ jobs:
       - name: Test
         run: go test -race ./...
 
-      - name: Build
-        run: go build ./...
+      - name: Build CLI
+        run: go build -o agent-sandbox ./cmd/agent-sandbox/
+
+      - name: Upload CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-sandbox-linux
+          path: agent-sandbox
+          retention-days: 1
 
       - name: Fail if lint failed
         if: steps.lint.outcome == 'failure'
@@ -65,3 +72,29 @@ jobs:
 
       - name: Test
         run: npx vitest run
+
+  examples:
+    name: Examples (generate + docker build)
+    runs-on: ubuntu-latest
+    needs: go
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [telegram-vibe, local-coding, multi-agent]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download CLI binary
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-sandbox-linux
+
+      - name: Make CLI executable
+        run: chmod +x ./agent-sandbox
+
+      - name: Generate build artifacts
+        run: ./agent-sandbox generate -C examples/${{ matrix.example }}
+
+      - name: Docker build
+        working-directory: examples/${{ matrix.example }}/.build
+        run: docker compose build
