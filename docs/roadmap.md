@@ -172,23 +172,22 @@ agent-sandbox generate && agent-sandbox compose up --build
 # → Full-featured agent: Docker API proxy, mcp-oauth, streaming
 ```
 
-- [ ] `plugins/docker/feature.yaml` + `gateway/handler.go` + compose sidecar
-- [ ] `plugins/mcp-oauth/feature.yaml` + `gateway/handler.go`
-- [ ] Streaming reply (edit Telegram message as agent streams)
-- [ ] Context buffer (multi-message batching before sending to agent)
-- [ ] Agent-provided commands (declared via ACP initialize response)
+- [x] `plugins/mcp-oauth/feature.yaml` + `gateway/handler.go`
+- [x] Streaming reply (edit Telegram message as agent streams)
+- [x] Agent-provided commands (declared via ACP initialize response)
 - [x] Telegram `setMyCommands` registration (bot menu)
+- [ ] `plugins/docker/feature.yaml` + `gateway/handler.go` + compose sidecar
+- [ ] Context buffer (multi-message batching before sending to agent)
 - [ ] Security hardening (cap_drop, no-new-privileges, hidepid, file permissions)
 
 ---
 
-### Phase 7: CI + Polish
+### Phase 7: CI + Polish ✅
 
-- [ ] GitHub Actions CI (lint, test, build on PR)
-- [ ] README with quickstart (update)
-- [ ] Migration guide for agent-fleet users
+- [x] GitHub Actions CI (lint, test, build on PR)
+- [x] README with quickstart (update)
 
-**Note:** GoReleaser release pipeline and install.sh were added in Phase 1.
+**Note:** GoReleaser release pipeline and install.sh were added in Phase 1. Migration guide dropped (no agent-fleet users).
 
 ---
 
@@ -216,7 +215,4 @@ agent-sandbox generate && agent-sandbox compose up --build
 
 ## agent-fleet Disposition
 
-- [ ] Tag final release (v0.12.0)
-- [ ] Update README: "maintenance mode, see agent-sandbox for new development"
-- [ ] Keep repo for reference
-- [ ] No new features, security fixes only
+No active users — no migration needed. Repo kept for historical reference only.
