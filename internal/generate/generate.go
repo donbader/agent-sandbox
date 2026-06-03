@@ -173,6 +173,10 @@ func (g *Generator) Run() error {
 		return err
 	}
 
+	if err := g.validateOutput(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
