@@ -100,16 +100,19 @@ export function formatMarkdown(text: string): string {
   result = result.replace(/\*\*\s*$/gm, "");
   result = result.replace(/~~\s*$/gm, "");
 
-  // Step 6: Restore placeholders
-  for (let i = 0; i < blockquotes.length; i++) {
-    result = result.replace(`\x00BLOCKQUOTE_${i}\x00`, blockquotes[i]);
-  }
-  for (let i = 0; i < inlineCodes.length; i++) {
-    result = result.replace(`\x00INLINE_${i}\x00`, inlineCodes[i]);
-  }
-  for (let i = 0; i < codeBlocks.length; i++) {
-    result = result.replace(`\x00CODEBLOCK_${i}\x00`, codeBlocks[i]);
-  }
+  // Step 6: Restore all placeholders in a single pass
+  result = result.replace(
+    /\x00(BLOCKQUOTE|INLINE|CODEBLOCK)_(\d+)\x00/g,
+    (_match, type, idx) => {
+      const i = Number(idx);
+      switch (type) {
+        case "BLOCKQUOTE": return blockquotes[i];
+        case "INLINE": return inlineCodes[i];
+        case "CODEBLOCK": return codeBlocks[i];
+        default: return "";
+      }
+    },
+  );
 
   return result;
 }

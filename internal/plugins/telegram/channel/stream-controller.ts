@@ -53,6 +53,7 @@ export class StreamController {
   private tools: ToolEntry[] = [];
   private thinkingBuffer = "";
   private thinkingDirty = false;
+  private contentDirty = false;
 
   // Message tracking
   private messageId: number | null = null;
@@ -91,8 +92,7 @@ export class StreamController {
   toolStart(toolCallId: string, title: string, status?: string): void {
     if (this.state === "DONE") return;
 
-    this.scheduleResultRemovals();
-
+    this.contentDirty = true;
     this.tools.push({
       id: toolCallId,
       title,
@@ -112,6 +112,7 @@ export class StreamController {
     if (!tool) return;
 
     tool.status = status as ToolEntry["status"];
+    this.contentDirty = true;
 
     if (content && content.length > 0) {
       const textItem = content.find((c) =>
@@ -120,6 +121,7 @@ export class StreamController {
       if (textItem && textItem.type === "content" && textItem.content?.type === "text") {
         const fullText = textItem.content.text;
         tool.resultPreview = fullText.length > 100 ? fullText.slice(-100) : fullText;
+        this.scheduleResultRemoval(tool);
       }
     }
   }
@@ -127,9 +129,8 @@ export class StreamController {
   pushText(text: string): void {
     if (this.state === "DONE") return;
 
-    this.scheduleResultRemovals();
-
     this.textChunks.push(text);
+    this.contentDirty = true;
 
     if (this.state === "BUFFERING" && !this.bufferTimer) {
       this.startBufferTimer();
@@ -239,12 +240,16 @@ export class StreamController {
     if (this.state !== "STREAMING") return;
     if (!this.messageId || this.overflowing) return;
 
+    // Fast dirty check: skip render if nothing changed since last tick
+    if (!this.contentDirty) return;
+    this.contentDirty = false;
+
     const content = this.renderContent();
     if (!content) return;
 
     const html = this.formatForSend(content);
 
-    // Dirty check
+    // Dirty check against last sent
     if (html === this.lastSentHtml) return;
 
     // Check for overflow
@@ -322,19 +327,17 @@ export class StreamController {
 
   // --- Private: Content rendering ---
 
-  private scheduleResultRemovals(): void {
-    for (const tool of this.tools) {
-      if (tool.resultPreview && !this.resultRemovalTimers.has(tool.id)) {
-        const timer = setTimeout(() => {
-          this.resultRemovalTimers.delete(tool.id);
-          tool.resultPreview = undefined;
-          if (this.state === "STREAMING") {
-            this.tickThrottle();
-          }
-        }, 2000);
-        this.resultRemovalTimers.set(tool.id, timer);
+  private scheduleResultRemoval(tool: ToolEntry): void {
+    if (this.resultRemovalTimers.has(tool.id)) return;
+    const timer = setTimeout(() => {
+      this.resultRemovalTimers.delete(tool.id);
+      tool.resultPreview = undefined;
+      this.contentDirty = true;
+      if (this.state === "STREAMING") {
+        this.tickThrottle();
       }
-    }
+    }, 2000);
+    this.resultRemovalTimers.set(tool.id, timer);
   }
 
   private renderContent(): string {

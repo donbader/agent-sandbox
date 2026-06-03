@@ -104,6 +104,8 @@ export class AcpAgent {
   private agentCommands: AgentCommand[] = [];
   private commandsListeners: Array<(commands: AgentCommand[]) => void> = [];
   private _perfHistory: number[] = [];
+  private _perfIndex = 0;
+  private _perfFull = false;
   private static readonly PERF_MAX = 50;
 
   constructor(config: AcpAgentConfig) {
@@ -119,7 +121,11 @@ export class AcpAgent {
 
   /** Recent prompt durations in ms (max 50, for /diagnose perf stats). */
   get perfHistory(): number[] {
-    return this._perfHistory;
+    if (!this._perfFull) return this._perfHistory.slice(0, this._perfIndex);
+    return [
+      ...this._perfHistory.slice(this._perfIndex),
+      ...this._perfHistory.slice(0, this._perfIndex),
+    ];
   }
 
   /** Get the current list of agent-declared commands. */
@@ -316,9 +322,14 @@ export class AcpAgent {
   }
 
   private recordPromptDuration(ms: number): void {
-    this._perfHistory.push(ms);
-    if (this._perfHistory.length > AcpAgent.PERF_MAX) {
-      this._perfHistory.shift();
+    if (this._perfHistory.length < AcpAgent.PERF_MAX) {
+      this._perfHistory.push(ms);
+    } else {
+      this._perfHistory[this._perfIndex] = ms;
+    }
+    this._perfIndex = (this._perfIndex + 1) % AcpAgent.PERF_MAX;
+    if (this._perfIndex === 0 && this._perfHistory.length === AcpAgent.PERF_MAX) {
+      this._perfFull = true;
     }
   }
 }
