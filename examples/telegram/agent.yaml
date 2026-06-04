@@ -7,7 +7,7 @@ runtime:
   extra_builds:
     # Build the channel-manager (telegram bridge) into the agent image
     - "COPY channel-manager/ /opt/channel-manager-src/"
-    - "RUN --mount=type=cache,target=/root/.npm cd /opt/channel-manager-src && npm install && npm run build && mv dist /opt/channel-manager/dist && mv node_modules /opt/channel-manager/node_modules && rm -rf /opt/channel-manager-src"
+    - "RUN --mount=type=cache,target=/root/.npm cd /opt/channel-manager-src && npm install && npm run build && mkdir -p /opt/channel-manager && mv dist /opt/channel-manager/dist && mv node_modules /opt/channel-manager/node_modules && rm -rf /opt/channel-manager-src"
     - "COPY channel-manager-config.json /opt/channel-manager/config.json"
   entrypoint: ["node", "/opt/channel-manager/dist/index.js"]
 
