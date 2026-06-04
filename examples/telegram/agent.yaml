@@ -1,12 +1,15 @@
-# Telegram bot agent with ACP wrapping
+# Telegram bot agent — channel-manager runs as entrypoint, spawns codex via ACP.
 name: telegram-agent
 log_level: debug
 
 runtime:
   image: "@builtin/codex"
   extra_builds:
-    - "RUN --mount=type=cache,target=/root/.npm npm install -g @zed-industries/codex-acp@0.15.0"
-  entrypoint: ["codex-acp", "--listen", ":8080"]
+    # Build the channel-manager (telegram bridge) into the agent image
+    - "COPY channel-manager/ /opt/channel-manager-src/"
+    - "RUN --mount=type=cache,target=/root/.npm cd /opt/channel-manager-src && npm install && npm run build && mv dist /opt/channel-manager/dist && mv node_modules /opt/channel-manager/node_modules && rm -rf /opt/channel-manager-src"
+    - "COPY channel-manager-config.json /opt/channel-manager/config.json"
+  entrypoint: ["node", "/opt/channel-manager/dist/index.js"]
 
 gateway:
   services:
@@ -20,4 +23,3 @@ installations:
       bot_token: "${TELEGRAM_BOT_TOKEN}"
       allowed_users:
         - "@${TELEGRAM_USERNAME}"
-      require_mention: false

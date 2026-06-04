@@ -31,6 +31,7 @@ func TestBuildDockerfile(t *testing.T) {
 	assert.Contains(t, output, "RUN apt-get update && apt-get install -y git")
 	assert.Contains(t, output, "RUN npm install -g some-tool")
 	assert.Contains(t, output, `CMD ["codex-acp","--listen",":8080"]`)
+	assert.Contains(t, output, "COPY .build/entrypoint.sh")
 }
 
 func TestBuildDockerfile_BuiltinPreset(t *testing.T) {

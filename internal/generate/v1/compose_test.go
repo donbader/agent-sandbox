@@ -31,12 +31,12 @@ func TestBuildCompose(t *testing.T) {
 	output, err := BuildCompose(cfg, contribs, "/project")
 	require.NoError(t, err)
 
-	// Agent service present
-	assert.Contains(t, output, "agent:")
+	// Agent service uses config name
+	assert.Contains(t, output, "test-agent:")
 	assert.Contains(t, output, "data:/opt/data")
 
-	// Gateway service present
-	assert.Contains(t, output, "gateway:")
+	// Gateway service uses config name + "-gateway"
+	assert.Contains(t, output, "test-agent-gateway:")
 
 	// Sidecar present with relative path from .build/
 	assert.Contains(t, output, "telegram:")
@@ -55,7 +55,7 @@ func TestBuildCompose_NoSidecars(t *testing.T) {
 	output, err := BuildCompose(cfg, nil, "/project")
 	require.NoError(t, err)
 
-	assert.Contains(t, output, "agent:")
-	assert.Contains(t, output, "gateway:")
+	assert.Contains(t, output, "simple-agent:")
+	assert.Contains(t, output, "simple-agent-gateway:")
 	assert.NotContains(t, output, "telegram:")
 }

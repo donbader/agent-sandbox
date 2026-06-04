@@ -1,0 +1,9 @@
+{
+  "channel": "telegram",
+  "acp_command": ["codex", "--full-auto"],
+  "cwd": "/home/agent/workspace",
+  "access_control": {
+    "allowed_users": [],
+    "require_mention": false
+  }
+}

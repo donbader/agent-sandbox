@@ -3,37 +3,19 @@ options:
   bot_token:
     type: string
     required: true
-    description: "Telegram bot token"
+    description: "Telegram bot token (passed to gateway for token rewrite)"
   allowed_users:
     type: array
     required: false
     description: "Telegram usernames allowed to interact"
     items:
       type: string
-  require_mention:
-    type: boolean
-    required: false
-    default: false
-    description: "Whether the bot requires @mention in groups"
 
 contributes:
   gateway:
     services:
       - url: https://api.telegram.org
+        headers:
+          X-Telegram-Bot-Token: "{{ .options.bot_token }}"
         middlewares:
           - custom: "./middlewares/telegram-token-rewrite.go"
-  sidecar:
-    services:
-      telegram:
-        build: ../../sidecar
-        environment:
-          AGENT_ACP_URL: "http://agent:8080"
-          TELEGRAM_BOT_TOKEN: "{{ .options.bot_token }}"
-        depends_on:
-          gateway:
-            condition: service_healthy
-        healthcheck:
-          test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1))"]
-          interval: "10s"
-          timeout: "5s"
-          retries: 3

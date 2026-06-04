@@ -135,7 +135,7 @@ func BuildDockerfile(cfg *config.V1Config, contribs *plugin.Contributions) (stri
 	}
 
 	// Transparent proxy entrypoint wrapper
-	lines = append(lines, "COPY entrypoint.sh /usr/local/bin/entrypoint.sh")
+	lines = append(lines, "COPY .build/entrypoint.sh /usr/local/bin/entrypoint.sh")
 	lines = append(lines, "RUN chmod +x /usr/local/bin/entrypoint.sh")
 	lines = append(lines, `ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]`)
 	lines = append(lines, "")

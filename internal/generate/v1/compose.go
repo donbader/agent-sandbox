@@ -28,19 +28,26 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 
 	// Agent service
 	// cap_add NET_ADMIN is required for iptables DNAT rules in entrypoint.sh.
+	agentName := cfg.Name
+	gatewayName := cfg.Name + "-gateway"
+
 	agentVolumes := []string{"certs:/shared/certs"}
 	agentVolumes = append(agentVolumes, cfg.Runtime.Volumes...)
 	agentSvc := map[string]any{
 		"build": map[string]any{
-			"context":    ".",
-			"dockerfile": "Dockerfile",
+			"context":    "..",
+			"dockerfile": ".build/Dockerfile",
 		},
-		"cap_add":    []string{"NET_ADMIN"},
-		"depends_on": []string{"gateway"},
-		"networks":   []string{"sandbox"},
-		"volumes":    agentVolumes,
+		"cap_add": []string{"NET_ADMIN"},
+		"depends_on": map[string]any{
+			gatewayName: map[string]any{
+				"condition": "service_healthy",
+			},
+		},
+		"networks": []string{"sandbox"},
+		"volumes":  agentVolumes,
 	}
-	compose.Services["agent"] = agentSvc
+	compose.Services[agentName] = agentSvc
 
 	// Gateway service
 	// The gateway writes /shared/certs/ca.crt so the agent can install it.
@@ -50,8 +57,12 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 			"context":    "./gateway-src",
 			"dockerfile": "Dockerfile",
 		},
-		"networks": []string{"sandbox"},
-		"volumes":  []string{"certs:/shared/certs"},
+		"networks": map[string]any{
+			"sandbox": map[string]any{
+				"aliases": []string{"gateway"},
+			},
+		},
+		"volumes": []string{"certs:/shared/certs"},
 		"healthcheck": map[string]any{
 			"test":     []string{"CMD", "wget", "--spider", "-q", "http://localhost:8080/health"},
 			"interval": "5s",
@@ -62,7 +73,7 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
 	}
-	compose.Services["gateway"] = gatewaySvc
+	compose.Services[gatewayName] = gatewaySvc
 
 	// Sidecar services from plugins
 	if contribs != nil {
