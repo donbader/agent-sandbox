@@ -49,7 +49,7 @@ set -e
 
 # Wait for gateway to be healthy before setting up routing.
 echo "[entrypoint] waiting for gateway..."
-until wget -q --spider http://gateway:8080/health 2>/dev/null; do
+until curl -sf http://gateway:8080/health >/dev/null 2>&1; do
     sleep 1
 done
 echo "[entrypoint] gateway ready"
