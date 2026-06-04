@@ -13,9 +13,9 @@ options:
 
 contributes:
   gateway:
+    environment:
+      - TELEGRAM_BOT_TOKEN
     services:
       - url: https://api.telegram.org
-        headers:
-          X-Telegram-Bot-Token: "{{ .options.bot_token }}"
         middlewares:
           - custom: "./middlewares/telegram-token-rewrite.go"

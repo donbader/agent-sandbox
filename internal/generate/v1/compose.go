@@ -147,7 +147,8 @@ func extractVolumeName(volume string) string {
 }
 
 // collectGatewayEnvVars extracts env var names referenced in gateway service headers
-// and returns them as docker-compose environment entries (passthrough format).
+// and explicit gateway.environment declarations, returning them as docker-compose
+// environment entries (passthrough format).
 func collectGatewayEnvVars(cfg *config.V1Config, contribs *plugin.Contributions) []string {
 	seen := map[string]bool{}
 
@@ -167,6 +168,12 @@ func collectGatewayEnvVars(cfg *config.V1Config, contribs *plugin.Contributions)
 				if envVar := extractEnvVar(value); envVar != "" {
 					seen[envVar] = true
 				}
+			}
+		}
+		// Explicit environment declarations from plugins
+		for _, envVar := range contribs.Gateway.Environment {
+			if envVar != "" {
+				seen[envVar] = true
 			}
 		}
 	}

@@ -34,8 +34,9 @@ type RuntimeContrib struct {
 }
 
 type GatewayContrib struct {
-	Services []GatewayService `yaml:"services"`
-	Volumes  []string         `yaml:"volumes"`
+	Services    []GatewayService `yaml:"services"`
+	Volumes     []string         `yaml:"volumes"`
+	Environment []string         `yaml:"environment"`
 }
 
 type GatewayService struct {
