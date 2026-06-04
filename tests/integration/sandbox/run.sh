@@ -9,7 +9,7 @@ CLI="${CLI_PATH:-agent-sandbox}"
 
 cleanup() {
   echo "--- Cleaning up ---"
-  "$CLI" -C "$SCRIPT_DIR" compose down -v 2>/dev/null || true
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" down -v 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -23,7 +23,7 @@ echo ""
 echo "--- Building and starting containers ---"
 # Export test secrets so compose picks them up
 export $(grep -v '^#' "$SCRIPT_DIR/test.env" | xargs)
-"$CLI" -C "$SCRIPT_DIR" compose up -d --build --wait --wait-timeout 60
+"$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" up -d --build --wait --wait-timeout 60
 
 # Wait for agent entrypoint to complete
 sleep 3

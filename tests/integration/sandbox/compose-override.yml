@@ -1,0 +1,19 @@
+# Override for integration test: adds a local httpbin echo server
+# to eliminate dependency on external httpbin.org.
+# Merged with generated .build/docker-compose.yml via -f flag.
+services:
+  echo-httpbin:
+    image: mccutchen/go-httpbin:v2.16.0
+    command: ["/bin/go-httpbin", "-port", "80"]
+    networks:
+      sandbox:
+        aliases:
+          - httpbin.org
+
+  # Override gateway to forward upstream as HTTP (echo server is plain HTTP)
+  sandbox-test-gateway:
+    environment:
+      - GATEWAY_INSECURE_UPSTREAM=true
+    depends_on:
+      echo-httpbin:
+        condition: service_started

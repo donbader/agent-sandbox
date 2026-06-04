@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 )
@@ -136,13 +137,22 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 // forwardRequest sends the request to the real server over TLS.
 func (h *Handler) forwardRequest(req *http.Request, serverName string) (*http.Response, error) {
 	// Set the host header and request URI
-	req.URL.Scheme = "https"
 	req.URL.Host = serverName
 	req.RequestURI = "" // must be empty for client requests
 
+	insecure := os.Getenv("GATEWAY_INSECURE_UPSTREAM") == "true"
+
+	if insecure {
+		// In test mode, forward as HTTP to allow plain-HTTP echo servers.
+		req.URL.Scheme = "http"
+	} else {
+		req.URL.Scheme = "https"
+	}
+
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			ServerName: serverName,
+			ServerName:         serverName,
+			InsecureSkipVerify: insecure, //nolint:gosec // test-only
 		},
 		// Disable compression so we can stream the raw response bytes
 		DisableCompression: true,
