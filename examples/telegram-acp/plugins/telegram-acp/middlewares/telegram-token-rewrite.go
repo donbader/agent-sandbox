@@ -1,0 +1,30 @@
+package custom
+
+import (
+	"strings"
+
+	"github.com/donbader/agent-sandbox/core/sdk/gateway"
+)
+
+func init() {
+	gateway.RegisterMiddleware("telegram-token-rewrite", func(ctx *gateway.MiddlewareContext) error {
+		// Telegram Bot API uses the token in the URL path: /bot<token>/method
+		// The agent uses a dummy token; the gateway rewrites it to the real one.
+		realToken := ctx.Env("TELEGRAM_BOT_TOKEN")
+		if realToken == "" {
+			return nil
+		}
+
+		path := ctx.Request.URL.Path
+		// Replace /bot<dummy>/... with /bot<real>/...
+		if idx := strings.Index(path, "/bot"); idx != -1 {
+			rest := path[idx+4:]
+			if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
+				method := rest[slashIdx:]
+				ctx.Request.URL.Path = path[:idx] + "/bot" + realToken + method
+			}
+		}
+
+		return nil
+	})
+}

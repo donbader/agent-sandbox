@@ -1,0 +1,39 @@
+name: telegram-acp
+options:
+  bot_token:
+    type: string
+    required: true
+    description: "Telegram bot token"
+  acp_package:
+    type: string
+    required: false
+    default: "@zed-industries/codex-acp"
+    description: "ACP adapter npm package name"
+  allowed_users:
+    type: array
+    required: false
+    description: "Telegram usernames allowed to interact with the bot"
+    items:
+      type: string
+
+contributes:
+  gateway:
+    services:
+      - url: https://api.telegram.org
+        middlewares:
+          - custom: "./middlewares/telegram-token-rewrite.go"
+  sidecar:
+    services:
+      telegram:
+        build: ./plugins/telegram-acp/sidecar
+        environment:
+          AGENT_ACP_URL: "http://gateway:8080/agent"
+          TELEGRAM_BOT_TOKEN: "{{ .options.bot_token }}"
+        depends_on:
+          gateway:
+            condition: service_healthy
+        healthcheck:
+          test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1))"]
+          interval: "10s"
+          timeout: "5s"
+          retries: 3

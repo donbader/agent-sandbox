@@ -1,0 +1,23 @@
+# Example: Telegram bot agent with ACP wrapping
+name: telegram-agent
+log_level: debug
+
+runtime:
+  image: "@builtin/codex"
+  extra_builds:
+    - "RUN --mount=type=cache,target=/root/.npm npm install -g @zed-industries/codex-acp@0.15.0"
+  entrypoint: ["codex-acp", "--listen", ":8080"]
+
+gateway:
+  services:
+    - url: https://agent-gateway.stx-ai.net
+      headers:
+        Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+
+installations:
+  - plugin: telegram-acp
+    options:
+      bot_token: "${TELEGRAM_BOT_TOKEN}"
+      acp_package: "@zed-industries/codex-acp"
+      allowed_users:
+        - "@${TELEGRAM_USERNAME}"
