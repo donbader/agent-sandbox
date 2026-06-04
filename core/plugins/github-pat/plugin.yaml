@@ -3,14 +3,19 @@ options:
   token:
     type: string
     required: true
-    description: "GitHub PAT (use ${VAR} env reference)"
+    description: "GitHub PAT env var reference (e.g. ${GITHUB_PAT})"
 
 contributes:
+  runtime:
+    extra_builds:
+      # Agent container needs dummy tokens so git/gh CLI attempt auth
+      # (the gateway intercepts and injects real credentials)
+      - "ENV GH_TOKEN=dummy GITHUB_TOKEN=dummy"
   gateway:
     services:
       - url: "https://api.github.com"
-        headers:
-          Authorization: "Bearer {{ .options.token }}"
+        middlewares:
+          - custom: "./middlewares/github-auth.go"
       - url: "https://github.com"
-        headers:
-          Authorization: "Bearer {{ .options.token }}"
+        middlewares:
+          - custom: "./middlewares/github-auth.go"
