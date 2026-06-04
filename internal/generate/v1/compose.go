@@ -14,7 +14,7 @@ type composeFile struct {
 	Networks map[string]any `yaml:"networks,omitempty"`
 }
 
-// BuildCompose generates a docker-compose.yaml string from config and plugin contributions.
+// BuildCompose generates a docker-compose.yml string from config and plugin contributions.
 func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions) (string, error) {
 	compose := composeFile{
 		Services: map[string]any{},

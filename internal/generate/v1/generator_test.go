@@ -53,7 +53,7 @@ installations:
 	// Verify outputs
 	buildDir := filepath.Join(projectDir, ".build")
 	assert.FileExists(t, filepath.Join(buildDir, "Dockerfile"))
-	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
 
 	// Check Dockerfile content
 	df, err := os.ReadFile(filepath.Join(buildDir, "Dockerfile"))
@@ -63,7 +63,7 @@ installations:
 	assert.Contains(t, string(df), `CMD ["sleep","infinity"]`)
 
 	// Check compose content
-	comp, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yaml"))
+	comp, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(comp), "agent:")
 	assert.Contains(t, string(comp), "gateway:")
@@ -107,7 +107,7 @@ installations:
 
 	buildDir := filepath.Join(projectDir, ".build")
 	assert.FileExists(t, filepath.Join(buildDir, "Dockerfile"))
-	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
 }
 
 func TestGenerator_Run_WithSidecar(t *testing.T) {
@@ -148,7 +148,7 @@ installations:
 	require.NoError(t, g.Run())
 
 	buildDir := filepath.Join(projectDir, ".build")
-	comp, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yaml"))
+	comp, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(comp), "mysvc:")
 	assert.Contains(t, string(comp), "PORT")

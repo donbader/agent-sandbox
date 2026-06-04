@@ -86,13 +86,13 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("write Dockerfile: %w", err)
 	}
 
-	// 5. Generate docker-compose.yaml
+	// 5. Generate docker-compose.yml
 	compose, err := BuildCompose(cfg, merged)
 	if err != nil {
 		return fmt.Errorf("build compose: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yaml"), []byte(compose), 0644); err != nil {
-		return fmt.Errorf("write docker-compose.yaml: %w", err)
+	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
+		return fmt.Errorf("write docker-compose.yml: %w", err)
 	}
 
 	// 6. Build gateway config + copy middleware
