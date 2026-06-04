@@ -111,7 +111,11 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 		return fmt.Errorf("marshal gateway config: %w", err)
 	}
 
-	configPath := filepath.Join(buildDir, "gateway-src", "config.yaml")
+	configDir := filepath.Join(buildDir, "gateway-src")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("create gateway-src dir: %w", err)
+	}
+	configPath := filepath.Join(configDir, "config.yaml")
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("write gateway config: %w", err)
 	}
