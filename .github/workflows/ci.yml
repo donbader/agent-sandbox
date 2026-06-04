@@ -108,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [telegram-vibe, local-coding]
+        example: [telegram, local-coding]
     steps:
       - uses: actions/checkout@v6
 

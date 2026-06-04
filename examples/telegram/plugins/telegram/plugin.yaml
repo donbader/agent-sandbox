@@ -1,20 +1,20 @@
-name: telegram-acp
+name: telegram
 options:
   bot_token:
     type: string
     required: true
     description: "Telegram bot token"
-  acp_package:
-    type: string
-    required: false
-    default: "@zed-industries/codex-acp"
-    description: "ACP adapter npm package name"
   allowed_users:
     type: array
     required: false
-    description: "Telegram usernames allowed to interact with the bot"
+    description: "Telegram usernames allowed to interact"
     items:
       type: string
+  require_mention:
+    type: boolean
+    required: false
+    default: false
+    description: "Whether the bot requires @mention in groups"
 
 contributes:
   gateway:
@@ -25,9 +25,9 @@ contributes:
   sidecar:
     services:
       telegram:
-        build: ./plugins/telegram-acp/sidecar
+        build: ../../sidecar
         environment:
-          AGENT_ACP_URL: "http://gateway:8080/agent"
+          AGENT_ACP_URL: "http://agent:8080"
           TELEGRAM_BOT_TOKEN: "{{ .options.bot_token }}"
         depends_on:
           gateway:
