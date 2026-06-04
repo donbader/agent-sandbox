@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"text/template"
 
 	"gopkg.in/yaml.v3"
@@ -47,6 +48,13 @@ func validateOptions(schema map[string]OptionSchema, opts map[string]any) error 
 		if s.Required {
 			if _, ok := opts[name]; !ok {
 				return fmt.Errorf("required option %q not provided", name)
+			}
+		}
+		if val, ok := opts[name]; ok {
+			if str, ok := val.(string); ok {
+				if strings.Contains(str, "..") {
+					return fmt.Errorf("option %q contains path traversal sequence", name)
+				}
 			}
 		}
 	}

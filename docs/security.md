@@ -169,3 +169,35 @@ Agent container:
 | Agent root reads secrets | ✗ Possible | ✓ Blocked (different container) |
 | Agent root bypasses proxy | ✗ Can modify iptables + reach internet | ✓ No internet route exists |
 | Agent root kills gateway | ✗ Can signal gateway process | ✓ Different PID namespace |
+
+## NET_ADMIN Capability
+
+Both `gateway` and `agent` containers run with `cap_add: [NET_ADMIN]`. Here's why each needs it and what the implications are.
+
+### Why it's required
+
+**Gateway:** needs `iptables -t nat -A PREROUTING` to redirect port 443 to the proxy port (8443) and `echo 1 > /proc/sys/net/ipv4/ip_forward` for packet forwarding. Without this, transparent MITM is impossible.
+
+**Agent:** needs `ip route replace default via $GATEWAY_IP` at boot to force all outbound traffic through the gateway. Without this, the agent would have direct internet access and bypass credential injection entirely.
+
+### Scope: network namespace only
+
+`NET_ADMIN` is scoped to the container's own network namespace. It grants control over that container's routing table, iptables rules, and interfaces — it does **not** grant access to the host network namespace or other containers' namespaces.
+
+### Container escape implications
+
+If an attacker escapes the container (e.g., via a container runtime CVE), `NET_ADMIN` gives them network manipulation capabilities in the host network namespace: ARP spoofing, route injection, iptables rule modification. This is elevated compared to a container without `NET_ADMIN`.
+
+### Mitigation
+
+The sandbox network (`internal`) is a Docker bridge — an isolated virtual network with no route to the internet. Even with `NET_ADMIN` post-escape, manipulating routes on a network that only connects to other sandbox containers has limited blast radius. The agent container additionally has `no-new-privileges:true` to prevent privilege escalation via setuid binaries.
+
+Future hardening: investigate replacing `NET_ADMIN` with more granular capabilities (`CAP_NET_RAW`, `CAP_NET_BIND_SERVICE`) once iptables usage is audited.
+
+## Plugin Option Validation
+
+### Path Traversal (mcp-oauth `token_dir`)
+
+The `mcp-oauth` plugin accepts a `token_dir` option that is rendered directly into a volume mount path via Go template (`oauth-tokens:{{ .options.token_dir }}`). A malicious value like `../../etc/evil` could write the OAuth token volume outside the intended directory.
+
+**Defense:** `validateOptions` in `internal/plugin/render.go` rejects any string option value containing `..`. This is a defense-in-depth measure applied to all plugins, not just mcp-oauth.

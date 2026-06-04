@@ -105,6 +105,27 @@ contributes:
 	assert.Equal(t, "2222:2222", rendered.Runtime.Ports[0])
 }
 
+func TestRenderContributions_PathTraversal(t *testing.T) {
+	raw := `
+name: mcp-oauth
+options:
+  token_dir:
+    type: string
+    required: false
+    default: "/data/oauth-tokens"
+contributes:
+  gateway:
+    volumes:
+      - "oauth-tokens:{{ .options.token_dir }}"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{"token_dir": "../../etc/evil"}
+	_, err = RenderContributions(p, opts)
+	assert.ErrorContains(t, err, "path traversal")
+}
+
 func TestRenderContributions_PreEntrypointCustomPort(t *testing.T) {
 	raw := `
 name: ssh
