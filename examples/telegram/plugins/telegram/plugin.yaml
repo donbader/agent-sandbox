@@ -13,8 +13,6 @@ options:
 
 contributes:
   gateway:
-    environment:
-      - TELEGRAM_BOT_TOKEN
     services:
       - url: https://api.telegram.org
         middlewares:
