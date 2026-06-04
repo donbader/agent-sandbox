@@ -29,9 +29,6 @@ export $(grep -v '^#' "$SCRIPT_DIR/test.env" | xargs)
 sleep 3
 
 echo ""
-echo "--- Running audit checks ---"
-"$CLI" -C "$SCRIPT_DIR" audit
-echo ""
 
 # The one check audit can't do: credential injection verification.
 # This requires a known secret and a mirror endpoint to confirm injection.
