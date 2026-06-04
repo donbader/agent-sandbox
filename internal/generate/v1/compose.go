@@ -41,6 +41,7 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 	compose.Services["agent"] = agentSvc
 
 	// Gateway service
+	gatewayEnv := collectGatewayEnvVars(cfg, contribs)
 	gatewaySvc := map[string]any{
 		"build": map[string]any{
 			"context":    "./gateway-src",
@@ -53,6 +54,9 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 			"timeout":  "3s",
 			"retries":  3,
 		},
+	}
+	if len(gatewayEnv) > 0 {
+		gatewaySvc["environment"] = gatewayEnv
 	}
 	compose.Services["gateway"] = gatewaySvc
 
@@ -119,6 +123,58 @@ func extractVolumeName(volume string) string {
 				return name
 			}
 			return ""
+		}
+	}
+	return ""
+}
+
+// collectGatewayEnvVars extracts env var names referenced in gateway service headers
+// and returns them as docker-compose environment entries (passthrough format).
+func collectGatewayEnvVars(cfg *config.V1Config, contribs *plugin.Contributions) []string {
+	seen := map[string]bool{}
+
+	// From user gateway config
+	for _, svc := range cfg.Gateway.Services {
+		for _, value := range svc.Headers {
+			if envVar := extractEnvVar(value); envVar != "" {
+				seen[envVar] = true
+			}
+		}
+	}
+
+	// From plugin contributions
+	if contribs != nil {
+		for _, svc := range contribs.Gateway.Services {
+			for _, value := range svc.Headers {
+				if envVar := extractEnvVar(value); envVar != "" {
+					seen[envVar] = true
+				}
+			}
+		}
+	}
+
+	var envVars []string
+	for v := range seen {
+		envVars = append(envVars, v)
+	}
+	return envVars
+}
+
+// extractEnvVar finds ${VAR_NAME} in a string and returns the var name.
+func extractEnvVar(s string) string {
+	start := -1
+	for i := 0; i < len(s)-1; i++ {
+		if s[i] == '$' && s[i+1] == '{' {
+			start = i + 2
+			break
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+	for i := start; i < len(s); i++ {
+		if s[i] == '}' {
+			return s[start:i]
 		}
 	}
 	return ""
