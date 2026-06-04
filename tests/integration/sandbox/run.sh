@@ -37,7 +37,7 @@ AGENT_SERVICE="sandbox-test"
 GATEWAY_SERVICE="sandbox-test-gateway"
 
 # Retry logic: httpbin.org occasionally returns 503
-MAX_RETRIES=3
+MAX_RETRIES=5
 RETRY_DELAY=5
 RESPONSE=""
 for i in $(seq 1 $MAX_RETRIES); do
@@ -46,8 +46,9 @@ for i in $(seq 1 $MAX_RETRIES); do
     break
   fi
   if [ "$i" -lt "$MAX_RETRIES" ]; then
-    echo "  Attempt $i/$MAX_RETRIES failed (may be transient), retrying in ${RETRY_DELAY}s..."
-    sleep "$RETRY_DELAY"
+    DELAY=$((RETRY_DELAY * i))
+    echo "  Attempt $i/$MAX_RETRIES failed (may be transient), retrying in ${DELAY}s..."
+    sleep "$DELAY"
   fi
 done
 
