@@ -4,17 +4,11 @@
 services:
   echo-httpbin:
     image: mccutchen/go-httpbin:v2.16.0
-    environment:
-      PORT: "80"
+    command: ["/bin/go-httpbin", "-port", "80"]
     networks:
       sandbox:
         aliases:
           - httpbin.org
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/health"]
-      interval: 3s
-      timeout: 2s
-      retries: 5
 
   # Override gateway to forward upstream as HTTP (echo server is plain HTTP)
   sandbox-test-gateway:
@@ -22,4 +16,4 @@ services:
       - GATEWAY_INSECURE_UPSTREAM=true
     depends_on:
       echo-httpbin:
-        condition: service_healthy
+        condition: service_started
