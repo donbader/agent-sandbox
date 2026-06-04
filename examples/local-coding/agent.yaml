@@ -1,13 +1,11 @@
 # yaml-language-server: $schema=.build/schema.json
 name: coder
-runtime: codex
 log_level: debug
-features:
-  - plugin: external-services
-    services:
-      - url: https://agent-gateway.stx-ai.net
-        headers:
-          Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
-
-  - plugin: custom-runtime
-    home_override: "./home"
+runtime:
+  image: "@builtin/codex"
+  entrypoint: ["sleep", "infinity"]
+gateway:
+  services:
+    - url: https://agent-gateway.stx-ai.net
+      headers:
+        Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}

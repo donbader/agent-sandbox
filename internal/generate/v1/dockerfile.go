@@ -60,18 +60,14 @@ func BuildDockerfile(cfg *config.V1Config, contribs *plugin.Contributions) (stri
 	}
 
 	// User extra builds
-	for _, eb := range cfg.Runtime.ExtraBuilds {
-		lines = append(lines, eb)
-	}
+	lines = append(lines, cfg.Runtime.ExtraBuilds...)
 	if len(cfg.Runtime.ExtraBuilds) > 0 {
 		lines = append(lines, "")
 	}
 
 	// Plugin extra builds
 	if contribs != nil {
-		for _, eb := range contribs.Runtime.ExtraBuilds {
-			lines = append(lines, eb)
-		}
+		lines = append(lines, contribs.Runtime.ExtraBuilds...)
 		if len(contribs.Runtime.ExtraBuilds) > 0 {
 			lines = append(lines, "")
 		}

@@ -1,12 +1,12 @@
-# yaml-language-server: $schema=.build/schema.json
 # Minimal agent config for sandbox integration tests.
-# Uses external-services to trigger gateway mode with MITM.
+# Uses gateway services to trigger MITM proxy mode.
 name: sandbox-test
-runtime: codex
 log_level: debug
-features:
-  - plugin: external-services
-    services:
-      - url: https://httpbin.org
-        headers:
-          Authorization: Bearer ${TEST_SECRET}
+runtime:
+  image: "@builtin/codex"
+  entrypoint: ["sleep", "infinity"]
+gateway:
+  services:
+    - url: https://httpbin.org
+      headers:
+        Authorization: Bearer ${TEST_SECRET}

@@ -31,7 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       go: ${{ steps.filter.outputs.go }}
-      typescript: ${{ steps.filter.outputs.typescript }}
       artifacts: ${{ steps.filter.outputs.artifacts }}
     steps:
       - uses: actions/checkout@v6
@@ -47,15 +46,12 @@ jobs:
               - 'go.work'
               - 'go.work.sum'
               - '.golangci.yml'
-            typescript:
-              - 'channel-manager/**'
             artifacts:
               - 'internal/generate/**'
               - 'internal/plugins/**'
               - 'internal/config/**'
               - 'internal/resolve/**'
               - 'cmd/**'
-              - 'channel-manager/**'
               - 'gateway/**'
               - 'examples/**'
               - 'tests/integration/**'
@@ -103,33 +99,6 @@ jobs:
           path: agent-sandbox
           retention-days: 1
 
-  typescript:
-    name: TypeScript (typecheck, test)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: changes
-    if: needs.changes.outputs.typescript == 'true'
-    defaults:
-      run:
-        working-directory: channel-manager
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: channel-manager/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Test
-        run: npx vitest run
-
   examples:
     name: Examples (generate + docker build)
     runs-on: ubuntu-latest
@@ -139,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [telegram-vibe, local-coding, multi-agent]
+        example: [telegram-vibe, local-coding]
     steps:
       - uses: actions/checkout@v6
 

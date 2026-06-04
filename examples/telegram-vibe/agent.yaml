@@ -1,25 +1,19 @@
 # yaml-language-server: $schema=.build/schema.json
 name: coder
-runtime: codex
 log_level: debug
-workdir: "{{ .AGENT_HOME }}/workspace"
-features:
+runtime:
+  image: "@builtin/codex"
+  entrypoint: ["sleep", "infinity"]
+gateway:
+  services:
+    - url: https://agent-gateway.stx-ai.net
+      headers:
+        Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+    - url: https://mcp.notion.com/mcp
+installations:
   - plugin: telegram
-    bot_token: ${TELEGRAM_BOT_TOKEN}
-    access_control:
-      allowed_users: ["@${TELEGRAM_USERNAME}"]
-      require_mention: false
-
-  - plugin: external-services
-    services:
-      - url: https://agent-gateway.stx-ai.net
-        headers:
-          Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
-
-  - plugin: mcp-oauth
-    providers:
-      notion:
-        mcp_url: https://mcp.notion.com/mcp
-
-  - plugin: custom-runtime
-    home_override: "./home"
+    options:
+      bot_token: ${TELEGRAM_BOT_TOKEN}
+      access_control:
+        allowed_users: ["@${TELEGRAM_USERNAME}"]
+        require_mention: false

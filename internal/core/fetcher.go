@@ -30,7 +30,7 @@ func Fetch(version string) (string, error) {
 	// Download from GitHub releases
 	if err := download(version, dir); err != nil {
 		// Clean up partial download
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("fetch core %s: %w", version, err)
 	}
 
