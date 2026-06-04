@@ -69,6 +69,47 @@ installations:
 	assert.Contains(t, string(comp), "gateway:")
 }
 
+func TestGenerator_UsesLocalCore(t *testing.T) {
+	projectDir := t.TempDir()
+	coreDir := t.TempDir()
+
+	// Create a bundled plugin in the core directory
+	pluginDir := filepath.Join(coreDir, "plugins", "github-pat")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(`
+name: github-pat
+options:
+  token:
+    type: string
+    required: true
+contributes:
+  gateway:
+    services:
+      - url: https://github.com
+        headers:
+          Authorization: "Bearer {{ .options.token }}"
+`), 0644))
+
+	agentYAML := `
+name: test-agent
+runtime:
+  image: "@builtin/codex"
+  entrypoint: ["sleep", "infinity"]
+installations:
+  - plugin: github-pat
+    options:
+      token: "ghp_test123"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	g := NewGeneratorWithCore(projectDir, coreDir)
+	require.NoError(t, g.Run())
+
+	buildDir := filepath.Join(projectDir, ".build")
+	assert.FileExists(t, filepath.Join(buildDir, "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yaml"))
+}
+
 func TestGenerator_Run_WithSidecar(t *testing.T) {
 	projectDir := t.TempDir()
 
