@@ -10,7 +10,7 @@ import "embed"
 //go:embed core/gateway
 var GatewaySource embed.FS
 
-// CorePlugins contains the built-in plugin definitions (runtime + core features).
+// CorePlugins contains the built-in plugin definitions (declarative YAML plugins).
 //
-//go:embed internal/plugins
+//go:embed core/plugins
 var CorePlugins embed.FS

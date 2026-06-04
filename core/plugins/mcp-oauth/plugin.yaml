@@ -1,0 +1,21 @@
+name: mcp-oauth
+options:
+  providers:
+    type: object
+    required: true
+    description: "Map of provider name to MCP config"
+  token_dir:
+    type: string
+    required: false
+    default: "/data/oauth-tokens"
+    description: "Directory for OAuth token files"
+
+# NOTE: Full mcp-oauth support requires dynamic service entries per provider
+# (extracting hostnames from provider URLs). For now, this plugin only declares
+# the shared volume mount. Users should also declare gateway services in their
+# agent.yaml for each provider endpoint. A richer template system or Go plugin
+# may be needed for full automation.
+contributes:
+  gateway:
+    volumes:
+      - "oauth-tokens:{{ .options.token_dir }}"

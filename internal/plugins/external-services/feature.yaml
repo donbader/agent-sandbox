@@ -1,2 +1,0 @@
-name: external-services
-description: Connect to external services (Docker containers or HTTPS endpoints) with optional header injection.

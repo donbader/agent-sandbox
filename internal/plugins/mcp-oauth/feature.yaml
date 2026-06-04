@@ -1,2 +1,0 @@
-name: mcp-oauth
-description: OAuth Bearer token injection for remote MCP servers. Reads a stored token file, auto-refreshes when expired, and injects Authorization headers via the gateway MITM proxy.

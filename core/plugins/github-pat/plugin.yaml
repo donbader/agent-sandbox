@@ -1,0 +1,16 @@
+name: github-pat
+options:
+  token:
+    type: string
+    required: true
+    description: "GitHub PAT (use ${VAR} env reference)"
+
+contributes:
+  gateway:
+    services:
+      - url: "https://api.github.com"
+        headers:
+          Authorization: "Bearer {{ .options.token }}"
+      - url: "https://github.com"
+        headers:
+          Authorization: "Bearer {{ .options.token }}"
