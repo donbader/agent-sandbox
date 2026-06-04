@@ -59,28 +59,3 @@ func TestBuildCompose_NoSidecars(t *testing.T) {
 	assert.Contains(t, output, "simple-agent-gateway:")
 	assert.NotContains(t, output, "telegram:")
 }
-
-func TestBuildCompose_PluginOptionsPassthroughToGateway(t *testing.T) {
-	cfg := &config.V1Config{
-		Name: "bot-agent",
-		Runtime: config.RuntimeConfig{
-			Image: "@builtin/codex",
-		},
-	}
-
-	// Plugin contributes gateway services + environment
-	contribs := &plugin.Contributions{
-		Gateway: plugin.GatewayContrib{
-			Services: []plugin.GatewayService{
-				{URL: "https://api.telegram.org"},
-			},
-			Environment: []string{"TELEGRAM_BOT_TOKEN"},
-		},
-	}
-
-	output, err := BuildCompose(cfg, contribs, "/project")
-	require.NoError(t, err)
-
-	// TELEGRAM_BOT_TOKEN should be passed to gateway via gateway.environment
-	assert.Contains(t, output, "TELEGRAM_BOT_TOKEN")
-}

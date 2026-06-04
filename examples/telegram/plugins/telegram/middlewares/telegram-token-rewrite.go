@@ -8,7 +8,7 @@ import (
 
 func init() {
 	gateway.RegisterMiddleware("telegram-token-rewrite", func(ctx *gateway.MiddlewareContext) error {
-		realToken := ctx.Env("TELEGRAM_BOT_TOKEN")
+		realToken := "{{ .options.bot_token }}"
 		if realToken == "" {
 			return nil
 		}

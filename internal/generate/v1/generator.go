@@ -122,12 +122,26 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("write gateway runtime config: %w", err)
 	}
 	if len(gwCfg.Middlewares) > 0 {
-		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares); err != nil {
+		// Collect all plugin options for middleware template rendering.
+		// Middleware templates can reference {{ .options.X }} to bake secrets at generate-time.
+		allOpts := collectAllOptions(cfg)
+		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares, allOpts); err != nil {
 			return fmt.Errorf("copy middleware: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// collectAllOptions merges all installation options into a single map.
+func collectAllOptions(cfg *config.V1Config) map[string]any {
+	opts := make(map[string]any)
+	for _, inst := range cfg.Installations {
+		for k, v := range inst.Options {
+			opts[k] = v
+		}
+	}
+	return opts
 }
 
 // extractGatewaySource copies the gateway source tree into .build/gateway-src/.

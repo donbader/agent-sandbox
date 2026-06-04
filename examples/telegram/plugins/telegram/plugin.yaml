@@ -3,7 +3,7 @@ options:
   bot_token:
     type: string
     required: true
-    description: "Telegram bot token (passed to gateway for token rewrite)"
+    description: "Telegram bot token (baked into gateway middleware at generate-time)"
   allowed_users:
     type: array
     required: false
@@ -13,8 +13,6 @@ options:
 
 contributes:
   gateway:
-    environment:
-      - TELEGRAM_BOT_TOKEN
     services:
       - url: https://api.telegram.org
         middlewares:
