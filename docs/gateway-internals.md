@@ -111,7 +111,7 @@ This prevents credentials from leaking into container logs even if a handler ina
 
 ## Adding a New Rewriter
 
-1. Create a new file in `gateway/internal/mitm/` (e.g., `my_rewriter.go`)
+1. Create a new file in `core/gateway/internal/mitm/` (e.g., `my_rewriter.go`)
 2. Implement the `Rewriter` interface:
 
 ```go
@@ -129,6 +129,48 @@ func (r *MyRewriter) RewriteRequest(req *http.Request) bool {
 ```
 
 3. Add a case in `buildRewriters()` in `cmd/gateway/main.go` to instantiate it from config
-4. Declare the MITM domains in your plugin's `plugin.yaml` under `gateway.hosts`
+4. Declare the MITM domains in your plugin's `plugin.yaml` under `gateway.services`
 
 The gateway binary is recompiled during Docker build, so new rewriters are picked up automatically when you `agent-sandbox compose up --build`.
+
+## Custom Middleware via Plugins
+
+For plugin-specific logic (URL rewriting, token swapping), plugins ship custom middleware as **Go templates**:
+
+```yaml
+# plugin.yaml
+contributes:
+  gateway:
+    services:
+      - url: https://api.example.com
+        middlewares:
+          - custom: "./middlewares/my-rewrite.go"
+```
+
+Middleware files support Go template syntax. At generate-time, the CLI resolves plugin options (including `${ENV_VAR}` references) and bakes the actual values into the generated code:
+
+```go
+// plugins/my-plugin/middlewares/my-rewrite.go (template)
+package custom
+
+import "github.com/donbader/agent-sandbox/core/sdk/gateway"
+
+func init() {
+    gateway.RegisterMiddleware("my-rewrite", func(ctx *gateway.MiddlewareContext) error {
+        secret := "{{ .options.api_key }}"
+        ctx.Request.Header.Set("Authorization", "Bearer " + secret)
+        return nil
+    })
+}
+```
+
+If the user sets `api_key: "${MY_API_KEY}"` and `MY_API_KEY=sk-123` in `.env`, the generated middleware contains:
+
+```go
+secret := "sk-123"
+```
+
+This means:
+- No runtime env var lookup needed — secrets are compiled into the gateway binary
+- The gateway container needs no env var passthrough for middleware secrets
+- Middleware without `{{` delimiters is copied as-is (backward compatible)
