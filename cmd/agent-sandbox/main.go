@@ -34,7 +34,7 @@ func main() {
 
 	root.PersistentFlags().StringVarP(&dir, "dir", "C", ".", "Project directory containing agent.yaml")
 
-	root.AddCommand(generateCmd(&dir))
+	root.AddCommand(generateV1Cmd(&dir))
 	root.AddCommand(composeCmd(&dir))
 	root.AddCommand(validateCmd(&dir))
 	root.AddCommand(auditCmd(&dir))
