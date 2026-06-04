@@ -128,61 +128,20 @@ func initCmd() *cobra.Command {
 				rt = "pi"
 			}
 
-			// Features
-			fmt.Println("\nOptional features (comma-separated numbers, or blank for none):")
-			fmt.Println("  1) github-pat      — GitHub PAT credential injection")
-			fmt.Println("  2) custom-runtime  — Custom packages, hooks, volumes")
-			featureChoice := prompt(reader, "Features []: ")
-
-			var features []string
-			var envVars []string
-			for _, ch := range strings.Split(featureChoice, ",") {
-				switch strings.TrimSpace(ch) {
-				case "1":
-					features = append(features, "github-pat")
-					envVars = append(envVars, "GITHUB_PAT")
-				case "2":
-					features = append(features, "custom-runtime")
-				}
-			}
-
-			// Generate agent.yaml
+			// Generate V1-shaped agent.yaml
 			var b strings.Builder
 			b.WriteString("# yaml-language-server: $schema=.build/schema.json\n")
 			_, _ = fmt.Fprintf(&b, "name: %s\n", name)
-			_, _ = fmt.Fprintf(&b, "runtime: %s\n", rt)
-
-			if len(features) > 0 {
-				b.WriteString("\nplugins:\n")
-				for _, f := range features {
-					switch f {
-					case "github-pat":
-						b.WriteString("  - plugin: github-pat\n")
-						b.WriteString("    options:\n")
-						b.WriteString("      token: \"${GITHUB_PAT}\"\n")
-					case "custom-runtime":
-						b.WriteString("  - plugin: custom-runtime\n")
-						b.WriteString("    options:\n")
-						b.WriteString("      commands:\n")
-						b.WriteString("        - \"apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*\"\n")
-					}
-				}
-			}
+			b.WriteString("core_version: v1.0.0\n")
+			b.WriteString("runtime:\n")
+			_, _ = fmt.Fprintf(&b, "  image: \"@builtin/%s\"\n", rt)
+			b.WriteString("  entrypoint: [\"sleep\", \"infinity\"]\n")
+			b.WriteString("gateway:\n")
+			b.WriteString("  services: []\n")
+			b.WriteString("installations: []\n")
 
 			if err := os.WriteFile("agent.yaml", []byte(b.String()), 0644); err != nil {
 				return fmt.Errorf("writing agent.yaml: %w", err)
-			}
-
-			// Generate .env if there are env vars
-			if len(envVars) > 0 {
-				var env strings.Builder
-				for _, v := range envVars {
-					_, _ = fmt.Fprintf(&env, "%s=\n", v)
-				}
-				if err := os.WriteFile(".env", []byte(env.String()), 0644); err != nil {
-					return fmt.Errorf("writing .env: %w", err)
-				}
-				fmt.Println("\nCreated .env — fill in your secrets")
 			}
 
 			fmt.Println("Created agent.yaml")
