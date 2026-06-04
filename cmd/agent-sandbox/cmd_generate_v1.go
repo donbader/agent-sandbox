@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -37,9 +38,11 @@ func generateV1Cmd(dir *string) *cobra.Command {
 			}
 
 			g := v1.NewGeneratorWithCore(projectDir, coreDir)
-			// When no external core dir, use the embedded gateway source
+			// When no external core dir, use the embedded gateway source and bundled plugins
 			if coreDir == "" {
 				g.SetGatewayFS(sandbox.GatewaySource)
+				pluginsFS, _ := fs.Sub(sandbox.CorePlugins, "core/plugins")
+				g.SetBundledPluginsFS(pluginsFS)
 			}
 			if err := g.Run(); err != nil {
 				return err

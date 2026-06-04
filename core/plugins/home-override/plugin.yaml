@@ -1,0 +1,19 @@
+name: home-override
+options:
+  home_directory:
+    type: string
+    required: true
+    description: "Path to local directory with agent home contents (relative to project root)"
+  volume:
+    type: boolean
+    required: false
+    default: false
+    description: "Persist home directory across restarts using a named Docker volume. Contents are seeded from home_directory on first run."
+
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ .options.home_directory }} /home/agent/"
+      - "RUN chown -R agent:agent /home/agent"
+    volumes:
+      - "{{ if .options.volume }}agent-home:/home/agent{{ else }}{{ .options.home_directory }}:/home/agent{{ end }}"

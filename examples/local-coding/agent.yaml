@@ -9,3 +9,8 @@ gateway:
     - url: https://agent-gateway.stx-ai.net
       headers:
         Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+installations:
+  - plugin: home-override
+    options:
+      home_directory: "./home"
+      volume: true

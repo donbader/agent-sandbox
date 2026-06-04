@@ -38,6 +38,14 @@ func (g *Generator) SetGatewayFS(gwFS fs.FS) {
 	g.gatewayFS = gwFS
 }
 
+// SetBundledPluginsFS sets the embedded filesystem containing bundled plugin definitions.
+// Used when no external core directory is specified.
+func (g *Generator) SetBundledPluginsFS(pluginsFS fs.FS) {
+	if g.bundledFS == nil {
+		g.bundledFS = pluginsFS
+	}
+}
+
 // Run executes the full generation pipeline.
 func (g *Generator) Run() error {
 	// 1. Load config
