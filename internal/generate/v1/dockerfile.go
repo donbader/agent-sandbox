@@ -134,6 +134,8 @@ func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions) (string
 	// Create unprivileged agent user for running the agent process.
 	// The entrypoint runs as root (needed for iptables), then drops to this user via gosu.
 	lines = append(lines, "RUN useradd -m -s /bin/bash agent")
+	lines = append(lines, "ENV HOME=/home/agent")
+	lines = append(lines, "WORKDIR /home/agent")
 	lines = append(lines, "")
 
 	// User extra builds
