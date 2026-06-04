@@ -33,6 +33,9 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 
 	agentVolumes := []string{"certs:/shared/certs"}
 	agentVolumes = append(agentVolumes, cfg.Runtime.Volumes...)
+	if contribs != nil {
+		agentVolumes = append(agentVolumes, contribs.Runtime.Volumes...)
+	}
 	agentSvc := map[string]any{
 		"build": map[string]any{
 			"context":    "..",
@@ -126,6 +129,16 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 		volName := extractVolumeName(v)
 		if volName != "" {
 			compose.Volumes[volName] = nil
+		}
+	}
+
+	// Extract named volumes from plugin runtime contributions
+	if contribs != nil {
+		for _, v := range contribs.Runtime.Volumes {
+			volName := extractVolumeName(v)
+			if volName != "" {
+				compose.Volumes[volName] = nil
+			}
 		}
 	}
 

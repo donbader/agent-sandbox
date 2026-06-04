@@ -33,6 +33,7 @@ type RuntimeContrib struct {
 	ExtraBuilds   []string `yaml:"extra_builds"`
 	PreEntrypoint []string `yaml:"pre_entrypoint"`
 	Ports         []string `yaml:"ports"`
+	Volumes       []string `yaml:"volumes"`
 }
 
 type GatewayContrib struct {

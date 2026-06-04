@@ -155,30 +155,4 @@ func LoadFleet(dir string) (*FleetConfig, error) {
 	return &cfg, nil
 }
 
-// HasFleetConfig returns true if a fleet.yaml exists in the directory.
-func HasFleetConfig(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, "fleet.yaml"))
-	return err == nil
-}
 
-// MergeSharedFeatures combines shared features with agent-specific features.
-// Per-agent features override shared features with the same plugin name.
-func MergeSharedFeatures(shared, agent []FeatureEntry) []FeatureEntry {
-	// Index agent features by plugin name
-	agentPlugins := make(map[string]bool)
-	for _, f := range agent {
-		agentPlugins[f.Plugin] = true
-	}
-
-	// Start with shared features that aren't overridden
-	var merged []FeatureEntry
-	for _, f := range shared {
-		if !agentPlugins[f.Plugin] {
-			merged = append(merged, f)
-		}
-	}
-
-	// Append all agent features
-	merged = append(merged, agent...)
-	return merged
-}

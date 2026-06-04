@@ -13,6 +13,7 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 		merged.Runtime.ExtraBuilds = append(merged.Runtime.ExtraBuilds, c.Runtime.ExtraBuilds...)
 		merged.Runtime.PreEntrypoint = append(merged.Runtime.PreEntrypoint, c.Runtime.PreEntrypoint...)
 		merged.Runtime.Ports = append(merged.Runtime.Ports, c.Runtime.Ports...)
+		merged.Runtime.Volumes = append(merged.Runtime.Volumes, c.Runtime.Volumes...)
 		merged.Gateway.Services = append(merged.Gateway.Services, c.Gateway.Services...)
 		merged.Gateway.Volumes = append(merged.Gateway.Volumes, c.Gateway.Volumes...)
 		for name, svc := range c.Sidecar.Services {
