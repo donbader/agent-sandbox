@@ -17,21 +17,21 @@ var Presets = map[string]struct {
 	"@builtin/codex": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @openai/codex@0.136.0",
 		},
 	},
 	"@builtin/claude-code": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
 		},
 	},
 	"@builtin/pi": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
 		},
 	},
@@ -82,7 +82,8 @@ else
     echo "[entrypoint] WARNING: CA cert not found at /shared/certs/ca.crt" >&2
 fi
 
-exec "$@"
+# Drop privileges to the agent user for the actual process.
+exec gosu agent "$@"
 `
 
 // EntrypointScript returns the transparent proxy bootstrap script content.
@@ -97,7 +98,7 @@ func EntrypointScript(preEntrypoint []string) string {
 	for _, cmd := range preEntrypoint {
 		extra += cmd + "\n"
 	}
-	return strings.Replace(entrypointScript, `exec "$@"`, extra+`exec "$@"`, 1)
+	return strings.Replace(entrypointScript, `exec gosu agent "$@"`, extra+`exec gosu agent "$@"`, 1)
 }
 
 // BuildDockerfile generates a Dockerfile string from config and plugin contributions.
@@ -126,9 +127,14 @@ func BuildDockerfile(cfg *config.V1Config, contribs *plugin.Contributions) (stri
 
 	// For custom images that don't use a preset, install iptables explicitly.
 	if _, isPreset := Presets[cfg.Runtime.Image]; !isPreset {
-		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends iptables iputils-ping ca-certificates wget && rm -rf /var/lib/apt/lists/*")
+		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends iptables iputils-ping ca-certificates wget gosu && rm -rf /var/lib/apt/lists/*")
 		lines = append(lines, "")
 	}
+
+	// Create unprivileged agent user for running the agent process.
+	// The entrypoint runs as root (needed for iptables), then drops to this user via gosu.
+	lines = append(lines, "RUN useradd -m -s /bin/bash agent")
+	lines = append(lines, "")
 
 	// User extra builds
 	lines = append(lines, cfg.Runtime.ExtraBuilds...)

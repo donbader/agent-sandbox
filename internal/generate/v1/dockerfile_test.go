@@ -32,6 +32,7 @@ func TestBuildDockerfile(t *testing.T) {
 	assert.Contains(t, output, "RUN npm install -g some-tool")
 	assert.Contains(t, output, `CMD ["codex-acp","--listen",":8080"]`)
 	assert.Contains(t, output, "COPY .build/entrypoint.sh")
+	assert.Contains(t, output, "RUN useradd -m -s /bin/bash agent")
 }
 
 func TestBuildDockerfile_BuiltinPreset(t *testing.T) {
@@ -68,7 +69,7 @@ func TestBuildDockerfile_CustomImage(t *testing.T) {
 
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
 	script := EntrypointScript(nil)
-	assert.Contains(t, script, `exec "$@"`)
+	assert.Contains(t, script, `exec gosu agent "$@"`)
 	assert.NotContains(t, script, "pre-entrypoint")
 }
 
@@ -81,7 +82,7 @@ func TestEntrypointScript_WithPreEntrypoint(t *testing.T) {
 	assert.Contains(t, script, "# Plugin pre-entrypoint commands")
 	// pre_entrypoint must come before exec
 	sshdIdx := indexOf(script, "/usr/sbin/sshd -p 2222")
-	execIdx := indexOf(script, `exec "$@"`)
+	execIdx := indexOf(script, `exec gosu agent "$@"`)
 	assert.Greater(t, execIdx, sshdIdx, "pre_entrypoint commands must come before exec")
 }
 
