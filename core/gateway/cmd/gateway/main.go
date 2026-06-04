@@ -53,16 +53,15 @@ func main() {
 	// before constructing the redacting logger.
 	rewriters := buildRewriters(cfg.Rewriters)
 
-	// Collect secret values for value-based log redaction:
-	// 1. Env-var backed secrets (auth-header type).
-	secrets := collectSecrets(cfg.Rewriters)
-	// 2. Runtime secrets from rewriters that implement SecretProvider (e.g. OAuth tokens).
+	// Collect secret values for value-based log redaction from two sources:
+	// 1. Rewriters that implement SecretProvider (auth-header env vars, OAuth tokens).
+	var secrets []string
 	for _, rw := range rewriters {
 		if sp, ok := rw.(mitm.SecretProvider); ok {
 			secrets = append(secrets, sp.Secrets()...)
 		}
 	}
-	// 3. Secrets declared by custom middleware via gateway.RegisterSecret().
+	// 2. Secrets declared by custom middleware via gateway.RegisterSecret().
 	secrets = append(secrets, gateway.Secrets()...)
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -187,19 +186,3 @@ func buildRewriters(cfgs []proxy.RewriterConfig) []mitm.Rewriter {
 	return rewriters
 }
 
-// collectSecrets reads the raw secret values from environment variables referenced
-// by rewriter configs. These values are used for value-based log redaction.
-func collectSecrets(cfgs []proxy.RewriterConfig) []string {
-	var secrets []string
-	for _, rc := range cfgs {
-		switch rc.Type {
-		case "auth-header":
-			if rc.EnvVar != "" {
-				if v := os.Getenv(rc.EnvVar); v != "" {
-					secrets = append(secrets, v)
-				}
-			}
-		}
-	}
-	return secrets
-}

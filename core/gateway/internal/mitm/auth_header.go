@@ -18,6 +18,7 @@ type AuthHeaderRewriter struct {
 	domains     []string
 	header      string
 	headerValue string // pre-computed final header value
+	rawSecret   string // original env var value for redaction
 }
 
 // NewAuthHeaderRewriter creates a rewriter that injects a header for the given domains.
@@ -42,7 +43,16 @@ func NewAuthHeaderRewriter(domains []string, header, valueFormat, envVar string)
 		domains:     domains,
 		header:      header,
 		headerValue: headerValue,
+		rawSecret:   value,
 	}, nil
+}
+
+// Secrets returns the raw secret value for log redaction.
+func (r *AuthHeaderRewriter) Secrets() []string {
+	if r.rawSecret == "" {
+		return nil
+	}
+	return []string{r.rawSecret}
 }
 
 // RewriteRequest injects the configured header if the request host matches one of the
