@@ -128,6 +128,8 @@ jobs:
 
       - name: Docker build (with layer cache)
         working-directory: examples/${{ matrix.example }}/.build
+        env:
+          BUILDX_BAKE_ENTITLEMENTS_FS: "0"
         run: docker buildx bake --file docker-compose.yml --set "*.cache-from=type=gha" --set "*.cache-to=type=gha,mode=max"
 
   sandbox:

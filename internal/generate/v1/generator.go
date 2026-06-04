@@ -135,6 +135,9 @@ func (g *Generator) extractGatewaySource(buildDir string) error {
 			// No gateway source in core dir — skip
 			return nil
 		}
+		if err := os.MkdirAll(filepath.Join(gatewayDest, "core"), 0755); err != nil {
+			return err
+		}
 		if err := copyDir(gatewaySrc, filepath.Join(gatewayDest, "core", "gateway")); err != nil {
 			return err
 		}
@@ -142,6 +145,26 @@ func (g *Generator) extractGatewaySource(buildDir string) error {
 		if _, err := os.Stat(sdkSrc); err == nil {
 			if err := copyDir(sdkSrc, filepath.Join(gatewayDest, "core", "sdk")); err != nil {
 				return err
+			}
+		}
+		// Copy go.mod and go.sum — check coreDir root first, then project root
+		for _, name := range []string{"go.mod", "go.sum"} {
+			var data []byte
+			var found bool
+			// Try coreDir (for self-contained core distributions)
+			if d, err := os.ReadFile(filepath.Join(g.coreDir, name)); err == nil {
+				data, found = d, true
+			}
+			// Fallback: project root (local development)
+			if !found {
+				if d, err := os.ReadFile(filepath.Join(g.projectDir, name)); err == nil {
+					data, found = d, true
+				}
+			}
+			if found {
+				if err := os.WriteFile(filepath.Join(gatewayDest, name), data, 0644); err != nil {
+					return fmt.Errorf("write %s: %w", name, err)
+				}
 			}
 		}
 		return writeGatewayBuildFiles(gatewayDest)
@@ -160,22 +183,18 @@ func (g *Generator) extractGatewaySource(buildDir string) error {
 	return writeGatewayBuildFiles(gatewayDest)
 }
 
-// writeGatewayBuildFiles generates go.mod and Dockerfile for the gateway build context.
+// writeGatewayBuildFiles generates the Dockerfile for the gateway build context.
+// go.mod and go.sum are expected to already exist (from embedded FS or coreDir copy).
 func writeGatewayBuildFiles(gatewayDir string) error {
 	if err := os.MkdirAll(gatewayDir, 0755); err != nil {
 		return err
 	}
 
-	// go.mod — module path matches import paths used by gateway source
-	goMod := "module github.com/donbader/agent-sandbox\n\ngo 1.26\n"
-	if err := os.WriteFile(filepath.Join(gatewayDir, "go.mod"), []byte(goMod), 0644); err != nil {
-		return fmt.Errorf("write go.mod: %w", err)
-	}
-
 	// Dockerfile for gateway
 	dockerfile := `FROM golang:1.26-alpine AS builder
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY core/ core/
 RUN go build -o /gateway ./core/gateway/cmd/gateway/
 

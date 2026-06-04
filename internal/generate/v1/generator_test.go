@@ -95,6 +95,9 @@ contributes:
 	require.NoError(t, os.MkdirAll(gatewayDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(gatewayDir, "main.go"), []byte("package main\n"), 0644))
 
+	// Create go.mod in coreDir (simulates self-contained core distribution)
+	require.NoError(t, os.WriteFile(filepath.Join(coreDir, "go.mod"), []byte("module github.com/donbader/agent-sandbox\n\ngo 1.26\n"), 0644))
+
 	agentYAML := `
 name: test-agent
 runtime:
