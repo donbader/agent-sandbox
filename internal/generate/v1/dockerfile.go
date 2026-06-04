@@ -17,21 +17,21 @@ var Presets = map[string]struct {
 	"@builtin/codex": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @openai/codex@0.136.0",
 		},
 	},
 	"@builtin/claude-code": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
 		},
 	},
 	"@builtin/pi": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
 		},
 	},
@@ -54,8 +54,14 @@ until wget -q --spider http://gateway:8080/health 2>/dev/null; do
 done
 echo "[entrypoint] gateway ready"
 
-# Resolve gateway IP using Docker's internal DNS (127.0.0.11).
-GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
+# Resolve gateway IP (getent may not exist in slim images, fall back to ping).
+GATEWAY_IP=""
+if command -v getent >/dev/null 2>&1; then
+    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
+fi
+if [ -z "$GATEWAY_IP" ]; then
+    GATEWAY_IP=$(ping -c1 -W1 gateway 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p')
+fi
 if [ -z "$GATEWAY_IP" ]; then
     echo "[entrypoint] ERROR: could not resolve gateway IP" >&2
     exit 1
@@ -63,13 +69,9 @@ fi
 echo "[entrypoint] gateway IP: $GATEWAY_IP"
 
 # Redirect outbound HTTPS traffic to the MITM proxy.
-iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination "${GATEWAY_IP}:8443"
+# Exclude traffic destined for the gateway itself to avoid loops.
+iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d "$GATEWAY_IP" -j DNAT --to-destination "${GATEWAY_IP}:8443"
 echo "[entrypoint] iptables: TCP 443 → ${GATEWAY_IP}:8443"
-
-# Redirect DNS to the gateway DNS server.
-iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination "${GATEWAY_IP}:53"
-iptables -t nat -A OUTPUT -p tcp --dport 53 -j DNAT --to-destination "${GATEWAY_IP}:53"
-echo "[entrypoint] iptables: DNS → ${GATEWAY_IP}:53"
 
 # Install the gateway CA certificate so TLS verification succeeds.
 if [ -f /shared/certs/ca.crt ]; then
@@ -114,7 +116,7 @@ func BuildDockerfile(cfg *config.V1Config, contribs *plugin.Contributions) (stri
 
 	// For custom images that don't use a preset, install iptables explicitly.
 	if _, isPreset := Presets[cfg.Runtime.Image]; !isPreset {
-		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends iptables ca-certificates wget && rm -rf /var/lib/apt/lists/*")
+		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends iptables iputils-ping ca-certificates wget && rm -rf /var/lib/apt/lists/*")
 		lines = append(lines, "")
 	}
 

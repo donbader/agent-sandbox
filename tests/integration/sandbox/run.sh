@@ -42,6 +42,9 @@ else
   echo -e "  \033[31m✗\033[0m Gateway did not inject credentials"
   echo "    Response: $RESPONSE"
   echo ""
+  echo "--- Container logs (agent) ---"
+  docker logs "$AGENT_CONTAINER" 2>&1 | tail -30
+  echo ""
   echo "--- Container logs (gateway) ---"
   docker logs "agent-sandbox-gateway-1" 2>&1 | tail -20
   exit 1
