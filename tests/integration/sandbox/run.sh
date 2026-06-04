@@ -36,7 +36,21 @@ echo "--- Credential injection check ---"
 AGENT_SERVICE="sandbox-test"
 GATEWAY_SERVICE="sandbox-test-gateway"
 
-RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose exec "$AGENT_SERVICE" curl -so- --max-time 30 https://httpbin.org/headers 2>&1 || true)
+# Retry logic: httpbin.org occasionally returns 503
+MAX_RETRIES=3
+RETRY_DELAY=5
+RESPONSE=""
+for i in $(seq 1 $MAX_RETRIES); do
+  RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose exec "$AGENT_SERVICE" curl -so- --max-time 30 https://httpbin.org/headers 2>&1 || true)
+  if echo "$RESPONSE" | grep -q "super-secret-token-12345"; then
+    break
+  fi
+  if [ "$i" -lt "$MAX_RETRIES" ]; then
+    echo "  Attempt $i/$MAX_RETRIES failed (may be transient), retrying in ${RETRY_DELAY}s..."
+    sleep "$RETRY_DELAY"
+  fi
+done
+
 if echo "$RESPONSE" | grep -q "super-secret-token-12345"; then
   echo -e "  \033[32m✓\033[0m Gateway injects credentials into outbound requests"
 else
