@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -69,6 +70,12 @@ func LoadV1(dir string) (*V1Config, error) {
 	}
 	if cfg.Runtime.Image == "" {
 		return nil, fmt.Errorf("agent.yaml: runtime.image is required")
+	}
+
+	for i, svc := range cfg.Gateway.Services {
+		if strings.HasPrefix(svc.URL, "docker://") && svc.Network == "" {
+			return nil, fmt.Errorf("agent.yaml: gateway.services[%d]: network is required for docker:// URLs", i)
+		}
 	}
 
 	return &cfg, nil
