@@ -55,6 +55,17 @@ func (g *Generator) Run() error {
 			return fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
 		}
 
+		// Resolve middleware paths relative to the plugin's base directory
+		if pluginDef.BaseDir != "" {
+			for i, svc := range rendered.Gateway.Services {
+				for j, mw := range svc.Middlewares {
+					if mw.Custom != "" {
+						rendered.Gateway.Services[i].Middlewares[j].Custom = filepath.Join(pluginDef.BaseDir, mw.Custom)
+					}
+				}
+			}
+		}
+
 		allContribs = append(allContribs, rendered)
 	}
 

@@ -11,6 +11,7 @@ type PluginDef struct {
 	Name        string                  `yaml:"name"`
 	Options     map[string]OptionSchema `yaml:"options"`
 	Contributes Contributions           `yaml:"contributes"`
+	BaseDir     string                  `yaml:"-"` // directory where plugin.yaml lives (for resolving relative paths)
 }
 
 type OptionSchema struct {

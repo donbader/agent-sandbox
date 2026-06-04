@@ -21,9 +21,15 @@ func NewResolver(projectDir string, bundledFS fs.FS) *Resolver {
 // Resolve finds and parses a plugin by name. If source is non-empty, it's a remote plugin (future).
 func (r *Resolver) Resolve(name string, source string) (*PluginDef, error) {
 	// 1. Check local plugins/<name>/plugin.yaml
-	localPath := filepath.Join(r.projectDir, "plugins", name, "plugin.yaml")
+	localDir := filepath.Join(r.projectDir, "plugins", name)
+	localPath := filepath.Join(localDir, "plugin.yaml")
 	if data, err := os.ReadFile(localPath); err == nil {
-		return ParsePluginYAML(data)
+		p, err := ParsePluginYAML(data)
+		if err != nil {
+			return nil, err
+		}
+		p.BaseDir = localDir
+		return p, nil
 	}
 
 	// 2. Check bundled FS

@@ -18,7 +18,12 @@ func CopyCustomMiddleware(projectDir, outDir string, middlewarePaths []string) e
 	}
 
 	for _, mwPath := range middlewarePaths {
-		srcPath := filepath.Join(projectDir, mwPath)
+		var srcPath string
+		if filepath.IsAbs(mwPath) {
+			srcPath = mwPath
+		} else {
+			srcPath = filepath.Join(projectDir, mwPath)
+		}
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			return fmt.Errorf("read middleware %s: %w", mwPath, err)
