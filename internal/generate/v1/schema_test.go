@@ -28,19 +28,19 @@ func TestGenerateSchema(t *testing.T) {
 	assert.Contains(t, schema, "properties")
 
 	// Verify key properties exist
-	props := schema["properties"].(map[string]any)
+	props, _ := schema["properties"].(map[string]any)
 	assert.Contains(t, props, "name")
 	assert.Contains(t, props, "runtime")
 	assert.Contains(t, props, "gateway")
 	assert.Contains(t, props, "installations")
 
 	// Verify required fields
-	required := schema["required"].([]any)
+	required, _ := schema["required"].([]any)
 	assert.Contains(t, required, "name")
 	assert.Contains(t, required, "runtime")
 
 	// Verify nested runtime properties
-	runtimeProps := props["runtime"].(map[string]any)["properties"].(map[string]any)
+	runtimeProps, _ := props["runtime"].(map[string]any)["properties"].(map[string]any)
 	assert.Contains(t, runtimeProps, "image")
 	assert.Contains(t, runtimeProps, "extra_builds")
 	assert.Contains(t, runtimeProps, "entrypoint")
