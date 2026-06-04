@@ -90,13 +90,16 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("create .build dir: %w", err)
 	}
 
-	// 4. Generate Dockerfile
+	// 4. Generate Dockerfile + entrypoint.sh (transparent proxy bootstrap)
 	dockerfile, err := BuildDockerfile(cfg, merged)
 	if err != nil {
 		return fmt.Errorf("build dockerfile: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
 		return fmt.Errorf("write Dockerfile: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "entrypoint.sh"), []byte(EntrypointScript()), 0755); err != nil {
+		return fmt.Errorf("write entrypoint.sh: %w", err)
 	}
 
 	// 5. Generate docker-compose.yml

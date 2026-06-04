@@ -17,27 +17,80 @@ var Presets = map[string]struct {
 	"@builtin/codex": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @openai/codex@0.136.0",
 		},
 	},
 	"@builtin/claude-code": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
 		},
 	},
 	"@builtin/pi": {
 		BaseImage: "node:24-slim",
 		Installs: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
 		},
 	},
 }
 
+// entrypointScript is the transparent proxy bootstrap script written to .build/entrypoint.sh.
+// It runs inside the agent container on startup and:
+//  1. Waits for the gateway health endpoint to be ready.
+//  2. Redirects outbound TCP 443 → gateway:8443 (MITM proxy) via iptables DNAT.
+//  3. Redirects outbound UDP/TCP 53 → gateway:53 (DNS) via iptables DNAT.
+//  4. Installs the gateway CA certificate into the system trust store.
+//  5. Execs the original CMD so no PID is wasted.
+const entrypointScript = `#!/bin/sh
+set -e
+
+# Wait for gateway to be healthy before setting up routing.
+echo "[entrypoint] waiting for gateway..."
+until wget -q --spider http://gateway:8080/health 2>/dev/null; do
+    sleep 1
+done
+echo "[entrypoint] gateway ready"
+
+# Resolve gateway IP using Docker's internal DNS (127.0.0.11).
+GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
+if [ -z "$GATEWAY_IP" ]; then
+    echo "[entrypoint] ERROR: could not resolve gateway IP" >&2
+    exit 1
+fi
+echo "[entrypoint] gateway IP: $GATEWAY_IP"
+
+# Redirect outbound HTTPS traffic to the MITM proxy.
+iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination "${GATEWAY_IP}:8443"
+echo "[entrypoint] iptables: TCP 443 → ${GATEWAY_IP}:8443"
+
+# Redirect DNS to the gateway DNS server.
+iptables -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination "${GATEWAY_IP}:53"
+iptables -t nat -A OUTPUT -p tcp --dport 53 -j DNAT --to-destination "${GATEWAY_IP}:53"
+echo "[entrypoint] iptables: DNS → ${GATEWAY_IP}:53"
+
+# Install the gateway CA certificate so TLS verification succeeds.
+if [ -f /shared/certs/ca.crt ]; then
+    cp /shared/certs/ca.crt /usr/local/share/ca-certificates/gateway-ca.crt
+    update-ca-certificates --fresh >/dev/null 2>&1
+    echo "[entrypoint] CA certificate installed"
+else
+    echo "[entrypoint] WARNING: CA cert not found at /shared/certs/ca.crt" >&2
+fi
+
+exec "$@"
+`
+
+// EntrypointScript returns the transparent proxy bootstrap script content.
+func EntrypointScript() string {
+	return entrypointScript
+}
+
 // BuildDockerfile generates a Dockerfile string from config and plugin contributions.
+// The Dockerfile uses entrypoint.sh (expected alongside it in the build context) as
+// ENTRYPOINT, which sets up iptables routing before handing off to CMD.
 func BuildDockerfile(cfg *config.V1Config, contribs *plugin.Contributions) (string, error) {
 	var lines []string
 
@@ -51,11 +104,17 @@ func BuildDockerfile(cfg *config.V1Config, contribs *plugin.Contributions) (stri
 	lines = append(lines, fmt.Sprintf("FROM %s", baseImage))
 	lines = append(lines, "")
 
-	// Preset installs
+	// Preset installs (includes iptables for builtin presets)
 	for _, inst := range presetInstalls {
 		lines = append(lines, fmt.Sprintf("RUN %s", inst))
 	}
 	if len(presetInstalls) > 0 {
+		lines = append(lines, "")
+	}
+
+	// For custom images that don't use a preset, install iptables explicitly.
+	if _, isPreset := Presets[cfg.Runtime.Image]; !isPreset {
+		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends iptables ca-certificates wget && rm -rf /var/lib/apt/lists/*")
 		lines = append(lines, "")
 	}
 
@@ -73,7 +132,13 @@ func BuildDockerfile(cfg *config.V1Config, contribs *plugin.Contributions) (stri
 		}
 	}
 
-	// Entrypoint
+	// Transparent proxy entrypoint wrapper
+	lines = append(lines, "COPY entrypoint.sh /usr/local/bin/entrypoint.sh")
+	lines = append(lines, "RUN chmod +x /usr/local/bin/entrypoint.sh")
+	lines = append(lines, `ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]`)
+	lines = append(lines, "")
+
+	// CMD — the actual agent process (passed as "$@" to entrypoint.sh)
 	if len(cfg.Runtime.Entrypoint) > 0 {
 		ep, err := json.Marshal(cfg.Runtime.Entrypoint)
 		if err != nil {

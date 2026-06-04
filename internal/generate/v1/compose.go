@@ -27,20 +27,23 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 	buildDir := filepath.Join(projectDir, ".build")
 
 	// Agent service
+	// cap_add NET_ADMIN is required for iptables DNAT rules in entrypoint.sh.
+	agentVolumes := []string{"certs:/shared/certs"}
+	agentVolumes = append(agentVolumes, cfg.Runtime.Volumes...)
 	agentSvc := map[string]any{
 		"build": map[string]any{
 			"context":    ".",
 			"dockerfile": "Dockerfile",
 		},
+		"cap_add":    []string{"NET_ADMIN"},
 		"depends_on": []string{"gateway"},
 		"networks":   []string{"sandbox"},
-	}
-	if len(cfg.Runtime.Volumes) > 0 {
-		agentSvc["volumes"] = cfg.Runtime.Volumes
+		"volumes":    agentVolumes,
 	}
 	compose.Services["agent"] = agentSvc
 
 	// Gateway service
+	// The gateway writes /shared/certs/ca.crt so the agent can install it.
 	gatewayEnv := collectGatewayEnvVars(cfg, contribs)
 	gatewaySvc := map[string]any{
 		"build": map[string]any{
@@ -48,6 +51,7 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 			"dockerfile": "Dockerfile",
 		},
 		"networks": []string{"sandbox"},
+		"volumes":  []string{"certs:/shared/certs"},
 		"healthcheck": map[string]any{
 			"test":     []string{"CMD", "wget", "--spider", "-q", "http://localhost:8080/health"},
 			"interval": "5s",
@@ -99,7 +103,10 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 	// Sandbox network
 	compose.Networks["sandbox"] = map[string]any{"driver": "bridge"}
 
-	// Extract named volumes
+	// The certs volume is always present — shared between gateway (writer) and agent (reader).
+	compose.Volumes["certs"] = nil
+
+	// Extract any additional named volumes from user config
 	for _, v := range cfg.Runtime.Volumes {
 		volName := extractVolumeName(v)
 		if volName != "" {
