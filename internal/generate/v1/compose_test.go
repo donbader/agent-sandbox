@@ -66,26 +66,21 @@ func TestBuildCompose_PluginOptionsPassthroughToGateway(t *testing.T) {
 		Runtime: config.RuntimeConfig{
 			Image: "@builtin/codex",
 		},
-		Installations: []config.Installation{
-			{
-				Plugin:  "telegram",
-				Options: map[string]any{"bot_token": "${TELEGRAM_BOT_TOKEN}"},
-			},
-		},
 	}
 
-	// Plugin contributes gateway services (middleware)
+	// Plugin contributes gateway services + environment
 	contribs := &plugin.Contributions{
 		Gateway: plugin.GatewayContrib{
 			Services: []plugin.GatewayService{
 				{URL: "https://api.telegram.org"},
 			},
+			Environment: []string{"TELEGRAM_BOT_TOKEN"},
 		},
 	}
 
 	output, err := BuildCompose(cfg, contribs, "/project")
 	require.NoError(t, err)
 
-	// TELEGRAM_BOT_TOKEN should be passed to gateway from plugin options
+	// TELEGRAM_BOT_TOKEN should be passed to gateway via gateway.environment
 	assert.Contains(t, output, "TELEGRAM_BOT_TOKEN")
 }
