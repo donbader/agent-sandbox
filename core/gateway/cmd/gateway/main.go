@@ -48,8 +48,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Collect secret values from rewriter env vars for value-based redaction.
+	// Build rewriters early so we can collect secrets from them (e.g. OAuth tokens)
+	// before constructing the redacting logger.
+	rewriters := buildRewriters(cfg.Rewriters)
+
+	// Collect secret values for value-based log redaction:
+	// 1. Env-var backed secrets (auth-header type).
 	secrets := collectSecrets(cfg.Rewriters)
+	// 2. Runtime secrets from rewriters that implement SecretProvider (e.g. OAuth tokens).
+	for _, rw := range rewriters {
+		if sp, ok := rw.(mitm.SecretProvider); ok {
+			secrets = append(secrets, sp.Secrets()...)
+		}
+	}
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: level,
@@ -76,9 +87,6 @@ func main() {
 
 	// Start TCP proxy
 	p := proxy.New(cfg)
-
-	// Build rewriters from config (shared between MITM and HTTP handlers)
-	rewriters := buildRewriters(cfg.Rewriters)
 
 	// Generate CA and register MITM handler if MITM domains are configured
 	if len(cfg.MITMDomains) > 0 {

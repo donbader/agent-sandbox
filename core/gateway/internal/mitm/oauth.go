@@ -67,6 +67,17 @@ func NewOAuthRewriter(domains []string, tokenFile string) (*OAuthRewriter, error
 	return r, nil
 }
 
+// Secrets implements SecretProvider. Returns the current cached access token
+// so it can be added to the log redaction list.
+func (r *OAuthRewriter) Secrets() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cachedToken != nil && r.cachedToken.AccessToken != "" {
+		return []string{r.cachedToken.AccessToken}
+	}
+	return nil
+}
+
 // RewriteRequest injects a Bearer Authorization header if the request host matches
 // one of the configured domains. Returns true if the header was injected.
 func (r *OAuthRewriter) RewriteRequest(req *http.Request) bool {

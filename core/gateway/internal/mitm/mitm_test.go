@@ -90,3 +90,19 @@ func TestHandler_Matches(t *testing.T) {
 		t.Error("expected no match for unknown.com")
 	}
 }
+
+func TestHandler_TransportReuse(t *testing.T) {
+	ca := testCA(t)
+	h := NewHandler([]string{"example.com"}, ca, nil)
+
+	t1 := h.getTransport("example.com")
+	t2 := h.getTransport("example.com")
+	if t1 != t2 {
+		t.Error("expected same transport to be reused for same host")
+	}
+
+	t3 := h.getTransport("other.com")
+	if t1 == t3 {
+		t.Error("expected different transport for different hosts")
+	}
+}

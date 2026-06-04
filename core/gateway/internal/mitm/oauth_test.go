@@ -252,6 +252,30 @@ func TestOAuthRewriter_CachesToken(t *testing.T) {
 	assert.Equal(t, "Bearer cached-token", req2.Header.Get("Authorization"))
 }
 
+func TestOAuthRewriter_ImplementsSecretProvider(t *testing.T) {
+	tokenFile := writeTestToken(t, &StoredToken{
+		AccessToken:   "super-secret-token",
+		RefreshToken:  strPtr("refresh"),
+		ExpiresAt:     time.Now().Unix() + 3600,
+		TokenEndpoint: "https://example.com/token",
+		ClientID:      "cid",
+		ClientSecret:  nil,
+	})
+
+	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
+	require.NoError(t, err)
+
+	// Prime the cache so the token is available.
+	req := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
+	req.Host = "mcp.notion.com"
+	rw.RewriteRequest(req)
+
+	sp, ok := any(rw).(SecretProvider)
+	require.True(t, ok, "OAuthRewriter must implement SecretProvider")
+	secrets := sp.Secrets()
+	assert.Contains(t, secrets, "super-secret-token")
+}
+
 // --- helpers ---
 
 func writeTestToken(t *testing.T, token *StoredToken) string {

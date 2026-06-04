@@ -15,14 +15,21 @@ import (
 	"sync"
 )
 
+// SecretProvider is implemented by rewriters that hold sensitive values (e.g. tokens)
+// that should be redacted from logs.
+type SecretProvider interface {
+	Secrets() []string
+}
+
 // Handler implements proxy.RequestHandler for MITM domains.
 // It terminates TLS using the sandbox CA, parses HTTP requests,
 // applies rewriters, and forwards to the real destination.
 type Handler struct {
-	domains   []string
-	caCert    tls.Certificate
-	certCache *CertCache
-	rewriters []Rewriter
+	domains        []string
+	caCert         tls.Certificate
+	certCache      *CertCache
+	rewriters      []Rewriter
+	transportCache sync.Map // keyed by serverName → *http.Transport
 }
 
 // Rewriter modifies HTTP requests before forwarding.
@@ -134,6 +141,29 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 	}
 }
 
+// getTransport returns a cached *http.Transport for the given serverName, creating
+// one on first use. Reusing transports enables TCP/TLS connection pooling.
+func (h *Handler) getTransport(serverName string) *http.Transport {
+	insecure := os.Getenv("GATEWAY_INSECURE_UPSTREAM") == "true"
+
+	if v, ok := h.transportCache.Load(serverName); ok {
+		return v.(*http.Transport)
+	}
+
+	t := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			ServerName:         serverName,
+			InsecureSkipVerify: insecure, //nolint:gosec // test-only
+		},
+		// Disable compression so we can stream the raw response bytes.
+		DisableCompression: true,
+	}
+
+	// Store, but prefer an existing entry if a concurrent goroutine beat us.
+	actual, _ := h.transportCache.LoadOrStore(serverName, t)
+	return actual.(*http.Transport)
+}
+
 // forwardRequest sends the request to the real server over TLS.
 func (h *Handler) forwardRequest(req *http.Request, serverName string) (*http.Response, error) {
 	// Set the host header and request URI
@@ -149,17 +179,8 @@ func (h *Handler) forwardRequest(req *http.Request, serverName string) (*http.Re
 		req.URL.Scheme = "https"
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			ServerName:         serverName,
-			InsecureSkipVerify: insecure, //nolint:gosec // test-only
-		},
-		// Disable compression so we can stream the raw response bytes
-		DisableCompression: true,
-	}
-
 	client := &http.Client{
-		Transport: transport,
+		Transport: h.getTransport(serverName),
 		// Don't follow redirects — pass them through
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
