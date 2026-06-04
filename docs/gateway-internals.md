@@ -1,28 +1,27 @@
 # Gateway Internals
 
-The gateway is a transparent egress proxy that runs as a separate container alongside the agent. All outbound TCP from the agent routes through it via default route manipulation. Its job is to intercept specific TLS connections for credential injection while passing everything else through untouched.
+The gateway is a transparent egress proxy that runs as a separate container alongside the agent. All outbound HTTPS from the agent routes through it via iptables DNAT (port 443 → gateway:8443). Its job is to intercept specific TLS connections for credential injection while passing everything else through untouched.
 
 ## Architecture
 
 ```
-Agent outbound TCP → Gateway TCP listener (:443)
-                          │
-                          ├─ Read TLS ClientHello
-                          ├─ Extract SNI (server name)
-                          │
-                          ├─ SNI matches MITM domain?
-                          │    YES → mitm.Handler (terminate TLS, rewrite HTTP, forward)
-                          │    NO  → passthrough (pipe bytes directly to upstream)
-                          │
-Agent DNS queries  → Gateway DNS server (:53)
-                          └─ Forward to 8.8.8.8
+Agent outbound TCP :443 → iptables DNAT → Gateway TCP listener (:8443)
+                                               │
+                                               ├─ Read TLS ClientHello
+                                               ├─ Extract SNI (server name)
+                                               │
+                                               ├─ SNI matches MITM domain?
+                                               │    YES → mitm.Handler (terminate TLS, rewrite HTTP, forward)
+                                               │    NO  → passthrough (pipe bytes directly to upstream)
+                                               │
+Gateway health endpoint (:8080/health) ← Agent entrypoint polls before setting up iptables
 ```
 
 ## Module Layout
 
 ```
-gateway/
-├── cmd/gateway/main.go            ← entrypoint, wiring
+core/gateway/
+├── cmd/gateway/main.go            ← entrypoint, wiring, health endpoint
 └── internal/
     ├── proxy/
     │   ├── config.go              ← Config structs, YAML loading
@@ -31,7 +30,7 @@ gateway/
     │   └── forward.go             ← Generic TCP port forwarder
     ├── mitm/
     │   ├── mitm.go                ← MITM handler (TLS termination + HTTP pipeline)
-    │   ├── cert.go                ← CA loading, on-demand cert generation, CertCache
+    │   ├── cert.go                ← CA generation, on-demand cert generation, CertCache
     │   ├── telegram.go            ← TelegramRewriter (URL path token swap)
     │   └── auth_header.go         ← AuthHeaderRewriter (header injection)
     ├── redact/
@@ -70,7 +69,7 @@ Built-in implementations:
 ## Connection Flow
 
 1. Agent makes outbound TCP connection (e.g., `curl https://github.com`)
-2. Default route sends packet to gateway container
+2. iptables DNAT rule redirects port 443 → gateway:8443
 3. Gateway's TCP listener accepts the connection
 4. Reads first 4096 bytes — expects a TLS ClientHello
 5. Calls `extractSNI()` to parse the server name from the ClientHello
@@ -80,19 +79,17 @@ Built-in implementations:
 
 The passthrough path preserves end-to-end TLS — the gateway never sees plaintext for non-MITM'd hosts.
 
-## DNS Server
+## DNS
 
-The gateway runs a UDP DNS forwarder on port 53. The agent's `/etc/resolv.conf` points to the gateway IP.
+The gateway includes a DNS forwarder on port 53, but in the current v1 architecture DNS resolution uses Docker's built-in DNS. The agent's `/etc/resolv.conf` points to Docker's embedded DNS server (127.0.0.11), which resolves container names (e.g., `gateway`) automatically.
 
-- All queries forwarded to `8.8.8.8:53`
-- Prevents DNS-based proxy bypass (agent can't resolve names through an alternative path)
-- Simple packet relay — no caching, no filtering
+The gateway DNS server exists as infrastructure for future use cases (DNS-based routing, filtering) but is not required for the transparent proxy to function.
 
 ## MITM Pipeline
 
 When a connection matches a MITM domain, `mitm.Handler` takes over:
 
-1. **Certificate generation** — `CertCache.GetOrCreate(domain, caCert)` generates an ECDSA P-256 leaf cert signed by the sandbox CA. Cached per domain (thread-safe, double-checked locking).
+1. **Certificate generation** — At startup, the gateway generates an ECDSA P-256 CA keypair and writes the CA cert to a shared volume (`/shared/certs/ca.crt`). Per-domain leaf certs are generated on demand via `CertCache.GetOrCreate(domain, caCert)` (thread-safe, double-checked locking).
 2. **TLS handshake** — wraps the client connection in a `prefixConn` (replays the already-read ClientHello bytes), then performs a `tls.Server` handshake using the generated cert.
 3. **HTTP request loop** (keep-alive aware):
    - `http.ReadRequest` from the decrypted stream
@@ -101,7 +98,7 @@ When a connection matches a MITM domain, `mitm.Handler` takes over:
    - Write upstream response back to agent over the MITM'd connection
    - Repeat until `Connection: close` or EOF
 
-The agent's TLS client trusts the sandbox CA (installed during Docker build via `update-ca-certificates`), so the MITM is transparent.
+The agent's TLS client trusts the gateway CA (installed at container startup via `update-ca-certificates` from the shared certs volume), so the MITM is transparent.
 
 ## Log Redaction
 
@@ -132,6 +129,6 @@ func (r *MyRewriter) RewriteRequest(req *http.Request) bool {
 ```
 
 3. Add a case in `buildRewriters()` in `cmd/gateway/main.go` to instantiate it from config
-4. Declare the MITM domains in your plugin's `feature.yaml` under `gateway.hosts`
+4. Declare the MITM domains in your plugin's `plugin.yaml` under `gateway.hosts`
 
 The gateway binary is recompiled during Docker build, so new rewriters are picked up automatically when you `agent-sandbox compose up --build`.

@@ -6,23 +6,18 @@
 agent-sandbox generate
   │
   ├── Detect mode: agent.yaml (single) or fleet.yaml (multi)
-  ├── Read runtime plugin: internal/plugins/<runtime>/runtime.yaml
-  ├── Read feature plugins: registered via init() in internal/plugins/<feature>/plugin.go
+  ├── Read preset: core/presets/<runtime>/
+  ├── Read feature plugins: core/plugins/<feature>/
   ├── Merge shared features (if fleet mode)
   │
   └── Generate .build/:
-        ├── gateway-src/        (embedded gateway core + feature gateway/ dirs)
-        ├── channel-manager-src/     (embedded channel manager + channel plugins)
+        ├── gateway-src/        (extracted from embed.FS: core/gateway + core/sdk)
         ├── home-override/      (from user's home/ dir)
-        ├── hooks/              (from feature entrypoint hooks)
         ├── Dockerfile.gateway  (gateway container: compile + minimal alpine)
-        ├── Dockerfile.agent    (agent container: channel-manager build + runtime)
-        ├── gateway-config.yaml (merged hosts from feature.yaml files)
-        ├── gateway-entrypoint.sh
-        ├── entrypoint.sh       (agent: default route + channel-manager/agent start)
-        ├── channel-manager-config.json (channels + agent cmd from runtime.yaml)
-        ├── certs/              (CA cert + key for MITM)
-        └── docker-compose.yml  (two services + internal network)
+        ├── Dockerfile          (agent container: runtime + entrypoint)
+        ├── config.yaml         (gateway runtime config: MITM domains + rewriters)
+        ├── entrypoint.sh       (agent: iptables DNAT + CA cert install + exec)
+        └── docker-compose.yml  (two services + shared certs volume + internal network)
 
 agent-sandbox compose up --build -d
   │
@@ -52,53 +47,28 @@ RUN go mod tidy && CGO_ENABLED=0 go build -o /gateway ./cmd/gateway/
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /gateway /usr/local/bin/gateway
-COPY gateway-config.yaml /etc/gateway/config.yaml
-COPY certs/ /etc/gateway/
-COPY gateway-entrypoint.sh /opt/entrypoint.sh
-RUN chmod +x /opt/entrypoint.sh
-ENTRYPOINT ["/opt/entrypoint.sh"]
+COPY config.yaml /etc/gateway/config.yaml
+ENTRYPOINT ["gateway"]
 ```
 
-### Dockerfile.agent
+### Dockerfile (Agent)
 
 ```dockerfile
-# Stage 1: Compile channel manager (if channels active)
-FROM node:22-slim AS channel-manager-build
-WORKDIR /src
-COPY channel-manager-src/package.json channel-manager-src/tsconfig.json ./
-RUN npm install
-COPY channel-manager-src/src/ ./src/
-RUN npm run build
+FROM node:24-slim
 
-# Stage 2: Agent runtime
-FROM node:22-slim
-
-# System packages (iproute2 for default route setup)
+# System packages (iptables for transparent proxy routing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    iproute2 ca-certificates git curl \
+    iptables ca-certificates git curl iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Agent user
 RUN useradd -m -s /bin/bash agent
 
-# Trust sandbox CA (for MITM'd connections)
-COPY certs/ca.crt /usr/local/share/ca-certificates/sandbox-ca.crt
-RUN update-ca-certificates
-
-# Channel Manager
-COPY --from=channel-manager-build /src/dist/ /opt/channel-manager/dist/
-COPY --from=channel-manager-build /src/node_modules/ /opt/channel-manager/node_modules/
-COPY channel-manager-config.json /opt/channel-manager/config.json
-
-# Runtime install (from runtime.yaml)
+# Runtime install (from preset)
 RUN npm install -g @openai/codex
 
-# Feature commands
-RUN apt-get update && apt-get install -y ripgrep fd-find
-
-# Home override + hooks
+# Home override
 COPY home-override/ /opt/home-override/
-COPY hooks/ /opt/hooks/
 
 COPY entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
@@ -106,12 +76,19 @@ ENTRYPOINT ["/opt/entrypoint.sh"]
 CMD ["sleep", "infinity"]
 ```
 
-### Dockerfile Without Gateway/Channel Manager (Phase 1-2)
+The agent entrypoint:
+1. Waits for gateway health check (`curl http://gateway:8080/health`)
+2. Resolves gateway container IP
+3. Sets up iptables DNAT: outbound TCP 443 → gateway:8443
+4. Installs gateway's CA cert from shared volume (`/shared/certs/ca.crt`)
+5. Execs into CMD
 
-When no features need gateway or channel manager, the Dockerfile is simple:
+### Dockerfile Without Gateway (Simple Mode)
+
+When no features need gateway, the Dockerfile is simple:
 
 ```dockerfile
-FROM node:22-slim
+FROM node:24-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ca-certificates \
@@ -130,25 +107,35 @@ CMD ["sleep", "infinity"]
 
 | Content | Purpose | Size |
 |---------|---------|------|
-| Gateway core source | TCP proxy, SNI, MITM framework | ~15MB |
-| Channel manager runtime | TypeScript: process spawning, plugin loader | ~5MB |
-| Built-in plugin YAML | runtime.yaml + feature.yaml defaults | ~10KB |
-| Entrypoint template | Shell script template | ~2KB |
+| Gateway core source (`core/gateway/`) | TCP proxy, SNI, MITM framework | ~15MB |
+| SDK module (`core/sdk/`) | Gateway middleware interfaces | ~5KB |
+| Built-in presets (`core/presets/`) | Base image, install commands, CMD | ~10KB |
+| Built-in plugins (`core/plugins/`) | Feature plugin definitions | ~10KB |
+| Root go.mod + go.sum | Gateway build dependencies | ~5KB |
 
-Gateway handlers (per-feature Go code) are part of the gateway core module (`gateway/internal/mitm/`). They are compiled along with the gateway core during Docker build.
+Gateway rewriters (auth-header, telegram-url) are config-driven — instantiated at runtime from `config.yaml`, not compiled per-plugin.
 
 ## Gateway Compilation
 
 The gateway binary is compiled during Docker build, not CLI build:
 
-1. CLI extracts gateway core source to `.build/gateway-src/`
-2. CLI generates `gateway-config.yaml` with rewriter rules from active feature plugins
-3. Docker multi-stage compiles gateway binary into one binary
-4. Config-driven rewriter types (`telegram-url`, `auth-header`) are instantiated at runtime from `gateway-config.yaml`
+1. CLI extracts gateway core source from `embed.FS` to `.build/gateway-src/` (includes `core/gateway/` + `core/sdk/` + root `go.mod`/`go.sum`)
+2. CLI generates `config.yaml` with rewriter rules from active feature plugins
+3. Docker multi-stage compiles gateway binary into a single binary
+4. Config-driven rewriter types (`telegram-url`, `auth-header`) are instantiated at runtime from `config.yaml`
 
 This means:
 - Gateway config changes = re-run `agent-sandbox generate`, rebuild container
 - User doesn't need Go installed (Docker handles compilation)
+
+## CA Certificate Lifecycle
+
+The CA keypair is generated at **gateway startup** (not build time):
+
+1. Gateway starts → generates ECDSA CA cert + key
+2. Writes CA cert to shared volume: `/shared/certs/ca.crt`
+3. Agent entrypoint waits for gateway health → copies CA cert from volume → `update-ca-certificates`
+4. All MITM'd connections use certificates signed by this runtime-generated CA
 
 ## Channel Manager Loading
 
@@ -165,23 +152,19 @@ The channel manager is TypeScript. Runs as the container entrypoint when channel
 ┌─ Internal Network ──────────────────────────────────────────┐
 │                                                              │
 │  ┌─ coder ───────────────────────────────────────────────┐  │
-│  │  Gateway (github + docker + telegram rules)            │  │
-│  │  Channel Manager → codex exec                              │  │
+│  │  Gateway (github + telegram rules)                     │  │
+│  │  Agent (codex, iptables DNAT → gateway:8443)           │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌─ reviewer ────────────────────────────────────────────┐  │
-│  │  Gateway (github + telegram rules)                     │  │
-│  │  Channel Manager → claude-code                             │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌─ dind (shared) ───────────────────────────────────────┐  │
-│  │  Docker daemon                                         │  │
+│  │  Gateway (github rules)                                │  │
+│  │  Agent (claude-code, iptables DNAT → gateway:8443)     │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Each agent has its own gateway instance (same core, different config + handlers). DinD shared if multiple agents need Docker.
+Each agent has its own gateway instance (same binary, different config). Agent traffic routes to its gateway via iptables DNAT (port 443 → gateway:8443).
 
 ## Project Structure
 
@@ -191,19 +174,25 @@ agent-sandbox/
 
   cmd/agent-sandbox/        ← CLI binary (generic template engine)
     main.go
-    cmd/                    ← cobra commands (generate, compose)
 
-  sdk/                      ← Plugin SDK (interfaces for gateway handlers)
-    go.mod
-    plugin.go
+  core/
+    gateway/                ← Gateway core source (embedded in CLI)
+      go.mod
+      cmd/gateway/main.go
+      internal/proxy/       ← TCP listener, SNI routing, passthrough
+      internal/mitm/        ← MITM handler, cert generation, rewriters
+      internal/dns/         ← UDP DNS forwarder
+      internal/redact/      ← Secret-masking slog handler
 
-  gateway/                  ← Gateway core source (embedded in CLI)
-    go.mod
-    cmd/gateway/main.go
-    proxy.go, sni.go, mitm.go
-    handler_interface.go    ← RequestHandler interface
+    sdk/                    ← Gateway middleware interfaces (embedded in CLI)
+      go.mod
+      gateway/middleware.go
 
-  channel-manager/          ← Channel manager runtime TypeScript (embedded in CLI)
-    package.json
-    src/index.ts, agent.ts, plugin-loader.ts, types.ts
+    presets/                ← Runtime presets (codex, claude-code, pi)
+      codex/preset.yaml
+      claude-code/preset.yaml
+
+    plugins/                ← Feature plugins (github-pat, mcp-oauth)
+      github-pat/plugin.yaml
+      mcp-oauth/plugin.yaml
 ```

@@ -67,7 +67,7 @@ agent-sandbox upgrade           # self-update
 └─────────────────┘         └──────────────────────┘
 ```
 
-All agent traffic flows through the gateway container via default route. The gateway injects credentials (GitHub PAT, API keys) without exposing them to the agent environment.
+All agent traffic flows through the gateway container via iptables DNAT. The gateway injects credentials (GitHub PAT, API keys) without exposing them to the agent environment.
 
 ## Documentation
 

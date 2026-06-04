@@ -20,16 +20,16 @@ cmd/agent-sandbox/      ← CLI entrypoint (generic template engine)
 internal/
   config/               ← agent.yaml parsing
   generate/             ← Build artifact generation (builder structs + Go templates)
+    v1/                 ← v1 generator (compose, dockerfile, gateway config)
     templates/          ← Go text/template files for Dockerfiles, compose, entrypoints
   resolve/              ← plugin resolution (local → embedded)
-  plugins/              ← core plugins (embedded in CLI)
-    codex/              ← runtime.yaml
-    custom-runtime/     ← feature.yaml + plugin.go (typed Config struct)
+core/
+  gateway/              ← Gateway core source (embedded in CLI via go:embed)
+  sdk/                  ← Gateway middleware interfaces
+  presets/              ← Runtime presets (codex, claude-code, pi)
+  plugins/              ← Feature plugins (github-pat, mcp-oauth)
 ext/
   plugins/              ← external plugins (per-plugin versioning)
-gateway/                ← (Phase 3) Gateway core source (embedded in CLI)
-channel-manager/         ← Channel manager TypeScript (ACP client, channel loader, wrapper)
-sdk/                    ← Gateway handler interface (for feature plugins)
 docs/                   ← Design documents
 ```
 
@@ -66,29 +66,23 @@ agent-sandbox compose up --build       # docker compose passthrough
 
 **Key principle:** Plugin updates never require CLI upgrades. CLI is a generic template engine.
 
-### Runtime Plugins (Pure Data — embedded in CLI)
+### Runtime Presets (Pure Data — embedded in CLI)
 
 ```
-plugins/runtime/<name>/runtime.yaml     ← base image, install commands, CMD, ports
-plugins/runtime/<name>/Dockerfile.tmpl  ← optional custom template
+core/presets/<name>/preset.yaml     ← base image, install commands, CMD, ports
 ```
 
-No Go code. CLI reads YAML and generates Dockerfile. Runtime plugins are core — they ship with the CLI binary.
+No Go code. CLI reads YAML and generates Dockerfile. Presets are core — they ship with the CLI binary.
 
-### Feature Plugins (Hybrid — Data + Code)
+### Feature Plugins (Pure Data)
 
-Core feature plugins live in `internal/plugins/<name>/` and are embedded in the CLI:
+Feature plugins live in `core/plugins/<name>/` and are embedded in the CLI:
 
 ```
-internal/plugins/<name>/feature.yaml   ← metadata, config schema
-internal/plugins/<name>/plugin.go      ← Go: typed Config struct + Register[C]() call
+core/plugins/<name>/plugin.yaml    ← metadata, gateway hosts, rewriter config
 ```
 
-- Each plugin defines a typed Config struct with `yaml` and `schema` tags
-- Plugins register via `init()` → `resolve.Register[C](name, fn)`
-- Framework handles yaml unmarshaling (map[string]any → typed struct)
-- Schema.json generated from struct tags via reflection (single source of truth)
-- `internal/plugins/register.go` imports all core plugins for side-effect registration
+Plugins declare gateway rewriter rules (MITM domains, header injection) that are merged into `config.yaml` at generate time.
 
 ## Testing Guidelines
 
@@ -135,10 +129,10 @@ Refer to docs/roadmap.md for the phased implementation plan.
 
 - Every phase produces a working `agent-sandbox generate && agent-sandbox compose up --build`
 - Plugin updates never require CLI upgrades
-- Runtime plugins are pure data (YAML) — no Go code
-- Feature plugins are hybrid (YAML + optional Go gateway + optional TypeScript channel)
-- Gateway handlers compile during Docker build, not CLI build
-- Channel manager spawns agent as child process, loads channel plugins dynamically
+- Runtime presets are pure data (YAML) — no Go code
+- Feature plugins declare gateway rewriter rules (YAML) — compiled into gateway at Docker build
+- Gateway binary compiles during Docker build, not CLI build
+- Transparent proxy via iptables DNAT — agent doesn't know it's proxied
 - Ephemeral by default — containers start fresh every restart
 - All credentials through gateway — real creds never in container env
 
