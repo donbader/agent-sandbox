@@ -133,18 +133,6 @@ func (g *Generator) Run() error {
 		}
 	}
 
-	if g.ChannelManager {
-		if err := g.writeChannelManagerSource(); err != nil {
-			return err
-		}
-		if err := g.writeCommandPlugins(); err != nil {
-			return err
-		}
-		if err := g.writeChannelConfig(); err != nil {
-			return err
-		}
-	}
-
 	if err := g.writeDockerfile(); err != nil {
 		return err
 	}

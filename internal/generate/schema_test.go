@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	// Import plugins to trigger init() registration
-	_ "github.com/donbader/agent-sandbox/internal/plugins/custom-runtime"
-	_ "github.com/donbader/agent-sandbox/internal/plugins/telegram"
+	_ "github.com/donbader/agent-sandbox/internal/plugins/claude-code"
+	_ "github.com/donbader/agent-sandbox/internal/plugins/github-pat"
 )
 
 func TestStructToJSONSchema(t *testing.T) {
@@ -156,35 +156,11 @@ func TestCollectFeatureItemSchemas(t *testing.T) {
 		}
 	})
 
-	t.Run("includes custom-runtime plugin properties", func(t *testing.T) {
-		item := findPlugin("custom-runtime")
+	t.Run("includes github-pat plugin properties", func(t *testing.T) {
+		item := findPlugin("github-pat")
 		require.NotNil(t, item)
 		props, _ := item["properties"].(map[string]any)
-		assert.Contains(t, props, "commands")
-		assert.Contains(t, props, "entrypoint_hooks")
-		assert.Contains(t, props, "runtime_volumes")
-		assert.Contains(t, props, "home_override")
-		assert.Contains(t, props, "env")
-	})
-
-	t.Run("includes telegram plugin properties", func(t *testing.T) {
-		item := findPlugin("telegram")
-		require.NotNil(t, item)
-		props, _ := item["properties"].(map[string]any)
-		assert.Contains(t, props, "access_control")
-
-		required, _ := item["required"].([]string)
-		assert.Contains(t, required, "access_control")
-	})
-
-	t.Run("custom-runtime commands has correct type", func(t *testing.T) {
-		item := findPlugin("custom-runtime")
-		require.NotNil(t, item)
-		props, _ := item["properties"].(map[string]any)
-		cmdProp, _ := props["commands"].(map[string]any)
-		assert.Equal(t, "array", cmdProp["type"])
-		assert.Equal(t, map[string]any{"type": "string"}, cmdProp["items"])
-		assert.Equal(t, "Additional RUN commands for the Dockerfile", cmdProp["description"])
+		assert.Contains(t, props, "token")
 	})
 }
 

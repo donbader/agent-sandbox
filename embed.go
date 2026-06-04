@@ -10,13 +10,6 @@ import "embed"
 //go:embed core/gateway
 var GatewaySource embed.FS
 
-// ChannelManagerSource contains the channel manager TypeScript source code, embedded for
-// writing to .build/channel-manager-src/ during generation. The Docker build
-// compiles this into the channel manager that runs inside the container.
-//
-//go:embed channel-manager
-var ChannelManagerSource embed.FS
-
 // CorePlugins contains the built-in plugin definitions (runtime + core features).
 //
 //go:embed internal/plugins
