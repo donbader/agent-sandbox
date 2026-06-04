@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/donbader/agent-sandbox/gateway/internal/proxy"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

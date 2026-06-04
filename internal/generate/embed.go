@@ -13,12 +13,12 @@ import (
 func (g *Generator) writeGatewaySource() error {
 	destDir := filepath.Join(g.OutDir, "gateway-src")
 
-	err := fs.WalkDir(sandbox.GatewaySource, "gateway", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(sandbox.GatewaySource, "core/gateway", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		relPath, err := filepath.Rel("gateway", path)
+		relPath, err := filepath.Rel("core/gateway", path)
 		if err != nil {
 			return err
 		}

@@ -9,11 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/donbader/agent-sandbox/gateway/internal/ca"
-	"github.com/donbader/agent-sandbox/gateway/internal/dns"
-	"github.com/donbader/agent-sandbox/gateway/internal/mitm"
-	"github.com/donbader/agent-sandbox/gateway/internal/proxy"
-	"github.com/donbader/agent-sandbox/gateway/internal/redact"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/ca"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/dns"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/mitm"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
 )
 
 const (
