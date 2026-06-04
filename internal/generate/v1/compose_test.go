@@ -1,0 +1,60 @@
+package v1
+
+import (
+	"testing"
+
+	"github.com/donbader/agent-sandbox/internal/config"
+	"github.com/donbader/agent-sandbox/internal/plugin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBuildCompose(t *testing.T) {
+	cfg := &config.V1Config{
+		Name: "test-agent",
+		Runtime: config.RuntimeConfig{
+			Volumes: []string{"data:/opt/data"},
+		},
+	}
+
+	contribs := &plugin.Contributions{
+		Sidecar: plugin.SidecarContrib{
+			Services: map[string]plugin.ComposeService{
+				"telegram": {
+					Build:       "./sidecar",
+					Environment: map[string]string{"AGENT_URL": "http://agent:8080"},
+				},
+			},
+		},
+	}
+
+	output, err := BuildCompose(cfg, contribs)
+	require.NoError(t, err)
+
+	// Agent service present
+	assert.Contains(t, output, "agent:")
+	assert.Contains(t, output, "data:/opt/data")
+
+	// Gateway service present
+	assert.Contains(t, output, "gateway:")
+
+	// Sidecar present
+	assert.Contains(t, output, "telegram:")
+	assert.Contains(t, output, "AGENT_URL")
+}
+
+func TestBuildCompose_NoSidecars(t *testing.T) {
+	cfg := &config.V1Config{
+		Name: "simple-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	output, err := BuildCompose(cfg, nil)
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "agent:")
+	assert.Contains(t, output, "gateway:")
+	assert.NotContains(t, output, "telegram:")
+}
