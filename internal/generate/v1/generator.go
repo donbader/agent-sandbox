@@ -115,6 +115,9 @@ func (g *Generator) Run() error {
 
 	// 7. Build gateway config + copy middleware
 	gwCfg := BuildGatewayConfig(cfg, merged)
+	if err := WriteGatewayRuntimeConfig(buildDir, gwCfg); err != nil {
+		return fmt.Errorf("write gateway runtime config: %w", err)
+	}
 	if len(gwCfg.Middlewares) > 0 {
 		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares); err != nil {
 			return fmt.Errorf("copy middleware: %w", err)
@@ -201,7 +204,9 @@ RUN go build -o /gateway ./core/gateway/cmd/gateway/
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget
 COPY --from=builder /gateway /usr/local/bin/gateway
+COPY config.yaml /etc/gateway/config.yaml
 EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=3s --retries=3 CMD wget --spider -q http://localhost:8080/health || exit 1
 CMD ["gateway"]
 `
 	if err := os.WriteFile(filepath.Join(gatewayDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
