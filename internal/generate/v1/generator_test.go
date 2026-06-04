@@ -90,6 +90,11 @@ contributes:
           Authorization: "Bearer {{ .options.token }}"
 `), 0644))
 
+	// Create gateway source in core directory
+	gatewayDir := filepath.Join(coreDir, "gateway", "cmd", "gateway")
+	require.NoError(t, os.MkdirAll(gatewayDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(gatewayDir, "main.go"), []byte("package main\n"), 0644))
+
 	agentYAML := `
 name: test-agent
 runtime:
@@ -108,6 +113,9 @@ installations:
 	buildDir := filepath.Join(projectDir, ".build")
 	assert.FileExists(t, filepath.Join(buildDir, "Dockerfile"))
 	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
+	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "go.mod"))
+	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "core", "gateway", "cmd", "gateway", "main.go"))
 }
 
 func TestGenerator_Run_WithSidecar(t *testing.T) {

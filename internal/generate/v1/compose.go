@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/plugin"
@@ -15,12 +16,15 @@ type composeFile struct {
 }
 
 // BuildCompose generates a docker-compose.yml string from config and plugin contributions.
-func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions) (string, error) {
+// projectDir is used to compute relative paths for sidecar build contexts.
+func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectDir string) (string, error) {
 	compose := composeFile{
 		Services: map[string]any{},
 		Volumes:  map[string]any{},
 		Networks: map[string]any{},
 	}
+
+	buildDir := filepath.Join(projectDir, ".build")
 
 	// Agent service
 	agentSvc := map[string]any{
@@ -59,7 +63,12 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions) (string,
 				"networks": []string{"sandbox"},
 			}
 			if svc.Build != "" {
-				sidecarSvc["build"] = svc.Build
+				// Make build path relative to .build/ directory
+				relPath, err := filepath.Rel(buildDir, svc.Build)
+				if err != nil {
+					relPath = svc.Build
+				}
+				sidecarSvc["build"] = relPath
 			}
 			if svc.Image != "" {
 				sidecarSvc["image"] = svc.Image

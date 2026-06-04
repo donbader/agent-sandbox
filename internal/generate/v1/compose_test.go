@@ -21,14 +21,14 @@ func TestBuildCompose(t *testing.T) {
 		Sidecar: plugin.SidecarContrib{
 			Services: map[string]plugin.ComposeService{
 				"telegram": {
-					Build:       "./sidecar",
+					Build:       "/project/sidecar",
 					Environment: map[string]string{"AGENT_URL": "http://agent:8080"},
 				},
 			},
 		},
 	}
 
-	output, err := BuildCompose(cfg, contribs)
+	output, err := BuildCompose(cfg, contribs, "/project")
 	require.NoError(t, err)
 
 	// Agent service present
@@ -38,9 +38,10 @@ func TestBuildCompose(t *testing.T) {
 	// Gateway service present
 	assert.Contains(t, output, "gateway:")
 
-	// Sidecar present
+	// Sidecar present with relative path from .build/
 	assert.Contains(t, output, "telegram:")
 	assert.Contains(t, output, "AGENT_URL")
+	assert.Contains(t, output, "../sidecar")
 }
 
 func TestBuildCompose_NoSidecars(t *testing.T) {
@@ -51,7 +52,7 @@ func TestBuildCompose_NoSidecars(t *testing.T) {
 		},
 	}
 
-	output, err := BuildCompose(cfg, nil)
+	output, err := BuildCompose(cfg, nil, "/project")
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "agent:")

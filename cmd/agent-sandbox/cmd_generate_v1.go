@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	sandbox "github.com/donbader/agent-sandbox"
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/core"
 	v1 "github.com/donbader/agent-sandbox/internal/generate/v1"
@@ -36,6 +37,10 @@ func generateV1Cmd(dir *string) *cobra.Command {
 			}
 
 			g := v1.NewGeneratorWithCore(projectDir, coreDir)
+			// When no external core dir, use the embedded gateway source
+			if coreDir == "" {
+				g.SetGatewayFS(sandbox.GatewaySource)
+			}
 			if err := g.Run(); err != nil {
 				return err
 			}

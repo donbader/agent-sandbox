@@ -14,6 +14,7 @@ import (
 type Generator struct {
 	projectDir string
 	bundledFS  fs.FS
+	gatewayFS  fs.FS
 	coreDir    string
 }
 
@@ -30,6 +31,11 @@ func NewGeneratorWithCore(projectDir, coreDir string) *Generator {
 		bundled = os.DirFS(pluginsDir)
 	}
 	return &Generator{projectDir: projectDir, bundledFS: bundled, coreDir: coreDir}
+}
+
+// SetGatewayFS sets the embedded filesystem containing gateway source code.
+func (g *Generator) SetGatewayFS(gwFS fs.FS) {
+	g.gatewayFS = gwFS
 }
 
 // Run executes the full generation pipeline.
@@ -55,13 +61,20 @@ func (g *Generator) Run() error {
 			return fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
 		}
 
-		// Resolve middleware paths relative to the plugin's base directory
+		// Resolve middleware and sidecar paths relative to the plugin's base directory
 		if pluginDef.BaseDir != "" {
 			for i, svc := range rendered.Gateway.Services {
 				for j, mw := range svc.Middlewares {
 					if mw.Custom != "" {
 						rendered.Gateway.Services[i].Middlewares[j].Custom = filepath.Join(pluginDef.BaseDir, mw.Custom)
 					}
+				}
+			}
+			// Resolve sidecar build paths relative to plugin directory
+			for name, svc := range rendered.Sidecar.Services {
+				if svc.Build != "" && !filepath.IsAbs(svc.Build) {
+					svc.Build = filepath.Join(pluginDef.BaseDir, svc.Build)
+					rendered.Sidecar.Services[name] = svc
 				}
 			}
 		}
@@ -87,7 +100,7 @@ func (g *Generator) Run() error {
 	}
 
 	// 5. Generate docker-compose.yml
-	compose, err := BuildCompose(cfg, merged)
+	compose, err := BuildCompose(cfg, merged, g.projectDir)
 	if err != nil {
 		return fmt.Errorf("build compose: %w", err)
 	}
@@ -95,7 +108,12 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("write docker-compose.yml: %w", err)
 	}
 
-	// 6. Build gateway config + copy middleware
+	// 6. Extract gateway source into .build/gateway-src/
+	if err := g.extractGatewaySource(buildDir); err != nil {
+		return fmt.Errorf("extract gateway source: %w", err)
+	}
+
+	// 7. Build gateway config + copy middleware
 	gwCfg := BuildGatewayConfig(cfg, merged)
 	if len(gwCfg.Middlewares) > 0 {
 		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares); err != nil {
@@ -104,4 +122,125 @@ func (g *Generator) Run() error {
 	}
 
 	return nil
+}
+
+// extractGatewaySource copies the gateway source tree into .build/gateway-src/.
+func (g *Generator) extractGatewaySource(buildDir string) error {
+	gatewayDest := filepath.Join(buildDir, "gateway-src")
+
+	// If coreDir is set, copy from local filesystem
+	if g.coreDir != "" {
+		gatewaySrc := filepath.Join(g.coreDir, "gateway")
+		if _, err := os.Stat(gatewaySrc); err != nil {
+			// No gateway source in core dir — skip
+			return nil
+		}
+		if err := copyDir(gatewaySrc, filepath.Join(gatewayDest, "core", "gateway")); err != nil {
+			return err
+		}
+		sdkSrc := filepath.Join(g.coreDir, "sdk")
+		if _, err := os.Stat(sdkSrc); err == nil {
+			if err := copyDir(sdkSrc, filepath.Join(gatewayDest, "core", "sdk")); err != nil {
+				return err
+			}
+		}
+		return writeGatewayBuildFiles(gatewayDest)
+	}
+
+	// Otherwise, extract from embedded FS
+	if g.gatewayFS == nil {
+		// No gateway source available — skip (tests may not provide it)
+		return nil
+	}
+
+	if err := extractFS(g.gatewayFS, ".", gatewayDest); err != nil {
+		return err
+	}
+
+	return writeGatewayBuildFiles(gatewayDest)
+}
+
+// writeGatewayBuildFiles generates go.mod and Dockerfile for the gateway build context.
+func writeGatewayBuildFiles(gatewayDir string) error {
+	if err := os.MkdirAll(gatewayDir, 0755); err != nil {
+		return err
+	}
+
+	// go.mod — module path matches import paths used by gateway source
+	goMod := "module github.com/donbader/agent-sandbox\n\ngo 1.26\n"
+	if err := os.WriteFile(filepath.Join(gatewayDir, "go.mod"), []byte(goMod), 0644); err != nil {
+		return fmt.Errorf("write go.mod: %w", err)
+	}
+
+	// Dockerfile for gateway
+	dockerfile := `FROM golang:1.26-alpine AS builder
+WORKDIR /src
+COPY go.mod ./
+COPY core/ core/
+RUN go build -o /gateway ./core/gateway/cmd/gateway/
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates wget
+COPY --from=builder /gateway /usr/local/bin/gateway
+EXPOSE 8080
+CMD ["gateway"]
+`
+	if err := os.WriteFile(filepath.Join(gatewayDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
+		return fmt.Errorf("write gateway Dockerfile: %w", err)
+	}
+
+	return nil
+}
+
+// extractFS extracts all files from an fs.FS to a destination directory.
+func extractFS(srcFS fs.FS, root, dest string) error {
+	return fs.WalkDir(srcFS, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		destPath := filepath.Join(dest, path)
+		if d.IsDir() {
+			return os.MkdirAll(destPath, 0755)
+		}
+
+		data, err := fs.ReadFile(srcFS, path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(destPath, data, 0644)
+	})
+}
+
+// copyDir recursively copies a directory from src to dst.
+func copyDir(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		destPath := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(destPath, 0755)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(destPath, data, 0644)
+	})
 }
