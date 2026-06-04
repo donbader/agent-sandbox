@@ -14,6 +14,9 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/mitm"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
+
+	// Custom middleware compilation target — user .go files are copied here at generate-time.
+	_ "github.com/donbader/agent-sandbox/core/gateway/middlewares/custom"
 )
 
 const (
