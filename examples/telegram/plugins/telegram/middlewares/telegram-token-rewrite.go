@@ -7,8 +7,12 @@ import (
 )
 
 func init() {
+	realToken := "{{ .options.bot_token }}"
+	if realToken != "" {
+		gateway.RegisterSecret(realToken)
+	}
+
 	gateway.RegisterMiddleware("telegram-token-rewrite", func(ctx *gateway.MiddlewareContext) error {
-		realToken := "{{ .options.bot_token }}"
 		if realToken == "" {
 			return nil
 		}

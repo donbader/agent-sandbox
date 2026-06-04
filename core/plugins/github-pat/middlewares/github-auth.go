@@ -7,10 +7,14 @@ import (
 )
 
 func init() {
+	// The secret is baked at generate-time from plugin options.
+	token := "{{ .options.token }}"
+	if token != "" {
+		gateway.RegisterSecret(token)
+	}
+
 	gateway.RegisterMiddleware("github-basic-auth", func(ctx *gateway.MiddlewareContext) error {
 		// Git uses Basic auth with format: x-access-token:<PAT>
-		// The secret is baked at generate-time from plugin options.
-		token := "{{ .options.token }}"
 		if token == "" {
 			return nil
 		}

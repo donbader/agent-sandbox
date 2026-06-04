@@ -15,6 +15,7 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/mitm"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
+	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 
 	// Custom middleware compilation target — user .go files are copied here at generate-time.
 	_ "github.com/donbader/agent-sandbox/core/gateway/middlewares/custom"
@@ -61,6 +62,8 @@ func main() {
 			secrets = append(secrets, sp.Secrets()...)
 		}
 	}
+	// 3. Secrets declared by custom middleware via gateway.RegisterSecret().
+	secrets = append(secrets, gateway.Secrets()...)
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: level,

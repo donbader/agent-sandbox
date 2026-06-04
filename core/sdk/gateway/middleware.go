@@ -28,3 +28,19 @@ func Get(name string) (MiddlewareFunc, bool) {
 func All() map[string]MiddlewareFunc {
 	return registry
 }
+
+// secrets collects values that should be redacted from logs.
+var secrets []string
+
+// RegisterSecret declares a value that should be redacted from gateway logs.
+// Call this in init() alongside RegisterMiddleware for any baked-in secrets.
+func RegisterSecret(value string) {
+	if value != "" {
+		secrets = append(secrets, value)
+	}
+}
+
+// Secrets returns all secrets registered by middleware for log redaction.
+func Secrets() []string {
+	return secrets
+}
