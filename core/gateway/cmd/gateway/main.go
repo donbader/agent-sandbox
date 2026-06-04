@@ -5,6 +5,7 @@ package main
 
 import (
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -124,6 +125,20 @@ func main() {
 			}
 		}()
 	}
+
+	// Health endpoint
+	healthAddr := ":8080"
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		})
+		if err := http.ListenAndServe(healthAddr, mux); err != nil {
+			slog.Error("health server error", "error", err)
+		}
+	}()
+	slog.Info("health endpoint listening", "addr", healthAddr)
 
 	// Wait for shutdown signal
 	sig := make(chan os.Signal, 1)
