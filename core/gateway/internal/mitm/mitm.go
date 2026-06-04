@@ -147,7 +147,8 @@ func (h *Handler) getTransport(serverName string) *http.Transport {
 	insecure := os.Getenv("GATEWAY_INSECURE_UPSTREAM") == "true"
 
 	if v, ok := h.transportCache.Load(serverName); ok {
-		return v.(*http.Transport)
+		t, _ := v.(*http.Transport)
+		return t
 	}
 
 	t := &http.Transport{
@@ -161,7 +162,8 @@ func (h *Handler) getTransport(serverName string) *http.Transport {
 
 	// Store, but prefer an existing entry if a concurrent goroutine beat us.
 	actual, _ := h.transportCache.LoadOrStore(serverName, t)
-	return actual.(*http.Transport)
+	result, _ := actual.(*http.Transport)
+	return result
 }
 
 // forwardRequest sends the request to the real server over TLS.
