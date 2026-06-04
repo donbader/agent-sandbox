@@ -75,3 +75,57 @@ contributes:
 
 	assert.Equal(t, "RUN install v1.0.0", rendered.Runtime.ExtraBuilds[0])
 }
+
+func TestRenderContributions_PreEntrypointAndPorts(t *testing.T) {
+	raw := `
+name: ssh
+options:
+  port:
+    type: integer
+    default: 2222
+contributes:
+  runtime:
+    extra_builds:
+      - "RUN apt-get install -y openssh-server"
+    pre_entrypoint:
+      - "/usr/sbin/sshd -p {{ .options.port }}"
+    ports:
+      - "{{ .options.port }}:{{ .options.port }}"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{}
+	rendered, err := RenderContributions(p, opts)
+	require.NoError(t, err)
+
+	require.Len(t, rendered.Runtime.PreEntrypoint, 1)
+	assert.Equal(t, "/usr/sbin/sshd -p 2222", rendered.Runtime.PreEntrypoint[0])
+	require.Len(t, rendered.Runtime.Ports, 1)
+	assert.Equal(t, "2222:2222", rendered.Runtime.Ports[0])
+}
+
+func TestRenderContributions_PreEntrypointCustomPort(t *testing.T) {
+	raw := `
+name: ssh
+options:
+  port:
+    type: integer
+    default: 2222
+contributes:
+  runtime:
+    pre_entrypoint:
+      - "/usr/sbin/sshd -p {{ .options.port }}"
+    ports:
+      - "{{ .options.port }}:{{ .options.port }}"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{"port": 8022}
+	rendered, err := RenderContributions(p, opts)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/usr/sbin/sshd -p 8022", rendered.Runtime.PreEntrypoint[0])
+	assert.Equal(t, "8022:8022", rendered.Runtime.Ports[0])
+}

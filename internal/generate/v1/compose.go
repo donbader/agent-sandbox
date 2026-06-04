@@ -47,6 +47,10 @@ func BuildCompose(cfg *config.V1Config, contribs *plugin.Contributions, projectD
 		"networks": []string{"sandbox"},
 		"volumes":  agentVolumes,
 	}
+	// Expose ports from plugin contributions (e.g. SSH)
+	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
+		agentSvc["ports"] = contribs.Runtime.Ports
+	}
 	compose.Services[agentName] = agentSvc
 
 	// Gateway service

@@ -59,3 +59,24 @@ func TestBuildCompose_NoSidecars(t *testing.T) {
 	assert.Contains(t, output, "simple-agent-gateway:")
 	assert.NotContains(t, output, "telegram:")
 }
+
+func TestBuildCompose_PluginPorts(t *testing.T) {
+	cfg := &config.V1Config{
+		Name: "ssh-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	contribs := &plugin.Contributions{
+		Runtime: plugin.RuntimeContrib{
+			Ports: []string{"2222:2222"},
+		},
+		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+	}
+
+	output, err := BuildCompose(cfg, contribs, "/project")
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "2222:2222")
+}

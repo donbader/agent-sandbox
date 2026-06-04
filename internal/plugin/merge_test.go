@@ -48,3 +48,23 @@ func TestMergeContributions_Empty(t *testing.T) {
 	assert.NotNil(t, merged.Sidecar.Services)
 	assert.Empty(t, merged.Runtime.ExtraBuilds)
 }
+
+func TestMergeContributions_PreEntrypointAndPorts(t *testing.T) {
+	a := &Contributions{
+		Runtime: RuntimeContrib{
+			PreEntrypoint: []string{"/usr/sbin/sshd -p 2222"},
+			Ports:         []string{"2222:2222"},
+		},
+	}
+	b := &Contributions{
+		Runtime: RuntimeContrib{
+			PreEntrypoint: []string{"/usr/bin/some-daemon"},
+			Ports:         []string{"8080:8080"},
+		},
+	}
+
+	merged := MergeContributions(a, b)
+
+	assert.Equal(t, []string{"/usr/sbin/sshd -p 2222", "/usr/bin/some-daemon"}, merged.Runtime.PreEntrypoint)
+	assert.Equal(t, []string{"2222:2222", "8080:8080"}, merged.Runtime.Ports)
+}

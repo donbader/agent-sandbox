@@ -86,8 +86,18 @@ exec "$@"
 `
 
 // EntrypointScript returns the transparent proxy bootstrap script content.
-func EntrypointScript() string {
-	return entrypointScript
+// preEntrypoint commands are injected before exec "$@".
+func EntrypointScript(preEntrypoint []string) string {
+	if len(preEntrypoint) == 0 {
+		return entrypointScript
+	}
+	// Insert pre_entrypoint commands before the final exec "$@"
+	var extra string
+	extra += "\n# Plugin pre-entrypoint commands\n"
+	for _, cmd := range preEntrypoint {
+		extra += cmd + "\n"
+	}
+	return strings.Replace(entrypointScript, `exec "$@"`, extra+`exec "$@"`, 1)
 }
 
 // BuildDockerfile generates a Dockerfile string from config and plugin contributions.

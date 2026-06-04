@@ -98,7 +98,7 @@ func (g *Generator) Run() error {
 	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
 		return fmt.Errorf("write Dockerfile: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(buildDir, "entrypoint.sh"), []byte(EntrypointScript()), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(buildDir, "entrypoint.sh"), []byte(EntrypointScript(merged.Runtime.PreEntrypoint)), 0755); err != nil {
 		return fmt.Errorf("write entrypoint.sh: %w", err)
 	}
 

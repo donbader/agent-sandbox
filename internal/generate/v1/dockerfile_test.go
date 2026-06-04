@@ -65,3 +65,31 @@ func TestBuildDockerfile_CustomImage(t *testing.T) {
 	assert.Contains(t, output, `CMD ["python","main.py"]`)
 	assert.NotContains(t, output, "npm install")
 }
+
+func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
+	script := EntrypointScript(nil)
+	assert.Contains(t, script, `exec "$@"`)
+	assert.NotContains(t, script, "pre-entrypoint")
+}
+
+func TestEntrypointScript_WithPreEntrypoint(t *testing.T) {
+	cmds := []string{"/usr/sbin/sshd -p 2222", "/usr/bin/other-daemon"}
+	script := EntrypointScript(cmds)
+
+	assert.Contains(t, script, "/usr/sbin/sshd -p 2222")
+	assert.Contains(t, script, "/usr/bin/other-daemon")
+	assert.Contains(t, script, "# Plugin pre-entrypoint commands")
+	// pre_entrypoint must come before exec
+	sshdIdx := indexOf(script, "/usr/sbin/sshd -p 2222")
+	execIdx := indexOf(script, `exec "$@"`)
+	assert.Greater(t, execIdx, sshdIdx, "pre_entrypoint commands must come before exec")
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}

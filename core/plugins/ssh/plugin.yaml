@@ -1,0 +1,26 @@
+name: ssh
+options:
+  port:
+    type: integer
+    required: false
+    default: 2222
+    description: "SSH port to expose"
+  authorized_keys:
+    type: string
+    required: true
+    description: "Path to public key file (relative to project root)"
+
+contributes:
+  runtime:
+    extra_builds:
+      - "RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/*"
+      - "RUN mkdir -p /run/sshd /home/agent/.ssh"
+      - "RUN ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N '' -q"
+      - "RUN sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config"
+      - "RUN sed -i 's/^#*Port.*/Port {{ .options.port }}/' /etc/ssh/sshd_config"
+      - "COPY {{ .options.authorized_keys }} /home/agent/.ssh/authorized_keys"
+      - "RUN chmod 700 /home/agent/.ssh && chmod 600 /home/agent/.ssh/authorized_keys"
+    pre_entrypoint:
+      - "/usr/sbin/sshd -p {{ .options.port }}"
+    ports:
+      - "{{ .options.port }}:{{ .options.port }}"
