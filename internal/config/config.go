@@ -12,45 +12,45 @@ import (
 
 // Config represents an agent.yaml file.
 type Config struct {
-	Name          string         `yaml:"name" jsonschema:"required,title=name,description=Agent instance name"`
-	LogLevel      string         `yaml:"log_level" jsonschema:"title=log_level,description=Logging verbosity,enum=info,enum=debug"`
-	CoreVersion   string         `yaml:"core_version" jsonschema:"title=core_version,description=Core version to use for generation"`
-	Runtime       RuntimeConfig  `yaml:"runtime" jsonschema:"required,title=runtime,description=Agent container configuration"`
-	Gateway       GatewayConfig  `yaml:"gateway" jsonschema:"title=gateway,description=Transparent egress proxy configuration"`
-	Installations []Installation `yaml:"installations" jsonschema:"title=installations,description=Plugins to install"`
+	Name          string         `yaml:"name" json:"name" jsonschema:"required,title=name,description=Agent instance name"`
+	LogLevel      string         `yaml:"log_level" json:"log_level,omitempty" jsonschema:"title=log_level,description=Logging verbosity,enum=info,enum=debug"`
+	CoreVersion   string         `yaml:"core_version" json:"core_version,omitempty" jsonschema:"title=core_version,description=Core version to use for generation"`
+	Runtime       RuntimeConfig  `yaml:"runtime" json:"runtime" jsonschema:"required,title=runtime,description=Agent container configuration"`
+	Gateway       GatewayConfig  `yaml:"gateway" json:"gateway,omitempty" jsonschema:"title=gateway,description=Transparent egress proxy configuration"`
+	Installations []Installation `yaml:"installations" json:"installations,omitempty" jsonschema:"title=installations,description=Plugins to install"`
 }
 
 // RuntimeConfig holds runtime container configuration.
 type RuntimeConfig struct {
-	Image       string   `yaml:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
-	ExtraBuilds []string `yaml:"extra_builds" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base"`
-	Entrypoint  []string `yaml:"entrypoint" jsonschema:"title=entrypoint,description=Container CMD override"`
-	Volumes     []string `yaml:"volumes" jsonschema:"title=volumes,description=Named or bind mount volumes"`
+	Image       string   `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
+	ExtraBuilds []string `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base"`
+	Entrypoint  []string `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override"`
+	Volumes     []string `yaml:"volumes" json:"volumes,omitempty" jsonschema:"title=volumes,description=Named or bind mount volumes"`
 }
 
 // GatewayConfig holds gateway proxy configuration.
 type GatewayConfig struct {
-	Services []GatewayServiceEntry `yaml:"services" jsonschema:"title=services,description=External services proxied through the gateway"`
+	Services []GatewayServiceEntry `yaml:"services" json:"services,omitempty" jsonschema:"title=services,description=External services proxied through the gateway"`
 }
 
 // GatewayServiceEntry represents an allowed upstream service.
 type GatewayServiceEntry struct {
-	URL         string            `yaml:"url" jsonschema:"required,title=url,description=HTTPS endpoint or docker://<service>:<port> for sidecars"`
-	Network     string            `yaml:"network" jsonschema:"title=network,description=Docker network to attach (required for docker:// URLs)"`
-	Headers     map[string]string `yaml:"headers" jsonschema:"title=headers,description=Headers injected by gateway on every proxied request"`
-	Middlewares []MiddlewareEntry `yaml:"middlewares" jsonschema:"title=middlewares,description=Custom middleware chain"`
+	URL         string            `yaml:"url" json:"url" jsonschema:"required,title=url,description=HTTPS endpoint or docker://<service>:<port> for sidecars"`
+	Network     string            `yaml:"network" json:"network,omitempty" jsonschema:"title=network,description=Docker network to attach (required for docker:// URLs)"`
+	Headers     map[string]string `yaml:"headers" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway on every proxied request"`
+	Middlewares []MiddlewareEntry `yaml:"middlewares" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=Custom middleware chain"`
 }
 
 // MiddlewareEntry represents a gateway middleware configuration.
 type MiddlewareEntry struct {
-	Custom string `yaml:"custom" jsonschema:"required,title=custom,description=Relative path to custom middleware .go file"`
+	Custom string `yaml:"custom" json:"custom" jsonschema:"required,title=custom,description=Relative path to custom middleware .go file"`
 }
 
 // Installation represents a plugin installation with options.
 type Installation struct {
-	Plugin  string         `yaml:"plugin" jsonschema:"required,title=plugin,description=Plugin name (bundled or local)"`
-	Source  string         `yaml:"source" jsonschema:"title=source,description=Plugin source (local path or remote git URL)"`
-	Options map[string]any `yaml:"options" jsonschema:"title=options,description=Plugin-specific configuration options"`
+	Plugin  string         `yaml:"plugin" json:"plugin" jsonschema:"required,title=plugin,description=Plugin name (bundled or local)"`
+	Source  string         `yaml:"source" json:"source,omitempty" jsonschema:"title=source,description=Plugin source (local path or remote git URL)"`
+	Options map[string]any `yaml:"options" json:"options,omitempty" jsonschema:"title=options,description=Plugin-specific configuration options"`
 }
 
 // Load loads and parses an agent.yaml from the given directory.

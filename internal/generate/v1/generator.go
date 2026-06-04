@@ -130,6 +130,11 @@ func (g *Generator) Run() error {
 		}
 	}
 
+	// 8. Generate JSON Schema
+	if err := generateSchema(buildDir); err != nil {
+		return fmt.Errorf("generate schema: %w", err)
+	}
+
 	return nil
 }
 
