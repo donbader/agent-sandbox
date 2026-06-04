@@ -23,7 +23,8 @@ esac
 
 # Get latest version
 echo "Fetching latest release..."
-VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
+VERSION=$(echo "$RELEASE_JSON" | jq -r .tag_name 2>/dev/null || echo "$RELEASE_JSON" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
 if [ -z "$VERSION" ]; then
   echo "Failed to fetch latest version"
   exit 1
@@ -39,6 +40,32 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 curl -fsSL "$URL" -o "$TMP/$FILENAME"
+
+# Verify checksum
+CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
+if command -v sha256sum >/dev/null 2>&1; then
+  echo "Verifying checksum..."
+  if curl -fsSL "$CHECKSUMS_URL" -o "$TMP/checksums.txt"; then
+    EXPECTED=$(grep "$FILENAME" "$TMP/checksums.txt" | awk '{print $1}')
+    if [ -z "$EXPECTED" ]; then
+      echo "Error: checksum for $FILENAME not found in checksums.txt"
+      exit 1
+    fi
+    ACTUAL=$(sha256sum "$TMP/$FILENAME" | awk '{print $1}')
+    if [ "$EXPECTED" != "$ACTUAL" ]; then
+      echo "Error: checksum verification failed!"
+      echo "  Expected: $EXPECTED"
+      echo "  Actual:   $ACTUAL"
+      exit 1
+    fi
+    echo "Checksum verified."
+  else
+    echo "Warning: could not download checksums.txt, skipping verification"
+  fi
+else
+  echo "Warning: sha256sum not available, skipping checksum verification"
+fi
+
 tar xzf "$TMP/$FILENAME" -C "$TMP"
 
 # Install
