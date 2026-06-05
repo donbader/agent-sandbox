@@ -3,7 +3,6 @@ package plugin
 import (
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -18,7 +17,7 @@ type Resolver struct {
 	bundledFS  fs.FS
 }
 
-// NewResolver creates a resolver that checks local plugins/ dir first, then bundled FS.
+// NewResolver creates a resolver that looks up plugins by explicit prefix.
 func NewResolver(projectDir string, bundledFS fs.FS) *Resolver {
 	return &Resolver{projectDir: projectDir, bundledFS: bundledFS}
 }
@@ -26,10 +25,10 @@ func NewResolver(projectDir string, bundledFS fs.FS) *Resolver {
 // Resolve finds and parses a plugin by name.
 //
 // Plugin name prefixes control resolution:
-//   - "@builtin/name" — resolve only from bundled FS
-//   - "./path"        — resolve only from local filesystem (relative to project dir)
-//   - "name"          — legacy: local plugins/<name>/ first, then bundled (warns on shadow)
+//   - "@builtin/name" — resolve from bundled FS
+//   - "./path"        — resolve from local filesystem (relative to project dir)
 //
+// Bare names without a prefix are rejected.
 // If source is non-empty, it's a remote plugin (future).
 func (r *Resolver) Resolve(name string, source string) (*PluginDef, error) {
 	// Remote (future — source field)
@@ -48,8 +47,7 @@ func (r *Resolver) Resolve(name string, source string) (*PluginDef, error) {
 		return r.resolveFromLocal(name)
 	}
 
-	// No prefix — legacy fallback: local first, then bundled, warn on shadow
-	return r.resolveLegacy(name)
+	return nil, fmt.Errorf("plugin %q: must use @builtin/%s or ./<path> prefix", name, name)
 }
 
 // resolveFromBundled resolves a plugin exclusively from the bundled FS.
@@ -88,38 +86,4 @@ func (r *Resolver) resolveFromLocal(relPath string) (*PluginDef, error) {
 	}
 	p.BaseDir = cleanDir
 	return p, nil
-}
-
-// resolveLegacy uses the original resolution order: local plugins/<name>/ → bundled.
-// Emits a warning when a local plugin shadows a bundled one.
-func (r *Resolver) resolveLegacy(name string) (*PluginDef, error) {
-	// 1. Check local plugins/<name>/plugin.yaml
-	localDir := filepath.Join(r.projectDir, "plugins", name)
-	localPath := filepath.Join(localDir, "plugin.yaml")
-	if data, err := os.ReadFile(localPath); err == nil {
-		p, err := ParsePluginYAML(data)
-		if err != nil {
-			return nil, err
-		}
-		p.BaseDir = localDir
-
-		// Warn if this shadows a bundled plugin
-		if r.bundledFS != nil {
-			bundledPath := path.Join(name, "plugin.yaml")
-			if _, berr := fs.ReadFile(r.bundledFS, bundledPath); berr == nil {
-				log.Printf("WARNING: local plugin %q shadows bundled plugin — use @builtin/%s to force bundled", name, name)
-			}
-		}
-		return p, nil
-	}
-
-	// 2. Check bundled FS
-	if r.bundledFS != nil {
-		bundledPath := path.Join(name, "plugin.yaml")
-		if data, err := fs.ReadFile(r.bundledFS, bundledPath); err == nil {
-			return ParsePluginYAML(data)
-		}
-	}
-
-	return nil, fmt.Errorf("plugin %q not found (checked: local plugins/%s/, bundled)", name, name)
 }

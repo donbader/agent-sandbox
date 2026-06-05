@@ -18,7 +18,7 @@ gateway:
         Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
 
 installations:
-  - plugin: telegram
+  - plugin: ./plugins/telegram
     options:
       bot_token: "${TELEGRAM_BOT_TOKEN}"
       allowed_users:

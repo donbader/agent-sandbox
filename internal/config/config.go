@@ -48,7 +48,7 @@ type MiddlewareEntry struct {
 
 // Installation represents a plugin installation with options.
 type Installation struct {
-	Plugin  string         `yaml:"plugin" json:"plugin" jsonschema:"required,title=plugin,description=Plugin name or path. Use @builtin/name for bundled-only or ./path for local-only. Plain name uses legacy resolution (local then bundled)."`
+	Plugin  string         `yaml:"plugin" json:"plugin" jsonschema:"required,title=plugin,description=Plugin reference. Use @builtin/name for bundled plugins or ./path for local plugins. Bare names are not allowed."`
 	Source  string         `yaml:"source" json:"source,omitempty" jsonschema:"title=source,description=Plugin source (reserved for future remote resolution)"`
 	Options map[string]any `yaml:"options" json:"options,omitempty" jsonschema:"title=options,description=Plugin-specific configuration options"`
 }

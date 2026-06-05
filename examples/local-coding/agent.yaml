@@ -10,7 +10,7 @@ gateway:
       headers:
         Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
 installations:
-  - plugin: home-override
+  - plugin: "@builtin/home-override"
     options:
       home_directory: "./home"
       volume: true
