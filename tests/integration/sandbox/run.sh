@@ -16,13 +16,14 @@ trap cleanup EXIT
 echo "=== Sandbox Integration Tests ==="
 echo ""
 
+# Export test secrets so generate can bake them into middleware
+export $(grep -v '^#' "$SCRIPT_DIR/test.env" | xargs)
+
 echo "--- Generating build artifacts ---"
 "$CLI" generate -C "$SCRIPT_DIR"
 
 echo ""
 echo "--- Building and starting containers ---"
-# Export test secrets so compose picks them up
-export $(grep -v '^#' "$SCRIPT_DIR/test.env" | xargs)
 "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" up -d --build --wait --wait-timeout 60
 
 # Wait for agent entrypoint to complete

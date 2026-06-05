@@ -15,13 +15,22 @@ import (
 // GatewayConfigOutput is the merged gateway configuration for rendering.
 type GatewayConfigOutput struct {
 	Services    []GatewayServiceOutput
-	Middlewares []MiddlewareRef // custom .go files to copy with domain scope
+	Middlewares []MiddlewareRef   // custom .go files to copy with domain scope
+	AuthHeaders []AuthHeaderEntry // auth-header entries to generate as .go files
 }
 
 // MiddlewareRef associates a custom middleware file with its target domains.
 type MiddlewareRef struct {
 	Path    string   // relative or absolute path to .go file
 	Domains []string // domains this middleware applies to
+}
+
+// AuthHeaderEntry describes an auth-header middleware to generate at build time.
+type AuthHeaderEntry struct {
+	Domain      string
+	Header      string
+	EnvVar      string
+	ValueFormat string
 }
 
 // GatewayServiceOutput represents a single gateway service entry in the output.
@@ -33,19 +42,10 @@ type GatewayServiceOutput struct {
 
 // gatewayRuntimeConfig matches the proxy.Config struct in core/gateway.
 type gatewayRuntimeConfig struct {
-	Listen      string                      `yaml:"listen"`
-	DNSListen   string                      `yaml:"dns_listen"`
-	MITMDomains []string                    `yaml:"mitm_domains"`
-	Middlewares []gatewayMiddlewareConfig   `yaml:"middlewares,omitempty"`
-	HealthAddr  string                      `yaml:"health_addr,omitempty"`
-}
-
-type gatewayMiddlewareConfig struct {
-	Type        string   `yaml:"type"`
-	Domains     []string `yaml:"domains"`
-	EnvVar      string   `yaml:"env_var,omitempty"`
-	Header      string   `yaml:"header,omitempty"`
-	ValueFormat string   `yaml:"value_format,omitempty"`
+	Listen      string   `yaml:"listen"`
+	DNSListen   string   `yaml:"dns_listen"`
+	MITMDomains []string `yaml:"mitm_domains"`
+	HealthAddr  string   `yaml:"health_addr,omitempty"`
 }
 
 // BuildGatewayConfig merges user gateway config with plugin contributions.
@@ -68,6 +68,16 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 				})
 			}
 		}
+		// Collect auth-header entries from declared headers
+		for header, value := range svc.Headers {
+			ev, valueFormat := envvar.ParseTemplate(value)
+			out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
+				Domain:      domain,
+				Header:      header,
+				EnvVar:      ev,
+				ValueFormat: valueFormat,
+			})
+		}
 	}
 
 	// Plugin-contributed services
@@ -86,6 +96,16 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 						Domains: []string{domain},
 					})
 				}
+			}
+			// Collect auth-header entries from plugin-contributed headers
+			for header, value := range svc.Headers {
+				ev, valueFormat := envvar.ParseTemplate(value)
+				out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
+					Domain:      domain,
+					Header:      header,
+					EnvVar:      ev,
+					ValueFormat: valueFormat,
+				})
 			}
 		}
 	}
@@ -106,19 +126,6 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			continue
 		}
 		rc.MITMDomains = append(rc.MITMDomains, domain)
-
-		// For each header, create an auth-header middleware entry
-		for header, value := range svc.Headers {
-			// Value might be "Bearer ${ENV_VAR}" — extract env var reference
-			ev, valueFormat := envvar.ParseTemplate(value)
-			rc.Middlewares = append(rc.Middlewares, gatewayMiddlewareConfig{
-				Type:        "auth-header",
-				Domains:     []string{domain},
-				Header:      header,
-				EnvVar:      ev,
-				ValueFormat: valueFormat,
-			})
-		}
 	}
 
 	data, err := yaml.Marshal(rc)

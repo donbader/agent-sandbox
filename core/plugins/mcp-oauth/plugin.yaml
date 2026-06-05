@@ -9,13 +9,15 @@ options:
     required: false
     default: "/data/oauth-tokens"
     description: "Directory for OAuth token files"
+  token_file:
+    type: string
+    required: false
+    default: "/data/oauth-tokens/token.json"
+    description: "Path to OAuth token JSON file"
 
-# NOTE: Full mcp-oauth support requires dynamic service entries per provider
-# (extracting hostnames from provider URLs). For now, this plugin only declares
-# the shared volume mount. Users should also declare gateway services in their
-# agent.yaml for each provider endpoint. A richer template system or Go plugin
-# may be needed for full automation.
 contributes:
   gateway:
     volumes:
       - "oauth-tokens:{{ .options.token_dir }}"
+    middlewares:
+      - custom: "./middlewares/oauth.go"

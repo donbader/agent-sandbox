@@ -8,26 +8,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MiddlewareConfig describes a built-in middleware to instantiate for a set of domains.
-type MiddlewareConfig struct {
-	Type        string   `yaml:"type"`                   // "auth-header" or "oauth"
-	Domains     []string `yaml:"domains"`                // domains this middleware applies to
-	EnvVar      string   `yaml:"env_var,omitempty"`      // environment variable holding the secret
-	Header      string   `yaml:"header,omitempty"`       // header name to inject (auth-header only)
-	ValueFormat string   `yaml:"value_format,omitempty"` // header value format, e.g. "token ${value}"
-
-	// OAuth-specific fields (type "oauth" only)
-	TokenFile string `yaml:"token_file,omitempty"` // path to stored OAuth token JSON file
-}
-
 // Config holds gateway configuration.
 type Config struct {
-	Listen       string             `yaml:"listen"`        // TCP listen address (e.g., ":8443")
-	DNSListen    string             `yaml:"dns_listen"`    // DNS listen address (e.g., ":53")
-	MITMDomains  []string           `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
-	HTTPServices []HTTPService      `yaml:"http_services"` // plain HTTP services to proxy
-	Middlewares  []MiddlewareConfig `yaml:"middlewares"`   // built-in middleware to apply
-	PortForwards []PortForward      `yaml:"port_forwards"` // TCP port forwards to agent container
+	Listen       string        `yaml:"listen"`        // TCP listen address (e.g., ":8443")
+	DNSListen    string        `yaml:"dns_listen"`    // DNS listen address (e.g., ":53")
+	MITMDomains  []string      `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
+	HTTPServices []HTTPService `yaml:"http_services"` // plain HTTP services to proxy
+	PortForwards []PortForward `yaml:"port_forwards"` // TCP port forwards to agent container
 }
 
 // HTTPService describes a plain HTTP service the gateway should proxy.
