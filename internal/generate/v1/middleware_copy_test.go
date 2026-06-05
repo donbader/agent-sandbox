@@ -33,7 +33,7 @@ func init() {
 	require.NoError(t, err)
 
 	// Verify file was copied to the custom middleware package dir
-	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "test.go")
+	dest := filepath.Join(outDir, "gateway-src", "core", "gateway", "middlewares", "custom", "test.go")
 	data, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "RegisterMiddleware")
@@ -63,7 +63,7 @@ func init() {
 	require.NoError(t, err)
 
 	// Verify template was rendered with the actual secret value
-	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "rewrite.go")
+	dest := filepath.Join(outDir, "gateway-src", "core", "gateway", "middlewares", "custom", "rewrite.go")
 	data, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `secret := "12345:ABCDEF"`)
@@ -101,7 +101,7 @@ func TestGenerateAuthHeaderMiddleware(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify generated file exists and contains expected code
-	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "auth_header_api_example_com_0.go")
+	dest := filepath.Join(outDir, "gateway-src", "core", "gateway", "middlewares", "custom", "auth_header_api_example_com_0.go")
 	data, err := os.ReadFile(dest)
 	require.NoError(t, err)
 
@@ -129,7 +129,7 @@ func TestGenerateAuthHeaderMiddleware_Base64Basic(t *testing.T) {
 	err := GenerateAuthHeaderMiddleware(outDir, entries)
 	require.NoError(t, err)
 
-	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "auth_header_github_com_0.go")
+	dest := filepath.Join(outDir, "gateway-src", "core", "gateway", "middlewares", "custom", "auth_header_github_com_0.go")
 	data, err := os.ReadFile(dest)
 	require.NoError(t, err)
 
@@ -154,7 +154,7 @@ func TestGenerateAuthHeaderMiddleware_SkipsMissingEnvVar(t *testing.T) {
 	require.NoError(t, err)
 
 	// No file should be generated for missing env var
-	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "auth_header_api_example_com_0.go")
+	dest := filepath.Join(outDir, "gateway-src", "core", "gateway", "middlewares", "custom", "auth_header_api_example_com_0.go")
 	_, err = os.Stat(dest)
 	assert.True(t, os.IsNotExist(err))
 }

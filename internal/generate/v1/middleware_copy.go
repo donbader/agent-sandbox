@@ -20,7 +20,7 @@ func CopyCustomMiddleware(projectDir, outDir string, middlewareRefs []Middleware
 		return nil
 	}
 
-	destDir := filepath.Join(outDir, "gateway-src", "middlewares", "custom")
+	destDir := filepath.Join(outDir, "gateway-src", "core", "gateway", "middlewares", "custom")
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("create middleware dest dir: %w", err)
 	}
@@ -69,7 +69,7 @@ func GenerateAuthHeaderMiddleware(outDir string, entries []AuthHeaderEntry) erro
 		return nil
 	}
 
-	destDir := filepath.Join(outDir, "gateway-src", "middlewares", "custom")
+	destDir := filepath.Join(outDir, "gateway-src", "core", "gateway", "middlewares", "custom")
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("create middleware dest dir: %w", err)
 	}
