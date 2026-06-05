@@ -2,6 +2,7 @@ package v1
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,71 @@ func CopyCustomMiddleware(projectDir, outDir string, middlewareRefs []Middleware
 	}
 
 	return nil
+}
+
+// GenerateAuthHeaderMiddleware generates self-registering .go files for auth-header entries.
+// Each entry becomes a compiled-in middleware that injects a header with a baked-in secret.
+func GenerateAuthHeaderMiddleware(outDir string, entries []AuthHeaderEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	destDir := filepath.Join(outDir, "gateway-src", "middlewares", "custom")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("create middleware dest dir: %w", err)
+	}
+
+	for i, entry := range entries {
+		secret := os.Getenv(entry.EnvVar)
+		if secret == "" {
+			continue // Skip — env var not set at generate time
+		}
+
+		// Compute header value with substitutions
+		headerValue := entry.ValueFormat
+		if headerValue == "" {
+			headerValue = "${value}"
+		}
+		headerValue = strings.ReplaceAll(headerValue, "${base64_basic}",
+			base64.StdEncoding.EncodeToString([]byte("x-access-token:"+secret)))
+		headerValue = strings.ReplaceAll(headerValue, "${value}", secret)
+
+		src := authHeaderTemplate(entry.Domain, entry.Header, headerValue, secret, i)
+
+		filename := fmt.Sprintf("auth_header_%s_%d.go", sanitizeFilename(entry.Domain), i)
+		destFile := filepath.Join(destDir, filename)
+		if err := os.WriteFile(destFile, []byte(src), 0644); err != nil {
+			return fmt.Errorf("write auth-header middleware: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// authHeaderTemplate generates Go source for a self-registering auth-header middleware.
+func authHeaderTemplate(domain, header, headerValue, secret string, idx int) string {
+	var buf bytes.Buffer
+	buf.WriteString("package custom\n\n")
+	buf.WriteString("import \"github.com/donbader/agent-sandbox/core/sdk/gateway\"\n\n")
+	buf.WriteString(fmt.Sprintf("func init() {\n"))
+	buf.WriteString(fmt.Sprintf("\tsecret := %q\n", secret))
+	buf.WriteString(fmt.Sprintf("\tgateway.RegisterSecret(secret)\n\n"))
+	buf.WriteString(fmt.Sprintf("\tgateway.RegisterMiddleware(gateway.MiddlewareDef{\n"))
+	buf.WriteString(fmt.Sprintf("\t\tName:    \"auth-header:%s:%d\",\n", domain, idx))
+	buf.WriteString(fmt.Sprintf("\t\tDomains: []string{%q},\n", domain))
+	buf.WriteString(fmt.Sprintf("\t\tFunc: func(ctx *gateway.MiddlewareContext) error {\n"))
+	buf.WriteString(fmt.Sprintf("\t\t\tctx.Request.Header.Set(%q, %q)\n", header, headerValue))
+	buf.WriteString(fmt.Sprintf("\t\t\treturn nil\n"))
+	buf.WriteString(fmt.Sprintf("\t\t},\n"))
+	buf.WriteString(fmt.Sprintf("\t})\n"))
+	buf.WriteString(fmt.Sprintf("}\n"))
+	return buf.String()
+}
+
+// sanitizeFilename replaces dots and special chars for use in filenames.
+func sanitizeFilename(s string) string {
+	r := strings.NewReplacer(".", "_", "/", "_", ":", "_")
+	return r.Replace(s)
 }
 
 // renderMiddleware executes Go templates in middleware source code.

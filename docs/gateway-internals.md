@@ -22,6 +22,7 @@ Gateway health endpoint (:8080/health) ← Agent entrypoint polls before setting
 ```
 core/gateway/
 ├── cmd/gateway/main.go            ← entrypoint, wiring, health endpoint
+├── middlewares/custom/stub.go     ← compilation target for all middleware
 └── internal/
     ├── proxy/
     │   ├── config.go              ← Config structs, YAML loading
@@ -31,13 +32,15 @@ core/gateway/
     │   └── forward.go             ← Generic TCP port forwarder
     ├── mitm/
     │   ├── mitm.go                ← MITM handler (TLS termination + HTTP pipeline)
-    │   ├── cert.go                ← CA generation, on-demand cert generation, CertCache
-    │   ├── auth_header.go         ← RegisterAuthHeaderMiddleware (header injection)
-    │   └── oauth.go               ← RegisterOAuthMiddleware (Bearer token from file)
+    │   └── cert.go                ← CA generation, on-demand cert generation, CertCache
     ├── redact/
     │   └── handler.go             ← slog handler that masks secrets in logs
     └── dns/
         └── dns.go                 ← UDP DNS forwarder
+
+core/plugins/
+├── github-pat/middlewares/        ← GitHub PAT auth (compile-time plugin)
+└── mcp-oauth/middlewares/         ← OAuth token refresh (compile-time plugin)
 ```
 
 ## Key Interfaces
@@ -67,13 +70,13 @@ type MiddlewareDef struct {
 type MiddlewareFunc func(ctx *MiddlewareContext) error
 ```
 
-Built-in middleware (registered from config at startup):
-- `RegisterAuthHeaderMiddleware` — injects an auth header (supports `${value}` and `${base64_basic}` templates)
-- `RegisterOAuthMiddleware` — reads OAuth token from file, refreshes when expired, injects Bearer header
+All middleware is compiled into the gateway binary at Docker build time. There are no runtime "built-in" types — everything uses the same `init()` self-registration pattern:
 
-Custom middleware (compiled into gateway from plugin templates):
-- Registered via `gateway.RegisterMiddleware(MiddlewareDef{...})` in `init()`
-- Domain-scoped: only runs for requests matching configured domains
+- **Auth-header middleware** — generated as `.go` files by the CLI from `gateway.services[].headers` config
+- **OAuth middleware** — ships as a plugin template in `core/plugins/mcp-oauth/middlewares/oauth.go`
+- **Custom middleware** — user-provided `.go` templates declared in `plugin.yaml`
+
+Domain-scoped: each middleware only runs for requests matching its configured domains.
 
 ## Connection Flow
 
@@ -118,80 +121,69 @@ Gateway logs are protected with two layers via the `redact.Handler` (wraps `slog
 
 This prevents credentials from leaking into container logs even if a handler inadvertently logs request details.
 
-## Adding a New Built-in Middleware
+## Adding New Middleware
 
-1. Create a registration function in `core/gateway/internal/mitm/` (e.g., `my_middleware.go`)
-2. Use the middleware SDK to register with domain scoping:
+All middleware follows the same pattern: a `.go` file in `package custom` with an `init()` function that calls `gateway.RegisterMiddleware()`. The gateway binary is recompiled during Docker build, so new middleware is picked up automatically when you `agent-sandbox compose up --build`.
+
+### As a plugin (recommended)
+
+1. Create a directory under `core/plugins/<name>/middlewares/`
+2. Write a `.go` file using Go template syntax for configuration:
 
 ```go
-func RegisterMyMiddleware(name string, domains []string, ...) error {
-    gateway.RegisterSecret(mySecret)
+package custom
 
+import (
+    "strings"
+    "github.com/donbader/agent-sandbox/core/sdk/gateway"
+)
+
+func init() {
+    secret := "{{ .options.api_key }}"
+    domains := strings.Split("{{ .domainsList }}", ",")
+
+    gateway.RegisterSecret(secret)
     gateway.RegisterMiddleware(gateway.MiddlewareDef{
-        Name:    name,
+        Name:    "my-middleware",
         Domains: domains,
         Func: func(ctx *gateway.MiddlewareContext) error {
-            // Modify ctx.Request in-place (add headers, rewrite URL, etc.)
+            ctx.Request.Header.Set("Authorization", "Bearer "+secret)
             return nil
         },
     })
-    return nil
 }
 ```
 
-3. Add a case in `registerBuiltinMiddleware()` in `cmd/gateway/main.go` to instantiate it from config
-4. Declare the MITM domains in your plugin's `plugin.yaml` under `gateway.services`
-
-The gateway binary is recompiled during Docker build, so new middleware is picked up automatically when you `agent-sandbox compose up --build`.
-
-## Custom Middleware via Plugins
-
-For plugin-specific logic (URL rewriting, token swapping), plugins ship custom middleware as **Go templates**:
+3. Declare the middleware in `plugin.yaml`:
 
 ```yaml
-# plugin.yaml
 contributes:
   gateway:
     services:
       - url: https://api.example.com
         middlewares:
-          - custom: "./middlewares/my-rewrite.go"
+          - custom: "./middlewares/my-middleware.go"
 ```
 
-Middleware files support Go template syntax. At generate-time, the CLI resolves plugin options (including `${ENV_VAR}` references) and bakes the actual values into the generated code:
+### Via gateway.services headers (auto-generated)
 
-```go
-// plugins/my-plugin/middlewares/my-rewrite.go (template)
-package custom
+For simple header injection, just declare headers in `agent.yaml`:
 
-import (
-    "strings"
-
-    "github.com/donbader/agent-sandbox/core/sdk/gateway"
-)
-
-func init() {
-    domains := strings.Split("{{ .domainsList }}", ",")
-
-    gateway.RegisterMiddleware(gateway.MiddlewareDef{
-        Name:    "my-rewrite",
-        Domains: domains,
-        Func: func(ctx *gateway.MiddlewareContext) error {
-            secret := "{{ .options.api_key }}"
-            ctx.Request.Header.Set("Authorization", "Bearer " + secret)
-            return nil
-        },
-    })
-}
+```yaml
+gateway:
+  services:
+    - url: https://api.example.com
+      headers:
+        Authorization: "Bearer ${MY_API_KEY}"
 ```
 
-If the user sets `api_key: "${MY_API_KEY}"` and `MY_API_KEY=sk-123` in `.env`, the generated middleware contains:
+The CLI generates a self-registering `.go` file at build time that bakes in the secret value. Template variables supported in header values:
+- `${value}` — raw env var value
+- `${base64_basic}` — base64("x-access-token:\<value\>") for git HTTP auth
 
-```go
-secret := "sk-123"
-```
+### Design principles
 
-This means:
-- No runtime env var lookup needed — secrets are compiled into the gateway binary
+- No runtime env var lookup — secrets are compiled into the gateway binary
 - The gateway container needs no env var passthrough for middleware secrets
 - Middleware without `{{` delimiters is copied as-is (backward compatible)
+- No `type` field or runtime switch — all middleware self-registers at compile time

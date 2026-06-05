@@ -17,7 +17,8 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 
-	// Custom middleware compilation target — user .go files are copied here at generate-time.
+	// Custom middleware compilation target — all middleware (.go files) are copied here at generate-time.
+	// Each file uses init() to self-register via the gateway SDK.
 	_ "github.com/donbader/agent-sandbox/core/gateway/middlewares/custom"
 )
 
@@ -48,11 +49,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Register built-in middleware from config (auth-header, oauth).
-	// These use the same SDK registry as custom middleware.
-	registerBuiltinMiddleware(cfg.Middlewares)
-
 	// Collect secrets from all middleware for log redaction.
+	// Middleware registers itself via init() — secrets are available after import.
 	secrets := gateway.Secrets()
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -142,40 +140,3 @@ func main() {
 	<-sig
 	slog.Info("shutting down")
 }
-
-// registerBuiltinMiddleware instantiates built-in middleware from config.
-func registerBuiltinMiddleware(cfgs []proxy.MiddlewareConfig) {
-	for _, mc := range cfgs {
-		if len(mc.Domains) == 0 {
-			slog.Warn("middleware entry has no domains, skipping", "type", mc.Type)
-			continue
-		}
-		switch mc.Type {
-		case "auth-header":
-			if err := mitm.RegisterAuthHeaderMiddleware(
-				"auth-header:"+mc.Domains[0],
-				mc.Domains, mc.Header, mc.ValueFormat, mc.EnvVar,
-			); err != nil {
-				slog.Error("auth-header middleware disabled", "domains", mc.Domains, "error", err)
-				continue
-			}
-			slog.Info("auth-header middleware enabled", "domains", mc.Domains, "header", mc.Header)
-		case "oauth":
-			if err := mitm.RegisterOAuthMiddleware(
-				"oauth:"+mc.Domains[0],
-				mc.Domains, mc.TokenFile,
-			); err != nil {
-				slog.Error("oauth middleware disabled", "domains", mc.Domains, "error", err)
-				continue
-			}
-			// Register initial token secrets for redaction.
-			for _, s := range mitm.OAuthSecrets(mc.TokenFile) {
-				gateway.RegisterSecret(s)
-			}
-			slog.Info("oauth middleware enabled", "domains", mc.Domains, "token_file", mc.TokenFile)
-		default:
-			slog.Warn("unknown middleware type", "type", mc.Type)
-		}
-	}
-}
-

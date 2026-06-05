@@ -137,6 +137,11 @@ func (g *Generator) Run() error {
 			return fmt.Errorf("copy middleware: %w", err)
 		}
 	}
+	if len(gwCfg.AuthHeaders) > 0 {
+		if err := GenerateAuthHeaderMiddleware(buildDir, gwCfg.AuthHeaders); err != nil {
+			return fmt.Errorf("generate auth-header middleware: %w", err)
+		}
+	}
 
 	// 8. Generate JSON Schema
 	if err := generateSchema(buildDir); err != nil {
