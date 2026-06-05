@@ -105,10 +105,15 @@ func (g *Generator) Run() error {
 
 	merged := plugin.MergeContributions(allContribs...)
 
-	// 3. Create output directory
+	// 4. Create output directory
 	buildDir := filepath.Join(g.projectDir, ".build")
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return fmt.Errorf("create .build dir: %w", err)
+	}
+
+	// 5. Extract bundled plugin assets into .build/ and rewrite COPY paths
+	if err := g.extractBundledPluginAssets(buildDir, resolved, merged); err != nil {
+		return fmt.Errorf("extract plugin assets: %w", err)
 	}
 
 	// 4. Generate Dockerfile + entrypoint.sh (transparent proxy bootstrap)
@@ -313,5 +318,71 @@ func validateRequires(resolved map[string]*resolvedPlugin) error {
 			}
 		}
 	}
+	return nil
+}
+
+// extractBundledPluginAssets copies bundled plugin directories (other than plugin.yaml)
+// into .build/plugins/<name>/ so that COPY instructions in extra_builds can reference them.
+// It rewrites COPY paths in merged.Runtime.ExtraBuilds accordingly.
+func (g *Generator) extractBundledPluginAssets(buildDir string, resolved map[string]*resolvedPlugin, merged *plugin.Contributions) error {
+	if g.bundledFS == nil {
+		return nil
+	}
+
+	for _, rp := range resolved {
+		// Only process bundled plugins (no BaseDir means it came from bundledFS)
+		if rp.def.BaseDir != "" {
+			continue
+		}
+
+		pluginName := rp.def.Name
+		// List entries in the plugin's bundled directory
+		entries, err := fs.ReadDir(g.bundledFS, pluginName)
+		if err != nil {
+			continue // plugin might not have extra assets
+		}
+
+		// Check if there are directories to extract (anything besides plugin.yaml)
+		var dirs []string
+		for _, entry := range entries {
+			if entry.IsDir() {
+				dirs = append(dirs, entry.Name())
+			}
+		}
+		if len(dirs) == 0 {
+			continue
+		}
+
+		// Extract each directory to .build/plugins/<plugin-name>/<dir>/
+		pluginBuildDir := filepath.Join(buildDir, "plugins", pluginName)
+		if err := os.MkdirAll(pluginBuildDir, 0755); err != nil {
+			return fmt.Errorf("mkdir plugin build dir: %w", err)
+		}
+
+		for _, dir := range dirs {
+			srcPath := pluginName + "/" + dir
+			dstPath := filepath.Join(pluginBuildDir, dir)
+			subFS, err := fs.Sub(g.bundledFS, srcPath)
+			if err != nil {
+				return fmt.Errorf("sub fs %s: %w", srcPath, err)
+			}
+			if err := extractFS(subFS, ".", dstPath); err != nil {
+				return fmt.Errorf("extract %s: %w", srcPath, err)
+			}
+		}
+
+		// Rewrite COPY instructions in extra_builds:
+		// "COPY agent-manager/ ..." → "COPY .build/plugins/agent-manager-acp/agent-manager/ ..."
+		for _, dir := range dirs {
+			oldPrefix := "COPY " + dir + "/"
+			newPrefix := "COPY .build/plugins/" + pluginName + "/" + dir + "/"
+			for i, line := range merged.Runtime.ExtraBuilds {
+				if len(line) >= len(oldPrefix) && line[:len(oldPrefix)] == oldPrefix {
+					merged.Runtime.ExtraBuilds[i] = newPrefix + line[len(oldPrefix):]
+				}
+			}
+		}
+	}
+
 	return nil
 }
