@@ -1,4 +1,7 @@
 name: telegram
+requires:
+  - "@builtin/agent-manager-acp"
+
 options:
   bot_token:
     type: string
@@ -17,3 +20,10 @@ contributes:
       - url: https://api.telegram.org
         middlewares:
           - custom: "./middlewares/telegram-token-rewrite.go"
+  sidecar:
+    services:
+      telegram:
+        build: ./telegram-adapter
+        environment:
+          AGENT_MANAGER_URL: "ws://agent:3100/acp"
+          TELEGRAM_BOT_TOKEN: "{{ .options.bot_token }}"

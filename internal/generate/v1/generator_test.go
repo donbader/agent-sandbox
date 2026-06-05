@@ -165,3 +165,77 @@ installations:
 	assert.Contains(t, string(comp), "PORT")
 	assert.Contains(t, string(comp), "8080")
 }
+
+func TestGenerator_Run_RequiresUnsatisfied(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Plugin that declares a requires dependency
+	pluginDir := filepath.Join(projectDir, "plugins", "my-channel")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(`
+name: my-channel
+requires:
+  - "@builtin/agent-manager-acp"
+contributes:
+  runtime:
+    extra_builds:
+      - "RUN echo channel"
+`), 0644))
+
+	agentYAML := `
+name: test-agent
+runtime:
+  image: "@builtin/codex"
+  entrypoint: ["sleep", "infinity"]
+installations:
+  - plugin: ./plugins/my-channel
+`
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	g := NewGenerator(projectDir, nil)
+	err := g.Run()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "requires \"@builtin/agent-manager-acp\"")
+}
+
+func TestGenerator_Run_RequiresSatisfied(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// "dep" plugin (simulates agent-manager-acp)
+	depDir := filepath.Join(projectDir, "plugins", "agent-manager-acp")
+	require.NoError(t, os.MkdirAll(depDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(depDir, "plugin.yaml"), []byte(`
+name: agent-manager-acp
+contributes:
+  runtime:
+    extra_builds:
+      - "RUN echo manager"
+`), 0644))
+
+	// Plugin that requires agent-manager-acp
+	channelDir := filepath.Join(projectDir, "plugins", "my-channel")
+	require.NoError(t, os.MkdirAll(channelDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(channelDir, "plugin.yaml"), []byte(`
+name: my-channel
+requires:
+  - "@builtin/agent-manager-acp"
+contributes:
+  runtime:
+    extra_builds:
+      - "RUN echo channel"
+`), 0644))
+
+	agentYAML := `
+name: test-agent
+runtime:
+  image: "@builtin/codex"
+  entrypoint: ["sleep", "infinity"]
+installations:
+  - plugin: ./plugins/agent-manager-acp
+  - plugin: ./plugins/my-channel
+`
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	g := NewGenerator(projectDir, nil)
+	require.NoError(t, g.Run())
+}

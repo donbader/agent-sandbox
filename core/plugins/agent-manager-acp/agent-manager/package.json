@@ -1,5 +1,5 @@
 {
-  "name": "agent-sandbox-channel-manager",
+  "name": "agent-manager-acp",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,12 +8,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.22.1",
-    "grammy": "^1.21.0",
-    "pino": "^10.3.1"
+    "@agentclientprotocol/sdk": "^0.25.0",
+    "pino": "^10.3.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
     "typescript": "^5.4.0",
     "vitest": "^3.1.0"
   }

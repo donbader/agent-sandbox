@@ -18,6 +18,11 @@ type Generator struct {
 	coreDir    string
 }
 
+type resolvedPlugin struct {
+	def      *plugin.PluginDef
+	rendered *plugin.Contributions
+}
+
 // NewGenerator creates a v1 generator for the given project directory.
 func NewGenerator(projectDir string, bundledFS fs.FS) *Generator {
 	return &Generator{projectDir: projectDir, bundledFS: bundledFS}
@@ -58,6 +63,8 @@ func (g *Generator) Run() error {
 	resolver := plugin.NewResolver(g.projectDir, g.bundledFS)
 	var allContribs []*plugin.Contributions
 
+	resolved := make(map[string]*resolvedPlugin)
+
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
 		if err != nil {
@@ -87,7 +94,13 @@ func (g *Generator) Run() error {
 			}
 		}
 
+		resolved[inst.Plugin] = &resolvedPlugin{def: pluginDef, rendered: rendered}
 		allContribs = append(allContribs, rendered)
+	}
+
+	// 3. Validate plugin dependencies
+	if err := validateRequires(resolved); err != nil {
+		return err
 	}
 
 	merged := plugin.MergeContributions(allContribs...)
@@ -278,4 +291,27 @@ func extractFS(srcFS fs.FS, root, dest string) error {
 // copyDir recursively copies a directory from src to dst.
 func copyDir(src, dst string) error {
 	return extractFS(os.DirFS(src), ".", dst)
+}
+
+// validateRequires checks that all plugin dependencies are satisfied.
+func validateRequires(resolved map[string]*resolvedPlugin) error {
+	// Build set of installed plugin names (by their PluginDef.Name)
+	installed := make(map[string]bool)
+	for _, rp := range resolved {
+		installed[rp.def.Name] = true
+	}
+
+	for ref, rp := range resolved {
+		for _, req := range rp.def.Requires {
+			// Check by plugin def name (strip @builtin/ prefix for comparison)
+			reqName := req
+			if len(reqName) > 9 && reqName[:9] == "@builtin/" {
+				reqName = reqName[9:]
+			}
+			if !installed[reqName] {
+				return fmt.Errorf("plugin %q requires %q — add it to installations", ref, req)
+			}
+		}
+	}
+	return nil
 }

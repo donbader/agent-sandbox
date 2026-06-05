@@ -9,6 +9,7 @@ import (
 // PluginDef represents a parsed plugin.yaml file.
 type PluginDef struct {
 	Name        string                  `yaml:"name"`
+	Requires    []string                `yaml:"requires"`
 	Options     map[string]OptionSchema `yaml:"options"`
 	Contributes Contributions           `yaml:"contributes"`
 	BaseDir     string                  `yaml:"-"` // directory where plugin.yaml lives (for resolving relative paths)
