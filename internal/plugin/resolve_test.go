@@ -1,7 +1,9 @@
 package plugin
 
 import (
+	"bytes"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,14 +104,45 @@ contributes:
 	p, err := resolver.Resolve("./my-plugins/custom-thing", "")
 	require.NoError(t, err)
 	assert.Equal(t, "custom-thing", p.Name)
-	assert.Equal(t, customDir, p.BaseDir)
+	assert.Equal(t, filepath.Clean(customDir), p.BaseDir)
 }
 
 func TestResolve_LocalPathPrefix_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	resolver := NewResolver(dir, nil)
 	_, err := resolver.Resolve("./nonexistent", "")
-	assert.ErrorContains(t, err, "not found")
+	assert.ErrorContains(t, err, "plugin at \"./nonexistent\" not found")
+}
+
+func TestResolve_LocalPathPrefix_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	resolver := NewResolver(dir, nil)
+	_, err := resolver.Resolve("./../../etc", "")
+	assert.ErrorContains(t, err, "escapes project directory")
+}
+
+func TestResolve_LegacyShadowWarning(t *testing.T) {
+	dir := t.TempDir()
+	bundled := testBundledFS()
+
+	// Create local plugin with same name as bundled
+	pluginDir := filepath.Join(dir, "plugins", "github-pat")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(`
+name: github-pat
+contributes: {}
+`), 0644))
+
+	// Capture log output
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	resolver := NewResolver(dir, bundled)
+	p, err := resolver.Resolve("github-pat", "")
+	require.NoError(t, err)
+	assert.Equal(t, "github-pat", p.Name)
+	assert.Contains(t, buf.String(), "WARNING: local plugin \"github-pat\" shadows bundled plugin")
 }
 
 func testBundledFS() fs.FS {

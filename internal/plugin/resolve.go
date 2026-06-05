@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -52,11 +53,12 @@ func (r *Resolver) Resolve(name string, source string) (*PluginDef, error) {
 }
 
 // resolveFromBundled resolves a plugin exclusively from the bundled FS.
+// BaseDir is intentionally left empty — bundled plugins have no filesystem path.
 func (r *Resolver) resolveFromBundled(name string) (*PluginDef, error) {
 	if r.bundledFS == nil {
 		return nil, fmt.Errorf("plugin %q: @builtin/ requested but no bundled plugins available", name)
 	}
-	bundledPath := filepath.Join(name, "plugin.yaml")
+	bundledPath := path.Join(name, "plugin.yaml")
 	data, err := fs.ReadFile(r.bundledFS, bundledPath)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q not found in bundled plugins", name)
@@ -65,9 +67,17 @@ func (r *Resolver) resolveFromBundled(name string) (*PluginDef, error) {
 }
 
 // resolveFromLocal resolves a plugin from a local path relative to the project dir.
+// Rejects paths that escape the project directory.
 func (r *Resolver) resolveFromLocal(relPath string) (*PluginDef, error) {
 	localDir := filepath.Join(r.projectDir, relPath)
-	localPath := filepath.Join(localDir, "plugin.yaml")
+	// Prevent path traversal outside project dir
+	cleanDir := filepath.Clean(localDir)
+	cleanProject := filepath.Clean(r.projectDir)
+	if !strings.HasPrefix(cleanDir, cleanProject+string(filepath.Separator)) {
+		return nil, fmt.Errorf("plugin path %q escapes project directory", relPath)
+	}
+
+	localPath := filepath.Join(cleanDir, "plugin.yaml")
 	data, err := os.ReadFile(localPath)
 	if err != nil {
 		return nil, fmt.Errorf("plugin at %q not found (checked %s)", relPath, localPath)
@@ -76,7 +86,7 @@ func (r *Resolver) resolveFromLocal(relPath string) (*PluginDef, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.BaseDir = localDir
+	p.BaseDir = cleanDir
 	return p, nil
 }
 
@@ -95,7 +105,7 @@ func (r *Resolver) resolveLegacy(name string) (*PluginDef, error) {
 
 		// Warn if this shadows a bundled plugin
 		if r.bundledFS != nil {
-			bundledPath := filepath.Join(name, "plugin.yaml")
+			bundledPath := path.Join(name, "plugin.yaml")
 			if _, berr := fs.ReadFile(r.bundledFS, bundledPath); berr == nil {
 				log.Printf("WARNING: local plugin %q shadows bundled plugin — use @builtin/%s to force bundled", name, name)
 			}
@@ -105,7 +115,7 @@ func (r *Resolver) resolveLegacy(name string) (*PluginDef, error) {
 
 	// 2. Check bundled FS
 	if r.bundledFS != nil {
-		bundledPath := filepath.Join(name, "plugin.yaml")
+		bundledPath := path.Join(name, "plugin.yaml")
 		if data, err := fs.ReadFile(r.bundledFS, bundledPath); err == nil {
 			return ParsePluginYAML(data)
 		}
