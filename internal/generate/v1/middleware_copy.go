@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/donbader/agent-sandbox/internal/envvar"
 )
 
 // CopyCustomMiddleware copies custom middleware .go files into the gateway build context.
@@ -83,25 +85,10 @@ func resolveEnvVars(opts map[string]any) map[string]any {
 	resolved := make(map[string]any, len(opts))
 	for k, v := range opts {
 		if s, ok := v.(string); ok {
-			resolved[k] = expandEnvVar(s)
+			resolved[k] = envvar.Expand(s)
 		} else {
 			resolved[k] = v
 		}
 	}
 	return resolved
-}
-
-// expandEnvVar replaces ${VAR} with the value of the environment variable.
-func expandEnvVar(s string) string {
-	start := strings.Index(s, "${")
-	if start == -1 {
-		return s
-	}
-	end := strings.Index(s[start:], "}")
-	if end == -1 {
-		return s
-	}
-	varName := s[start+2 : start+end]
-	envVal := os.Getenv(varName)
-	return s[:start] + envVal + s[start+end+1:]
 }

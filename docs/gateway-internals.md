@@ -26,13 +26,14 @@ core/gateway/
     ├── proxy/
     │   ├── config.go              ← Config structs, YAML loading
     │   ├── proxy.go               ← TCP listener, SNI routing, passthrough
+    │   ├── http.go                ← Plain HTTP proxy handler
     │   ├── sni.go                 ← TLS ClientHello SNI extraction
     │   └── forward.go             ← Generic TCP port forwarder
     ├── mitm/
     │   ├── mitm.go                ← MITM handler (TLS termination + HTTP pipeline)
     │   ├── cert.go                ← CA generation, on-demand cert generation, CertCache
-    │   ├── telegram.go            ← TelegramRewriter (URL path token swap)
-    │   └── auth_header.go         ← AuthHeaderRewriter (header injection)
+    │   ├── auth_header.go         ← RegisterAuthHeaderMiddleware (header injection)
+    │   └── oauth.go               ← RegisterOAuthMiddleware (Bearer token from file)
     ├── redact/
     │   └── handler.go             ← slog handler that masks secrets in logs
     └── dns/
@@ -52,19 +53,27 @@ type RequestHandler interface {
 }
 ```
 
-### Rewriter (mitm package)
+### Middleware (sdk/gateway package)
 
-Modifies HTTP requests in-place before they're forwarded upstream:
+All request modification flows through a unified middleware system with domain scoping:
 
 ```go
-type Rewriter interface {
-    RewriteRequest(req *http.Request) bool
+type MiddlewareDef struct {
+    Name    string
+    Domains []string
+    Func    MiddlewareFunc
 }
+
+type MiddlewareFunc func(ctx *MiddlewareContext) error
 ```
 
-Built-in implementations:
-- `TelegramRewriter` — swaps dummy bot token in URL path with real `TELEGRAM_BOT_TOKEN`
-- `AuthHeaderRewriter` — injects an auth header (supports `${value}` and `${base64_basic}` templates)
+Built-in middleware (registered from config at startup):
+- `RegisterAuthHeaderMiddleware` — injects an auth header (supports `${value}` and `${base64_basic}` templates)
+- `RegisterOAuthMiddleware` — reads OAuth token from file, refreshes when expired, injects Bearer header
+
+Custom middleware (compiled into gateway from plugin templates):
+- Registered via `gateway.RegisterMiddleware(MiddlewareDef{...})` in `init()`
+- Domain-scoped: only runs for requests matching configured domains
 
 ## Connection Flow
 
@@ -93,7 +102,7 @@ When a connection matches a MITM domain, `mitm.Handler` takes over:
 2. **TLS handshake** — wraps the client connection in a `prefixConn` (replays the already-read ClientHello bytes), then performs a `tls.Server` handshake using the generated cert.
 3. **HTTP request loop** (keep-alive aware):
    - `http.ReadRequest` from the decrypted stream
-   - Apply each `Rewriter` in order (token swap, header injection, etc.)
+   - Call `applyMiddleware(req)` — finds matching middleware by domain, executes in order
    - Forward the modified request to real upstream via fresh TLS connection
    - Write upstream response back to agent over the MITM'd connection
    - Repeat until `Connection: close` or EOF
@@ -105,33 +114,35 @@ The agent's TLS client trusts the gateway CA (installed at container startup via
 Gateway logs are protected with two layers via the `redact.Handler` (wraps `slog`):
 
 1. **Key-based** — attributes named `token`, `authorization`, `api_key`, etc. are always redacted
-2. **Value-based** — all string attribute values are scanned for known secret substrings (collected from rewriter env vars at startup) and replaced with `[REDACTED]`
+2. **Value-based** — all string attribute values are scanned for known secret substrings (collected from middleware via `gateway.RegisterSecret()` at startup) and replaced with `[REDACTED]`
 
 This prevents credentials from leaking into container logs even if a handler inadvertently logs request details.
 
-## Adding a New Rewriter
+## Adding a New Built-in Middleware
 
-1. Create a new file in `core/gateway/internal/mitm/` (e.g., `my_rewriter.go`)
-2. Implement the `Rewriter` interface:
+1. Create a registration function in `core/gateway/internal/mitm/` (e.g., `my_middleware.go`)
+2. Use the middleware SDK to register with domain scoping:
 
 ```go
-type MyRewriter struct {
-    domains []string
-    secret  string
-}
+func RegisterMyMiddleware(name string, domains []string, ...) error {
+    gateway.RegisterSecret(mySecret)
 
-func (r *MyRewriter) RewriteRequest(req *http.Request) bool {
-    // Check if this request is for one of our domains
-    // Modify req in-place (add headers, rewrite URL, etc.)
-    // Return true if modified, false otherwise
-    return true
+    gateway.RegisterMiddleware(gateway.MiddlewareDef{
+        Name:    name,
+        Domains: domains,
+        Func: func(ctx *gateway.MiddlewareContext) error {
+            // Modify ctx.Request in-place (add headers, rewrite URL, etc.)
+            return nil
+        },
+    })
+    return nil
 }
 ```
 
-3. Add a case in `buildRewriters()` in `cmd/gateway/main.go` to instantiate it from config
+3. Add a case in `registerBuiltinMiddleware()` in `cmd/gateway/main.go` to instantiate it from config
 4. Declare the MITM domains in your plugin's `plugin.yaml` under `gateway.services`
 
-The gateway binary is recompiled during Docker build, so new rewriters are picked up automatically when you `agent-sandbox compose up --build`.
+The gateway binary is recompiled during Docker build, so new middleware is picked up automatically when you `agent-sandbox compose up --build`.
 
 ## Custom Middleware via Plugins
 
@@ -153,13 +164,23 @@ Middleware files support Go template syntax. At generate-time, the CLI resolves 
 // plugins/my-plugin/middlewares/my-rewrite.go (template)
 package custom
 
-import "github.com/donbader/agent-sandbox/core/sdk/gateway"
+import (
+    "strings"
+
+    "github.com/donbader/agent-sandbox/core/sdk/gateway"
+)
 
 func init() {
-    gateway.RegisterMiddleware("my-rewrite", func(ctx *gateway.MiddlewareContext) error {
-        secret := "{{ .options.api_key }}"
-        ctx.Request.Header.Set("Authorization", "Bearer " + secret)
-        return nil
+    domains := strings.Split("{{ .domainsList }}", ",")
+
+    gateway.RegisterMiddleware(gateway.MiddlewareDef{
+        Name:    "my-rewrite",
+        Domains: domains,
+        Func: func(ctx *gateway.MiddlewareContext) error {
+            secret := "{{ .options.api_key }}"
+            ctx.Request.Header.Set("Authorization", "Bearer " + secret)
+            return nil
+        },
     })
 }
 ```
