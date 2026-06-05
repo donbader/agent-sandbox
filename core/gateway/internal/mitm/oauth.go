@@ -1,5 +1,5 @@
-// Package mitm provides MITM rewriters for the gateway proxy.
-// This file implements the OAuthRewriter which reads a stored OAuth token from
+// Package mitm provides built-in middleware for the gateway proxy.
+// This file implements the OAuth middleware which reads a stored OAuth token from
 // a JSON file, refreshes it when expired, and injects a Bearer Authorization header.
 package mitm
 
@@ -17,41 +17,38 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
 
-// StoredToken represents a persisted OAuth token (written by setup, read/updated by this rewriter).
+// StoredToken represents a persisted OAuth token (written by setup, read/updated by this middleware).
 type StoredToken struct {
-	AccessToken    string  `json:"access_token"`
-	RefreshToken   *string `json:"refresh_token"`
-	ExpiresAt      int64   `json:"expires_at"`
-	TokenEndpoint  string  `json:"token_endpoint"`
-	ClientID       string  `json:"client_id"`
-	ClientSecret   *string `json:"client_secret"`
+	AccessToken   string  `json:"access_token"`
+	RefreshToken  *string `json:"refresh_token"`
+	ExpiresAt     int64   `json:"expires_at"`
+	TokenEndpoint string  `json:"token_endpoint"`
+	ClientID      string  `json:"client_id"`
+	ClientSecret  *string `json:"client_secret"`
 }
 
-// OAuthRewriter injects a Bearer token into requests destined for specific domains.
-// It reads a token file from disk, refreshes the token when expired, and caches
-// the current access token in memory.
-type OAuthRewriter struct {
-	domains   []string
-	tokenFile string
-
-	mu           sync.Mutex
-	cachedToken  *StoredToken
-	cachedUntil  time.Time
-	httpClient   *http.Client
+// oauthState holds the runtime state for the OAuth middleware.
+type oauthState struct {
+	tokenFile   string
+	mu          sync.Mutex
+	cachedToken *StoredToken
+	cachedUntil time.Time
+	httpClient  *http.Client
 }
 
-// NewOAuthRewriter creates a rewriter that reads an OAuth token file and injects
-// Bearer tokens for the given domains. The token file must exist and contain valid
-// JSON matching the StoredToken format.
-func NewOAuthRewriter(domains []string, tokenFile string) (*OAuthRewriter, error) {
+// RegisterOAuthMiddleware creates and registers an OAuth middleware.
+// It reads a token file from disk, refreshes the token when expired, and injects
+// a Bearer Authorization header for matching domains.
+func RegisterOAuthMiddleware(name string, domains []string, tokenFile string) error {
 	if tokenFile == "" {
-		return nil, fmt.Errorf("oauth: token_file is required")
+		return fmt.Errorf("oauth: token_file is required")
 	}
 
-	r := &OAuthRewriter{
-		domains:   domains,
+	state := &oauthState{
 		tokenFile: tokenFile,
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
@@ -64,124 +61,106 @@ func NewOAuthRewriter(domains []string, tokenFile string) (*OAuthRewriter, error
 		slog.Warn("oauth token file not found at startup", "path", tokenFile, "error", err)
 	}
 
-	return r, nil
+	gateway.RegisterMiddleware(gateway.MiddlewareDef{
+		Name:    name,
+		Domains: domains,
+		Func: func(ctx *gateway.MiddlewareContext) error {
+			token, err := state.getValidToken()
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					slog.Debug("oauth: token file not found (not yet authorized)", "file", state.tokenFile)
+				} else {
+					slog.Error("oauth: failed to get token", "error", err)
+				}
+				return nil // non-fatal: request continues without auth
+			}
+
+			ctx.Request.Header.Set("Authorization", "Bearer "+token)
+			return nil
+		},
+	})
+
+	return nil
 }
 
-// Secrets implements SecretProvider. Returns the current cached access token
-// so it can be added to the log redaction list.
-func (r *OAuthRewriter) Secrets() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.cachedToken != nil && r.cachedToken.AccessToken != "" {
-		return []string{r.cachedToken.AccessToken}
+// OAuthSecrets returns current OAuth token secrets for log redaction.
+func OAuthSecrets(tokenFile string) []string {
+	data, err := os.ReadFile(tokenFile)
+	if err != nil {
+		return nil
+	}
+	var token StoredToken
+	if err := json.Unmarshal(data, &token); err != nil {
+		return nil
+	}
+	if token.AccessToken != "" {
+		return []string{token.AccessToken}
 	}
 	return nil
 }
 
-// RewriteRequest injects a Bearer Authorization header if the request host matches
-// one of the configured domains. Returns true if the header was injected.
-func (r *OAuthRewriter) RewriteRequest(req *http.Request) bool {
-	host := req.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-
-	matched := false
-	for _, d := range r.domains {
-		if host == d {
-			matched = true
-			break
-		}
-	}
-	if !matched {
-		return false
-	}
-
-	token, err := r.getValidToken()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			slog.Debug("oauth: token file not found (not yet authorized)", "host", host, "file", r.tokenFile)
-		} else {
-			slog.Error("oauth: failed to get token", "error", err, "host", host)
-		}
-		return false
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	return true
-}
-
 // getValidToken returns a valid access token, refreshing if necessary.
-func (r *OAuthRewriter) getValidToken() (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (s *oauthState) getValidToken() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// Use cached token if still valid (with 5-minute buffer).
-	if r.cachedToken != nil && time.Now().Before(r.cachedUntil) {
-		return r.cachedToken.AccessToken, nil
+	if s.cachedToken != nil && time.Now().Before(s.cachedUntil) {
+		return s.cachedToken.AccessToken, nil
 	}
 
-	// Read token from file.
-	stored, err := r.readTokenFile()
+	stored, err := s.readTokenFile()
 	if err != nil {
 		return "", err
 	}
 
 	now := time.Now().Unix()
 
-	// Refresh if token expires within 5 minutes.
 	if now+300 >= stored.ExpiresAt {
-		refreshed, err := r.refreshToken(stored)
+		refreshed, err := s.refreshToken(stored)
 		if err != nil {
 			return "", fmt.Errorf("token refresh failed: %w", err)
 		}
 		stored = refreshed
-
-		// Save refreshed token back to file.
-		if err := r.writeTokenFile(stored); err != nil {
+		if err := s.writeTokenFile(stored); err != nil {
 			slog.Error("oauth: failed to write refreshed token", "error", err)
-			// Non-fatal — token is still usable in memory.
 		}
 	}
 
-	// Cache until 5 minutes before expiry (minimum 60 seconds).
 	ttl := stored.ExpiresAt - now - 300
 	if ttl < 60 {
 		ttl = 60
 	}
-	r.cachedToken = stored
-	r.cachedUntil = time.Now().Add(time.Duration(ttl) * time.Second)
+	s.cachedToken = stored
+	s.cachedUntil = time.Now().Add(time.Duration(ttl) * time.Second)
+	gateway.RegisterSecret(stored.AccessToken)
 
 	return stored.AccessToken, nil
 }
 
 // readTokenFile reads and parses the stored token JSON file.
-func (r *OAuthRewriter) readTokenFile() (*StoredToken, error) {
-	data, err := os.ReadFile(r.tokenFile)
+func (s *oauthState) readTokenFile() (*StoredToken, error) {
+	data, err := os.ReadFile(s.tokenFile)
 	if err != nil {
-		return nil, fmt.Errorf("reading token file %s: %w", r.tokenFile, err)
+		return nil, fmt.Errorf("reading token file %s: %w", s.tokenFile, err)
 	}
-
 	var token StoredToken
 	if err := json.Unmarshal(data, &token); err != nil {
-		return nil, fmt.Errorf("parsing token file %s: %w", r.tokenFile, err)
+		return nil, fmt.Errorf("parsing token file %s: %w", s.tokenFile, err)
 	}
-
 	return &token, nil
 }
 
-// writeTokenFile writes the refreshed token back to disk using write-rename
-// for crash safety (avoids partial writes corrupting the JSON file).
-func (r *OAuthRewriter) writeTokenFile(token *StoredToken) error {
+// writeTokenFile writes the refreshed token back to disk using write-rename.
+func (s *oauthState) writeTokenFile(token *StoredToken) error {
 	data, err := json.MarshalIndent(token, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := r.tokenFile + ".tmp"
+	tmp := s.tokenFile + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, r.tokenFile)
+	return os.Rename(tmp, s.tokenFile)
 }
 
 // tokenResponse is the OAuth token endpoint response.
@@ -229,7 +208,6 @@ func ssrfSafeTransport() *http.Transport {
 				}
 			}
 
-			// All IPs are public — connect to the first one.
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 		},
@@ -237,7 +215,7 @@ func ssrfSafeTransport() *http.Transport {
 }
 
 // refreshToken exchanges a refresh token for a new access token.
-func (r *OAuthRewriter) refreshToken(stored *StoredToken) (*StoredToken, error) {
+func (s *oauthState) refreshToken(stored *StoredToken) (*StoredToken, error) {
 	if stored.RefreshToken == nil || *stored.RefreshToken == "" {
 		return nil, fmt.Errorf("no refresh_token available — re-run oauth setup")
 	}
@@ -255,7 +233,7 @@ func (r *OAuthRewriter) refreshToken(stored *StoredToken) (*StoredToken, error) 
 		params.Set("client_secret", *stored.ClientSecret)
 	}
 
-	resp, err := r.httpClient.Post(
+	resp, err := s.httpClient.Post(
 		stored.TokenEndpoint,
 		"application/x-www-form-urlencoded",
 		strings.NewReader(params.Encode()),
@@ -265,7 +243,7 @@ func (r *OAuthRewriter) refreshToken(stored *StoredToken) (*StoredToken, error) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB max
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("reading refresh response: %w", err)
 	}
@@ -284,7 +262,6 @@ func (r *OAuthRewriter) refreshToken(stored *StoredToken) (*StoredToken, error) 
 		expiresIn = 3600
 	}
 
-	// Preserve old refresh token if server didn't return a new one.
 	refreshToken := stored.RefreshToken
 	if tr.RefreshToken != "" {
 		refreshToken = &tr.RefreshToken

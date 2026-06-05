@@ -10,10 +10,10 @@ import (
 )
 
 // CopyCustomMiddleware copies custom middleware .go files into the gateway build context.
-// Middleware files are treated as Go templates and rendered with the resolved plugin options.
-// This allows secrets to be baked into the generated code at generate-time.
-func CopyCustomMiddleware(projectDir, outDir string, middlewarePaths []string, opts map[string]any) error {
-	if len(middlewarePaths) == 0 {
+// Middleware files are treated as Go templates and rendered with the resolved plugin options
+// and domain scope. This allows secrets and domain lists to be baked into the generated code.
+func CopyCustomMiddleware(projectDir, outDir string, middlewareRefs []MiddlewareRef, opts map[string]any) error {
+	if len(middlewareRefs) == 0 {
 		return nil
 	}
 
@@ -24,27 +24,33 @@ func CopyCustomMiddleware(projectDir, outDir string, middlewarePaths []string, o
 
 	// Resolve ${VAR} references in options to actual env values
 	resolved := resolveEnvVars(opts)
-	data := map[string]any{"options": resolved}
 
-	for _, mwPath := range middlewarePaths {
+	for _, ref := range middlewareRefs {
 		var srcPath string
-		if filepath.IsAbs(mwPath) {
-			srcPath = mwPath
+		if filepath.IsAbs(ref.Path) {
+			srcPath = ref.Path
 		} else {
-			srcPath = filepath.Join(projectDir, mwPath)
+			srcPath = filepath.Join(projectDir, ref.Path)
 		}
 		content, err := os.ReadFile(srcPath)
 		if err != nil {
-			return fmt.Errorf("read middleware %s: %w", mwPath, err)
+			return fmt.Errorf("read middleware %s: %w", ref.Path, err)
+		}
+
+		// Template data includes options and domains (as comma-separated string for embedding in Go string literals)
+		data := map[string]any{
+			"options":     resolved,
+			"domains":     ref.Domains,
+			"domainsList": strings.Join(ref.Domains, ","),
 		}
 
 		// Template-render the middleware file
 		rendered, err := renderMiddleware(srcPath, string(content), data)
 		if err != nil {
-			return fmt.Errorf("render middleware %s: %w", mwPath, err)
+			return fmt.Errorf("render middleware %s: %w", ref.Path, err)
 		}
 
-		destFile := filepath.Join(destDir, filepath.Base(mwPath))
+		destFile := filepath.Join(destDir, filepath.Base(ref.Path))
 		if err := os.WriteFile(destFile, []byte(rendered), 0644); err != nil {
 			return fmt.Errorf("write middleware %s: %w", destFile, err)
 		}

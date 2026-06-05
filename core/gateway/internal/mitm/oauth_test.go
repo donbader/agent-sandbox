@@ -10,11 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestOAuthRewriter_InjectsBearer(t *testing.T) {
+func TestOAuthMiddleware_InjectsBearer(t *testing.T) {
+	gateway.ResetForTesting()
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "test-access-token",
 		RefreshToken:  strPtr("test-refresh"),
@@ -24,18 +26,23 @@ func TestOAuthRewriter_InjectsBearer(t *testing.T) {
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
+	err := RegisterOAuthMiddleware("test-oauth", []string{"mcp.notion.com"}, tokenFile)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
 	req.Host = "mcp.notion.com"
 
-	modified := rw.RewriteRequest(req)
-	assert.True(t, modified)
+	matching := gateway.MatchingMiddleware(req)
+	require.NotEmpty(t, matching)
+
+	ctx := &gateway.MiddlewareContext{Request: req, Env: os.Getenv}
+	err = matching[0].Func(ctx)
+	require.NoError(t, err)
 	assert.Equal(t, "Bearer test-access-token", req.Header.Get("Authorization"))
 }
 
-func TestOAuthRewriter_SkipsNonMatchingDomain(t *testing.T) {
+func TestOAuthMiddleware_SkipsNonMatchingDomain(t *testing.T) {
+	gateway.ResetForTesting()
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "token",
 		RefreshToken:  strPtr("refresh"),
@@ -45,19 +52,19 @@ func TestOAuthRewriter_SkipsNonMatchingDomain(t *testing.T) {
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
+	err := RegisterOAuthMiddleware("test-oauth", []string{"mcp.notion.com"}, tokenFile)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("GET", "https://api.github.com/repos", nil)
 	req.Host = "api.github.com"
 
-	modified := rw.RewriteRequest(req)
-	assert.False(t, modified)
-	assert.Empty(t, req.Header.Get("Authorization"))
+	matching := gateway.MatchingMiddleware(req)
+	assert.Empty(t, matching)
 }
 
-func TestOAuthRewriter_RefreshesExpiredToken(t *testing.T) {
-	// Mock token endpoint that returns a new token (TLS for HTTPS validation).
+func TestOAuthMiddleware_RefreshesExpiredToken(t *testing.T) {
+	gateway.ResetForTesting()
+
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
 		err := r.ParseForm()
@@ -78,23 +85,20 @@ func TestOAuthRewriter_RefreshesExpiredToken(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "expired-token",
 		RefreshToken:  strPtr("old-refresh"),
-		ExpiresAt:     time.Now().Unix() - 100, // Already expired.
-		TokenEndpoint: server.URL,              // https://127.0.0.1:PORT
+		ExpiresAt:     time.Now().Unix() - 100,
+		TokenEndpoint: server.URL,
 		ClientID:      "client-id",
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
+	state := &oauthState{
+		tokenFile:  tokenFile,
+		httpClient: server.Client(),
+	}
+
+	token, err := state.getValidToken()
 	require.NoError(t, err)
-	// Use TLS server's client (trusts test cert, bypasses SSRF dialer for localhost).
-	rw.httpClient = server.Client()
-
-	req := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
-	req.Host = "mcp.notion.com"
-
-	modified := rw.RewriteRequest(req)
-	assert.True(t, modified)
-	assert.Equal(t, "Bearer new-access-token", req.Header.Get("Authorization"))
+	assert.Equal(t, "new-access-token", token)
 
 	// Verify token file was updated.
 	data, err := os.ReadFile(tokenFile)
@@ -105,49 +109,45 @@ func TestOAuthRewriter_RefreshesExpiredToken(t *testing.T) {
 	assert.Equal(t, "new-refresh", *saved.RefreshToken)
 }
 
-func TestOAuthRewriter_RejectsHTTPTokenEndpoint(t *testing.T) {
+func TestOAuthMiddleware_RejectsHTTPTokenEndpoint(t *testing.T) {
+	gateway.ResetForTesting()
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "expired-token",
 		RefreshToken:  strPtr("refresh"),
-		ExpiresAt:     time.Now().Unix() - 100, // Expired — triggers refresh.
+		ExpiresAt:     time.Now().Unix() - 100,
 		TokenEndpoint: "http://evil.example.com/token",
 		ClientID:      "cid",
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
-	require.NoError(t, err)
+	state := &oauthState{
+		tokenFile:  tokenFile,
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+	}
 
-	req := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
-	req.Host = "mcp.notion.com"
-
-	// Should fail because token_endpoint is http, not https.
-	modified := rw.RewriteRequest(req)
-	assert.False(t, modified)
-	assert.Empty(t, req.Header.Get("Authorization"))
+	_, err := state.getValidToken()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must use https")
 }
 
-func TestOAuthRewriter_BlocksPrivateIPEndpoint(t *testing.T) {
+func TestOAuthMiddleware_BlocksPrivateIPEndpoint(t *testing.T) {
+	gateway.ResetForTesting()
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "expired-token",
 		RefreshToken:  strPtr("refresh"),
-		ExpiresAt:     time.Now().Unix() - 100, // Expired — triggers refresh.
+		ExpiresAt:     time.Now().Unix() - 100,
 		TokenEndpoint: "https://127.0.0.1:9999/token",
 		ClientID:      "cid",
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
-	require.NoError(t, err)
-	// Keep the default SSRF-safe transport (don't override httpClient).
+	state := &oauthState{
+		tokenFile:  tokenFile,
+		httpClient: &http.Client{Transport: ssrfSafeTransport(), Timeout: 5 * time.Second},
+	}
 
-	req := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
-	req.Host = "mcp.notion.com"
-
-	// Should fail because 127.0.0.1 is a private IP.
-	modified := rw.RewriteRequest(req)
-	assert.False(t, modified)
-	assert.Empty(t, req.Header.Get("Authorization"))
+	_, err := state.getValidToken()
+	assert.Error(t, err)
 }
 
 func TestValidateTokenEndpoint(t *testing.T) {
@@ -197,13 +197,15 @@ func TestIsPrivateIP(t *testing.T) {
 	}
 }
 
-func TestOAuthRewriter_ErrorsWithoutTokenFile(t *testing.T) {
-	_, err := NewOAuthRewriter([]string{"mcp.example.com"}, "")
+func TestRegisterOAuthMiddleware_ErrorsWithoutTokenFile(t *testing.T) {
+	gateway.ResetForTesting()
+	err := RegisterOAuthMiddleware("test", []string{"mcp.example.com"}, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "token_file is required")
 }
 
-func TestOAuthRewriter_HandlesHostWithPort(t *testing.T) {
+func TestOAuthMiddleware_HandlesHostWithPort(t *testing.T) {
+	gateway.ResetForTesting()
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "port-token",
 		RefreshToken:  strPtr("refresh"),
@@ -213,18 +215,23 @@ func TestOAuthRewriter_HandlesHostWithPort(t *testing.T) {
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
+	err := RegisterOAuthMiddleware("test-oauth", []string{"mcp.notion.com"}, tokenFile)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "https://mcp.notion.com:443/mcp", nil)
 	req.Host = "mcp.notion.com:443"
 
-	modified := rw.RewriteRequest(req)
-	assert.True(t, modified)
+	matching := gateway.MatchingMiddleware(req)
+	require.NotEmpty(t, matching)
+
+	ctx := &gateway.MiddlewareContext{Request: req, Env: os.Getenv}
+	err = matching[0].Func(ctx)
+	require.NoError(t, err)
 	assert.Equal(t, "Bearer port-token", req.Header.Get("Authorization"))
 }
 
-func TestOAuthRewriter_CachesToken(t *testing.T) {
+func TestOAuthMiddleware_CachesToken(t *testing.T) {
+	gateway.ResetForTesting()
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "cached-token",
 		RefreshToken:  strPtr("refresh"),
@@ -234,25 +241,25 @@ func TestOAuthRewriter_CachesToken(t *testing.T) {
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
+	state := &oauthState{
+		tokenFile:  tokenFile,
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+	}
+
+	// First call reads from file.
+	token1, err := state.getValidToken()
 	require.NoError(t, err)
+	assert.Equal(t, "cached-token", token1)
 
-	// First request reads from file.
-	req1 := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
-	req1.Host = "mcp.notion.com"
-	rw.RewriteRequest(req1)
-
-	// Delete the token file — second request should use cache.
+	// Delete the token file — second call should use cache.
 	_ = os.Remove(tokenFile)
 
-	req2 := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
-	req2.Host = "mcp.notion.com"
-	modified := rw.RewriteRequest(req2)
-	assert.True(t, modified)
-	assert.Equal(t, "Bearer cached-token", req2.Header.Get("Authorization"))
+	token2, err := state.getValidToken()
+	require.NoError(t, err)
+	assert.Equal(t, "cached-token", token2)
 }
 
-func TestOAuthRewriter_ImplementsSecretProvider(t *testing.T) {
+func TestOAuthSecrets(t *testing.T) {
 	tokenFile := writeTestToken(t, &StoredToken{
 		AccessToken:   "super-secret-token",
 		RefreshToken:  strPtr("refresh"),
@@ -262,17 +269,7 @@ func TestOAuthRewriter_ImplementsSecretProvider(t *testing.T) {
 		ClientSecret:  nil,
 	})
 
-	rw, err := NewOAuthRewriter([]string{"mcp.notion.com"}, tokenFile)
-	require.NoError(t, err)
-
-	// Prime the cache so the token is available.
-	req := httptest.NewRequest("POST", "https://mcp.notion.com/mcp", nil)
-	req.Host = "mcp.notion.com"
-	rw.RewriteRequest(req)
-
-	sp, ok := any(rw).(SecretProvider)
-	require.True(t, ok, "OAuthRewriter must implement SecretProvider")
-	secrets := sp.Secrets()
+	secrets := OAuthSecrets(tokenFile)
 	assert.Contains(t, secrets, "super-secret-token")
 }
 

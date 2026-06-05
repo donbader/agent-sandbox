@@ -78,7 +78,7 @@ func TestCertCache_GetOrCreate(t *testing.T) {
 
 func TestHandler_Matches(t *testing.T) {
 	ca := testCA(t)
-	h := NewHandler([]string{"api.example.com", "other.example.com"}, ca, nil)
+	h := NewHandler([]string{"api.example.com", "other.example.com"}, ca)
 
 	if !h.Matches("api.example.com") {
 		t.Error("expected match for api.example.com")
@@ -93,7 +93,7 @@ func TestHandler_Matches(t *testing.T) {
 
 func TestHandler_TransportReuse(t *testing.T) {
 	ca := testCA(t)
-	h := NewHandler([]string{"example.com"}, ca, nil)
+	h := NewHandler([]string{"example.com"}, ca)
 
 	t1 := h.getTransport("example.com")
 	t2 := h.getTransport("example.com")

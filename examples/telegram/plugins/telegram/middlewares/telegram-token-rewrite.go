@@ -12,20 +12,27 @@ func init() {
 		gateway.RegisterSecret(realToken)
 	}
 
-	gateway.RegisterMiddleware("telegram-token-rewrite", func(ctx *gateway.MiddlewareContext) error {
-		if realToken == "" {
-			return nil
-		}
+	// Domains are baked at generate-time from service URL.
+	domains := strings.Split("{{ .domainsList }}", ",")
 
-		path := ctx.Request.URL.Path
-		if idx := strings.Index(path, "/bot"); idx != -1 {
-			rest := path[idx+4:]
-			if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
-				method := rest[slashIdx:]
-				ctx.Request.URL.Path = path[:idx] + "/bot" + realToken + method
+	gateway.RegisterMiddleware(gateway.MiddlewareDef{
+		Name:    "telegram-token-rewrite",
+		Domains: domains,
+		Func: func(ctx *gateway.MiddlewareContext) error {
+			if realToken == "" {
+				return nil
 			}
-		}
 
-		return nil
+			path := ctx.Request.URL.Path
+			if idx := strings.Index(path, "/bot"); idx != -1 {
+				rest := path[idx+4:]
+				if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
+					method := rest[slashIdx:]
+					ctx.Request.URL.Path = path[:idx] + "/bot" + realToken + method
+				}
+			}
+
+			return nil
+		},
 	})
 }

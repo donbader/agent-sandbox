@@ -1,6 +1,9 @@
 package gateway
 
-import "net/http"
+import (
+	"net"
+	"net/http"
+)
 
 // MiddlewareContext provides request access and environment resolution for custom middleware.
 type MiddlewareContext struct {
@@ -11,22 +14,50 @@ type MiddlewareContext struct {
 // MiddlewareFunc is the signature for custom gateway middleware.
 type MiddlewareFunc func(ctx *MiddlewareContext) error
 
-var registry = map[string]MiddlewareFunc{}
-
-// RegisterMiddleware registers a named middleware function.
-func RegisterMiddleware(name string, fn MiddlewareFunc) {
-	registry[name] = fn
+// MiddlewareDef defines a middleware with domain scoping.
+type MiddlewareDef struct {
+	Name    string
+	Domains []string
+	Func    MiddlewareFunc
 }
 
-// Get returns a registered middleware by name.
-func Get(name string) (MiddlewareFunc, bool) {
-	fn, ok := registry[name]
-	return fn, ok
+var registry []MiddlewareDef
+
+// RegisterMiddleware registers a domain-scoped middleware.
+func RegisterMiddleware(def MiddlewareDef) {
+	registry = append(registry, def)
 }
 
-// All returns all registered middleware.
-func All() map[string]MiddlewareFunc {
+// All returns all registered middleware definitions.
+func All() []MiddlewareDef {
 	return registry
+}
+
+// MatchingMiddleware returns middleware whose domain list matches the given request host.
+// If a middleware has no domains configured, it matches all requests.
+func MatchingMiddleware(req *http.Request) []MiddlewareDef {
+	host := req.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	var matched []MiddlewareDef
+	for _, mw := range registry {
+		if len(mw.Domains) == 0 || domainMatches(mw.Domains, host) {
+			matched = append(matched, mw)
+		}
+	}
+	return matched
+}
+
+// domainMatches returns true if host matches any domain in the list.
+func domainMatches(domains []string, host string) bool {
+	for _, d := range domains {
+		if host == d {
+			return true
+		}
+	}
+	return false
 }
 
 // secrets collects values that should be redacted from logs.
@@ -43,4 +74,10 @@ func RegisterSecret(value string) {
 // Secrets returns all secrets registered by middleware for log redaction.
 func Secrets() []string {
 	return secrets
+}
+
+// ResetForTesting clears all registered middleware and secrets. Test use only.
+func ResetForTesting() {
+	registry = nil
+	secrets = nil
 }

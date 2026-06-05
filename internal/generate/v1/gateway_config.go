@@ -14,7 +14,13 @@ import (
 // GatewayConfigOutput is the merged gateway configuration for rendering.
 type GatewayConfigOutput struct {
 	Services    []GatewayServiceOutput
-	Middlewares []string // paths to custom .go files to copy
+	Middlewares []MiddlewareRef // custom .go files to copy with domain scope
+}
+
+// MiddlewareRef associates a custom middleware file with its target domains.
+type MiddlewareRef struct {
+	Path    string   // relative or absolute path to .go file
+	Domains []string // domains this middleware applies to
 }
 
 // GatewayServiceOutput represents a single gateway service entry in the output.
@@ -26,14 +32,14 @@ type GatewayServiceOutput struct {
 
 // gatewayRuntimeConfig matches the proxy.Config struct in core/gateway.
 type gatewayRuntimeConfig struct {
-	Listen      string                    `yaml:"listen"`
-	DNSListen   string                    `yaml:"dns_listen"`
-	MITMDomains []string                  `yaml:"mitm_domains"`
-	Rewriters   []gatewayRewriterConfig   `yaml:"rewriters,omitempty"`
-	HealthAddr  string                    `yaml:"health_addr,omitempty"`
+	Listen      string                      `yaml:"listen"`
+	DNSListen   string                      `yaml:"dns_listen"`
+	MITMDomains []string                    `yaml:"mitm_domains"`
+	Middlewares []gatewayMiddlewareConfig   `yaml:"middlewares,omitempty"`
+	HealthAddr  string                      `yaml:"health_addr,omitempty"`
 }
 
-type gatewayRewriterConfig struct {
+type gatewayMiddlewareConfig struct {
 	Type        string   `yaml:"type"`
 	Domains     []string `yaml:"domains"`
 	EnvVar      string   `yaml:"env_var,omitempty"`
@@ -52,9 +58,13 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 			Network: svc.Network,
 			Headers: svc.Headers,
 		})
+		domain := extractDomain(svc.URL)
 		for _, mw := range svc.Middlewares {
 			if mw.Custom != "" {
-				out.Middlewares = append(out.Middlewares, mw.Custom)
+				out.Middlewares = append(out.Middlewares, MiddlewareRef{
+					Path:    mw.Custom,
+					Domains: []string{domain},
+				})
 			}
 		}
 	}
@@ -67,9 +77,13 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 				Network: svc.Network,
 				Headers: svc.Headers,
 			})
+			domain := extractDomain(svc.URL)
 			for _, mw := range svc.Middlewares {
 				if mw.Custom != "" {
-					out.Middlewares = append(out.Middlewares, mw.Custom)
+					out.Middlewares = append(out.Middlewares, MiddlewareRef{
+						Path:    mw.Custom,
+						Domains: []string{domain},
+					})
 				}
 			}
 		}
@@ -92,11 +106,11 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 		}
 		rc.MITMDomains = append(rc.MITMDomains, domain)
 
-		// For each header, create an auth-header rewriter
+		// For each header, create an auth-header middleware entry
 		for header, value := range svc.Headers {
 			// Value might be "Bearer ${ENV_VAR}" — extract env var reference
 			envVar, valueFormat := parseHeaderValue(value)
-			rc.Rewriters = append(rc.Rewriters, gatewayRewriterConfig{
+			rc.Middlewares = append(rc.Middlewares, gatewayMiddlewareConfig{
 				Type:        "auth-header",
 				Domains:     []string{domain},
 				Header:      header,

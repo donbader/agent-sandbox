@@ -1,6 +1,6 @@
 // Gateway is a transparent proxy that runs inside the agent container.
 // It intercepts all outbound traffic via iptables and either passes it through
-// or applies credential injection via RequestHandlers.
+// or applies credential injection via middleware.
 package main
 
 import (
@@ -43,31 +43,21 @@ func main() {
 
 	cfg, err := proxy.LoadConfig(configPath)
 	if err != nil {
-		// Minimal logger for startup errors (before secrets are known).
 		slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 		slog.Error("load config", "error", err)
 		os.Exit(1)
 	}
 
-	// Build rewriters early so we can collect secrets from them (e.g. OAuth tokens)
-	// before constructing the redacting logger.
-	rewriters := buildRewriters(cfg.Rewriters)
+	// Register built-in middleware from config (auth-header, oauth).
+	// These use the same SDK registry as custom middleware.
+	registerBuiltinMiddleware(cfg.Middlewares)
 
-	// Collect secret values for value-based log redaction from two sources:
-	// 1. Rewriters that implement SecretProvider (auth-header env vars, OAuth tokens).
-	var secrets []string
-	for _, rw := range rewriters {
-		if sp, ok := rw.(mitm.SecretProvider); ok {
-			secrets = append(secrets, sp.Secrets()...)
-		}
-	}
-	// 2. Secrets declared by custom middleware via gateway.RegisterSecret().
-	secrets = append(secrets, gateway.Secrets()...)
+	// Collect secrets from all middleware for log redaction.
+	secrets := gateway.Secrets()
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: level,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Key-based redaction as a first layer (catches explicitly named attrs).
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == "token" || a.Key == "authorization" || a.Key == "api_key" {
 				return slog.String(a.Key, "[REDACTED]")
 			}
@@ -100,18 +90,14 @@ func main() {
 		}
 		slog.Info("CA certificate written", "cert", sharedCertPath, "key", privateKeyPath)
 
-		handler := mitm.NewHandler(cfg.MITMDomains, caCert, rewriters)
+		handler := mitm.NewHandler(cfg.MITMDomains, caCert)
 		p.RegisterHandler(handler)
 		slog.Info("mitm enabled", "domains", cfg.MITMDomains)
 	}
 
-	// Register HTTP proxy handler (for plain HTTP services with header injection)
+	// Register HTTP proxy handler (for plain HTTP services)
 	{
-		var httpRewriters []proxy.HTTPRewriter
-		for _, rw := range rewriters {
-			httpRewriters = append(httpRewriters, rw)
-		}
-		httpHandler := proxy.NewHTTPHandler(cfg.HTTPServices, httpRewriters)
+		httpHandler := proxy.NewHTTPHandler(cfg.HTTPServices)
 		p.RegisterHTTPHandler(httpHandler)
 		if len(cfg.HTTPServices) > 0 {
 			slog.Info("http proxy enabled", "services", cfg.HTTPServices)
@@ -157,32 +143,35 @@ func main() {
 	slog.Info("shutting down")
 }
 
-// buildRewriters instantiates rewriters from the gateway config.
-// Each entry in cfgs maps to a specific rewriter type.
-func buildRewriters(cfgs []proxy.RewriterConfig) []mitm.Rewriter {
-	var rewriters []mitm.Rewriter
-	for _, rc := range cfgs {
-		switch rc.Type {
+// registerBuiltinMiddleware instantiates built-in middleware from config.
+func registerBuiltinMiddleware(cfgs []proxy.MiddlewareConfig) {
+	for _, mc := range cfgs {
+		switch mc.Type {
 		case "auth-header":
-			rw, err := mitm.NewAuthHeaderRewriter(rc.Domains, rc.Header, rc.ValueFormat, rc.EnvVar)
-			if err != nil {
-				slog.Error("auth-header rewriter disabled", "domains", rc.Domains, "header", rc.Header, "error", err)
+			if err := mitm.RegisterAuthHeaderMiddleware(
+				"auth-header:"+mc.Domains[0],
+				mc.Domains, mc.Header, mc.ValueFormat, mc.EnvVar,
+			); err != nil {
+				slog.Error("auth-header middleware disabled", "domains", mc.Domains, "error", err)
 				continue
 			}
-			rewriters = append(rewriters, rw)
-			slog.Info("auth-header rewriter enabled", "domains", rc.Domains, "header", rc.Header)
+			slog.Info("auth-header middleware enabled", "domains", mc.Domains, "header", mc.Header)
 		case "oauth":
-			rw, err := mitm.NewOAuthRewriter(rc.Domains, rc.TokenFile)
-			if err != nil {
-				slog.Error("oauth rewriter disabled", "domains", rc.Domains, "error", err)
+			if err := mitm.RegisterOAuthMiddleware(
+				"oauth:"+mc.Domains[0],
+				mc.Domains, mc.TokenFile,
+			); err != nil {
+				slog.Error("oauth middleware disabled", "domains", mc.Domains, "error", err)
 				continue
 			}
-			rewriters = append(rewriters, rw)
-			slog.Info("oauth rewriter enabled", "domains", rc.Domains, "token_file", rc.TokenFile)
+			// Register initial token secrets for redaction.
+			for _, s := range mitm.OAuthSecrets(mc.TokenFile) {
+				gateway.RegisterSecret(s)
+			}
+			slog.Info("oauth middleware enabled", "domains", mc.Domains, "token_file", mc.TokenFile)
 		default:
-			slog.Warn("unknown rewriter type", "type", rc.Type)
+			slog.Warn("unknown middleware type", "type", mc.Type)
 		}
 	}
-	return rewriters
 }
 

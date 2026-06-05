@@ -56,7 +56,8 @@ func TestBuildGatewayConfig_WithMiddleware(t *testing.T) {
 	gwCfg := BuildGatewayConfig(cfg, nil)
 
 	require.Len(t, gwCfg.Middlewares, 1)
-	assert.Equal(t, "./middlewares/telegram.go", gwCfg.Middlewares[0])
+	assert.Equal(t, "./middlewares/telegram.go", gwCfg.Middlewares[0].Path)
+	assert.Equal(t, []string{"api.telegram.org"}, gwCfg.Middlewares[0].Domains)
 }
 
 func TestBuildGatewayConfig_NilContribs(t *testing.T) {

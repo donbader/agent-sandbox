@@ -29,7 +29,7 @@ func init() {
 `
 	require.NoError(t, os.WriteFile(filepath.Join(mwDir, "test.go"), []byte(mwContent), 0644))
 
-	err := CopyCustomMiddleware(projectDir, outDir, []string{"./middlewares/test.go"}, nil)
+	err := CopyCustomMiddleware(projectDir, outDir, []MiddlewareRef{{Path: "./middlewares/test.go", Domains: []string{"example.com"}}}, nil)
 	require.NoError(t, err)
 
 	// Verify file was copied to the custom middleware package dir
@@ -59,7 +59,7 @@ func init() {
 	t.Setenv("MY_BOT_TOKEN", "12345:ABCDEF")
 	opts := map[string]any{"bot_token": "${MY_BOT_TOKEN}"}
 
-	err := CopyCustomMiddleware(projectDir, outDir, []string{"./middlewares/rewrite.go"}, opts)
+	err := CopyCustomMiddleware(projectDir, outDir, []MiddlewareRef{{Path: "./middlewares/rewrite.go", Domains: []string{"api.telegram.org"}}}, opts)
 	require.NoError(t, err)
 
 	// Verify template was rendered with the actual secret value
@@ -79,7 +79,7 @@ func TestCopyCustomMiddleware_MissingFile(t *testing.T) {
 	projectDir := t.TempDir()
 	outDir := t.TempDir()
 
-	err := CopyCustomMiddleware(projectDir, outDir, []string{"./nonexistent.go"}, nil)
+	err := CopyCustomMiddleware(projectDir, outDir, []MiddlewareRef{{Path: "./nonexistent.go", Domains: []string{"example.com"}}}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "read middleware")
 }

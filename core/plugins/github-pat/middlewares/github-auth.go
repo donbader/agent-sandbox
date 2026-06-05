@@ -2,6 +2,7 @@ package custom
 
 import (
 	"encoding/base64"
+	"strings"
 
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
@@ -13,14 +14,21 @@ func init() {
 		gateway.RegisterSecret(token)
 	}
 
-	gateway.RegisterMiddleware("github-basic-auth", func(ctx *gateway.MiddlewareContext) error {
-		// Git uses Basic auth with format: x-access-token:<PAT>
-		if token == "" {
-			return nil
-		}
+	// Domains are baked at generate-time from service URL.
+	domains := strings.Split("{{ .domainsList }}", ",")
 
-		basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-		ctx.Request.Header.Set("Authorization", "Basic "+basic)
-		return nil
+	gateway.RegisterMiddleware(gateway.MiddlewareDef{
+		Name:    "github-basic-auth",
+		Domains: domains,
+		Func: func(ctx *gateway.MiddlewareContext) error {
+			// Git uses Basic auth with format: x-access-token:<PAT>
+			if token == "" {
+				return nil
+			}
+
+			basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+			ctx.Request.Header.Set("Authorization", "Basic "+basic)
+			return nil
+		},
 	})
 }

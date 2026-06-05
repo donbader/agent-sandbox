@@ -7,22 +7,19 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
+
+	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
 
-// HTTPHandler proxies plain HTTP requests, applying rewriters for header injection.
+// HTTPHandler proxies plain HTTP requests, applying middleware for header injection.
 type HTTPHandler struct {
-	services  map[string]string // host → host:port mapping
-	rewriters []HTTPRewriter
-}
-
-// HTTPRewriter modifies HTTP requests before forwarding (same interface as mitm.Rewriter).
-type HTTPRewriter interface {
-	RewriteRequest(req *http.Request) bool
+	services map[string]string // host → host:port mapping
 }
 
 // NewHTTPHandler creates an HTTP proxy handler for the given services.
-func NewHTTPHandler(services []HTTPService, rewriters []HTTPRewriter) *HTTPHandler {
+func NewHTTPHandler(services []HTTPService) *HTTPHandler {
 	svcMap := make(map[string]string, len(services))
 	for _, s := range services {
 		port := s.Port
@@ -32,13 +29,12 @@ func NewHTTPHandler(services []HTTPService, rewriters []HTTPRewriter) *HTTPHandl
 		svcMap[s.Host] = net.JoinHostPort(s.Host, port)
 	}
 	return &HTTPHandler{
-		services:  svcMap,
-		rewriters: rewriters,
+		services: svcMap,
 	}
 }
 
 // Handle processes an HTTP connection: reads requests in a loop (keep-alive),
-// applies rewriters, and forwards to the upstream service.
+// applies middleware, and forwards to the upstream service.
 func (h *HTTPHandler) Handle(clientConn net.Conn, initialData []byte) {
 	// Build a reader that replays the initial data then reads from the conn
 	var reader *bufio.Reader
@@ -72,7 +68,6 @@ func (h *HTTPHandler) Handle(clientConn net.Conn, initialData []byte) {
 			// For unknown hosts, try to forward using the Host header as-is
 			if req.Host != "" {
 				if _, _, err := net.SplitHostPort(req.Host); err != nil {
-					// No port specified, default to 80
 					target = net.JoinHostPort(req.Host, "80")
 				} else {
 					target = req.Host
@@ -84,10 +79,19 @@ func (h *HTTPHandler) Handle(clientConn net.Conn, initialData []byte) {
 			}
 		}
 
-		// Apply rewriters (header injection)
+		// Apply middleware (domain-scoped)
+		matching := gateway.MatchingMiddleware(req)
 		rewritten := false
-		for _, rw := range h.rewriters {
-			if rw.RewriteRequest(req) {
+		if len(matching) > 0 {
+			ctx := &gateway.MiddlewareContext{
+				Request: req,
+				Env:     os.Getenv,
+			}
+			for _, mw := range matching {
+				if err := mw.Func(ctx); err != nil {
+					slog.Error("http: middleware error", "name", mw.Name, "error", err)
+					continue
+				}
 				rewritten = true
 			}
 		}
@@ -128,7 +132,7 @@ func (h *HTTPHandler) forwardHTTP(req *http.Request, target string) (*http.Respo
 
 	client := &http.Client{
 		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
@@ -142,5 +146,4 @@ func sendHTTPError(conn net.Conn, status int, msg string) {
 		status, http.StatusText(status), len(msg), msg)
 	_, _ = io.WriteString(conn, resp)
 }
-
 
