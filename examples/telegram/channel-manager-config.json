@@ -1,6 +1,6 @@
 {
   "channel": "telegram",
-  "acp_command": ["codex", "--full-auto"],
+  "acp_command": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox"],
   "cwd": "/home/agent/workspace",
   "access_control": {
     "allowed_users": [],
