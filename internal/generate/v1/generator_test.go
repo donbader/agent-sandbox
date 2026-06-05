@@ -41,7 +41,7 @@ gateway:
       headers:
         Authorization: Bearer ${TOKEN}
 installations:
-  - plugin: my-tool
+  - plugin: ./plugins/my-tool
     options:
       version: "2.0.0"
 `
@@ -104,7 +104,7 @@ runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
 installations:
-  - plugin: github-pat
+  - plugin: "@builtin/github-pat"
     options:
       token: "ghp_test123"
 `
@@ -149,7 +149,7 @@ runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
 installations:
-  - plugin: my-sidecar
+  - plugin: ./plugins/my-sidecar
     options:
       port: "8080"
 `
