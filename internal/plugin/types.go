@@ -10,9 +10,11 @@ import (
 type PluginDef struct {
 	Name        string                  `yaml:"name"`
 	Requires    []string                `yaml:"requires"`
+	Assets      []string                `yaml:"assets"`
 	Options     map[string]OptionSchema `yaml:"options"`
 	Contributes Contributions           `yaml:"contributes"`
 	BaseDir     string                  `yaml:"-"` // directory where plugin.yaml lives (for resolving relative paths)
+	AssetPaths  map[string]string       `yaml:"-"` // resolved asset paths (set by generator after extraction)
 }
 
 type OptionSchema struct {

@@ -1,4 +1,7 @@
 name: agent-manager-acp
+assets:
+  - agent-manager/
+
 options:
   acp_command:
     type: array
@@ -8,7 +11,7 @@ options:
 contributes:
   runtime:
     extra_builds:
-      - "COPY agent-manager/ /opt/agent-manager-src/"
+      - "COPY {{ asset \"agent-manager\" }}/ /opt/agent-manager-src/"
       - "RUN cd /opt/agent-manager-src && npm install && npm run build && mkdir -p /opt/agent-manager && mv dist /opt/agent-manager/dist && mv node_modules /opt/agent-manager/node_modules && rm -rf /opt/agent-manager-src"
     ports:
       - "3100"

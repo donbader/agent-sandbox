@@ -24,7 +24,19 @@ func RenderContributions(p *PluginDef, opts map[string]any) (*Contributions, err
 		return nil, fmt.Errorf("marshal contributes: %w", err)
 	}
 
-	tmpl, err := template.New("contrib").Parse(string(contribYAML))
+	funcMap := template.FuncMap{
+		"asset": func(name string) string {
+			if p.AssetPaths != nil {
+				if path, ok := p.AssetPaths[name]; ok {
+					return path
+				}
+			}
+			// Fallback: return as-is (local plugins reference relative to project)
+			return name
+		},
+	}
+
+	tmpl, err := template.New("contrib").Funcs(funcMap).Parse(string(contribYAML))
 	if err != nil {
 		return nil, fmt.Errorf("parse contributes template: %w", err)
 	}

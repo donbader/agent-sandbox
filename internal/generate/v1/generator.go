@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/plugin"
@@ -59,16 +60,26 @@ func (g *Generator) Run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// 2. Resolve and render plugins
+	// 2. Create output directory (needed early for asset extraction)
+	buildDir := filepath.Join(g.projectDir, ".build")
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
+		return fmt.Errorf("create .build dir: %w", err)
+	}
+
+	// 3. Resolve plugins, extract assets, then render
 	resolver := plugin.NewResolver(g.projectDir, g.bundledFS)
 	var allContribs []*plugin.Contributions
-
 	resolved := make(map[string]*resolvedPlugin)
 
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
 		if err != nil {
 			return fmt.Errorf("resolve plugin %q: %w", inst.Plugin, err)
+		}
+
+		// Resolve asset paths before rendering so {{ asset "X" }} works in templates
+		if err := g.resolveAssetPaths(pluginDef, buildDir); err != nil {
+			return fmt.Errorf("resolve assets for plugin %q: %w", inst.Plugin, err)
 		}
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options)
@@ -98,23 +109,12 @@ func (g *Generator) Run() error {
 		allContribs = append(allContribs, rendered)
 	}
 
-	// 3. Validate plugin dependencies
+	// 4. Validate plugin dependencies
 	if err := validateRequires(resolved); err != nil {
 		return err
 	}
 
 	merged := plugin.MergeContributions(allContribs...)
-
-	// 4. Create output directory
-	buildDir := filepath.Join(g.projectDir, ".build")
-	if err := os.MkdirAll(buildDir, 0755); err != nil {
-		return fmt.Errorf("create .build dir: %w", err)
-	}
-
-	// 5. Extract bundled plugin assets into .build/ and rewrite COPY paths
-	if err := g.extractBundledPluginAssets(buildDir, resolved, merged); err != nil {
-		return fmt.Errorf("extract plugin assets: %w", err)
-	}
 
 	// 4. Generate Dockerfile + entrypoint.sh (transparent proxy bootstrap)
 	dockerfile, err := BuildDockerfile(cfg, merged)
@@ -321,66 +321,49 @@ func validateRequires(resolved map[string]*resolvedPlugin) error {
 	return nil
 }
 
-// extractBundledPluginAssets copies bundled plugin directories (other than plugin.yaml)
-// into .build/plugins/<name>/ so that COPY instructions in extra_builds can reference them.
-// It rewrites COPY paths in merged.Runtime.ExtraBuilds accordingly.
-func (g *Generator) extractBundledPluginAssets(buildDir string, resolved map[string]*resolvedPlugin, merged *plugin.Contributions) error {
-	if g.bundledFS == nil {
+// resolveAssetPaths extracts declared assets and populates pluginDef.AssetPaths.
+//
+// For bundled plugins: extracts from embedded FS to .build/plugins/<name>/<asset>/
+// For local plugins: resolves relative to plugin's BaseDir
+//
+// After this, {{ asset "X" }} in templates resolves to the correct Docker COPY path.
+func (g *Generator) resolveAssetPaths(p *plugin.PluginDef, buildDir string) error {
+	if len(p.Assets) == 0 {
 		return nil
 	}
 
-	for _, rp := range resolved {
-		// Only process bundled plugins (no BaseDir means it came from bundledFS)
-		if rp.def.BaseDir != "" {
-			continue
-		}
+	p.AssetPaths = make(map[string]string, len(p.Assets))
 
-		pluginName := rp.def.Name
-		// List entries in the plugin's bundled directory
-		entries, err := fs.ReadDir(g.bundledFS, pluginName)
-		if err != nil {
-			continue // plugin might not have extra assets
-		}
+	for _, assetName := range p.Assets {
+		// Trim trailing slash
+		name := strings.TrimSuffix(assetName, "/")
 
-		// Check if there are directories to extract (anything besides plugin.yaml)
-		var dirs []string
-		for _, entry := range entries {
-			if entry.IsDir() {
-				dirs = append(dirs, entry.Name())
+		if p.BaseDir != "" {
+			// Local plugin: asset is relative to plugin directory
+			p.AssetPaths[name] = filepath.Join(p.BaseDir, name)
+		} else {
+			// Bundled plugin: extract from embedded FS to .build/plugins/<plugin>/<asset>/
+			if g.bundledFS == nil {
+				return fmt.Errorf("plugin %q declares asset %q but no bundled FS available", p.Name, name)
 			}
-		}
-		if len(dirs) == 0 {
-			continue
-		}
 
-		// Extract each directory to .build/plugins/<plugin-name>/<dir>/
-		pluginBuildDir := filepath.Join(buildDir, "plugins", pluginName)
-		if err := os.MkdirAll(pluginBuildDir, 0755); err != nil {
-			return fmt.Errorf("mkdir plugin build dir: %w", err)
-		}
+			srcPath := p.Name + "/" + name
+			dstPath := filepath.Join(buildDir, "plugins", p.Name, name)
 
-		for _, dir := range dirs {
-			srcPath := pluginName + "/" + dir
-			dstPath := filepath.Join(pluginBuildDir, dir)
 			subFS, err := fs.Sub(g.bundledFS, srcPath)
 			if err != nil {
-				return fmt.Errorf("sub fs %s: %w", srcPath, err)
+				return fmt.Errorf("asset %q not found in bundled plugin %q", name, p.Name)
+			}
+
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+				return err
 			}
 			if err := extractFS(subFS, ".", dstPath); err != nil {
-				return fmt.Errorf("extract %s: %w", srcPath, err)
+				return fmt.Errorf("extract asset %q: %w", name, err)
 			}
-		}
 
-		// Rewrite COPY instructions in extra_builds:
-		// "COPY agent-manager/ ..." → "COPY .build/plugins/agent-manager-acp/agent-manager/ ..."
-		for _, dir := range dirs {
-			oldPrefix := "COPY " + dir + "/"
-			newPrefix := "COPY .build/plugins/" + pluginName + "/" + dir + "/"
-			for i, line := range merged.Runtime.ExtraBuilds {
-				if len(line) >= len(oldPrefix) && line[:len(oldPrefix)] == oldPrefix {
-					merged.Runtime.ExtraBuilds[i] = newPrefix + line[len(oldPrefix):]
-				}
-			}
+			// Path relative to Docker build context (project root)
+			p.AssetPaths[name] = ".build/plugins/" + p.Name + "/" + name
 		}
 	}
 

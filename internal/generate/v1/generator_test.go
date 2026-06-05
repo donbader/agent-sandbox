@@ -239,3 +239,55 @@ installations:
 	g := NewGenerator(projectDir, nil)
 	require.NoError(t, g.Run())
 }
+
+func TestGenerator_Run_BundledPluginAssets(t *testing.T) {
+	projectDir := t.TempDir()
+	coreDir := t.TempDir()
+
+	// Create a bundled plugin with an asset directory
+	pluginDir := filepath.Join(coreDir, "plugins", "my-bundled")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(`
+name: my-bundled
+assets:
+  - my-src/
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ asset \"my-src\" }}/ /opt/my-src/"
+      - "RUN echo built"
+`), 0644))
+
+	// Create the asset directory
+	assetDir := filepath.Join(pluginDir, "my-src")
+	require.NoError(t, os.MkdirAll(assetDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(assetDir, "main.ts"), []byte("console.log('hello')"), 0644))
+
+	// Create gateway source
+	gatewayDir := filepath.Join(coreDir, "gateway", "cmd", "gateway")
+	require.NoError(t, os.MkdirAll(gatewayDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(gatewayDir, "main.go"), []byte("package main\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(coreDir, "go.mod"), []byte("module test\n\ngo 1.26\n"), 0644))
+
+	agentYAML := `
+name: test-agent
+runtime:
+  image: "@builtin/codex"
+  entrypoint: ["sleep", "infinity"]
+installations:
+  - plugin: "@builtin/my-bundled"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	g := NewGeneratorWithCore(projectDir, coreDir)
+	require.NoError(t, g.Run())
+
+	// Verify asset was extracted to .build/plugins/my-bundled/my-src/
+	extractedFile := filepath.Join(projectDir, ".build", "plugins", "my-bundled", "my-src", "main.ts")
+	assert.FileExists(t, extractedFile)
+
+	// Verify Dockerfile references the extracted path
+	df, err := os.ReadFile(filepath.Join(projectDir, ".build", "Dockerfile"))
+	require.NoError(t, err)
+	assert.Contains(t, string(df), "COPY .build/plugins/my-bundled/my-src/ /opt/my-src/")
+}
