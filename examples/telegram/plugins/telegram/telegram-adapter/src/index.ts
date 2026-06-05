@@ -4,7 +4,7 @@
  * Connects to agent-manager via ACP over WebSocket, receives Telegram messages
  * via grammY, and forwards them as ACP prompts.
  */
-import { Bot } from "grammy";
+import { Bot, Context } from "grammy";
 import WebSocket from "ws";
 import pino from "pino";
 
@@ -12,6 +12,9 @@ const log = pino({ name: "telegram-adapter" });
 
 const AGENT_MANAGER_URL = process.env.AGENT_MANAGER_URL ?? "ws://agent:3100/acp";
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ALLOWED_USERS = (process.env.ALLOWED_USERS ?? "").split(",").filter(Boolean);
+const RECONNECT_DELAY_MS = 3000;
+const MAX_TELEGRAM_MSG_LENGTH = 4096;
 
 if (!BOT_TOKEN) {
   log.fatal("TELEGRAM_BOT_TOKEN is required");
@@ -27,144 +30,141 @@ interface JsonRpcMessage {
   error?: { code: number; message: string };
 }
 
+interface SessionUpdate {
+  sessionId: string;
+  update: {
+    sessionUpdate: string;
+    content?: { type: string; text?: string };
+  };
+}
+
 class TelegramAdapter {
   private bot: Bot;
   private ws: WebSocket | null = null;
   private nextId = 1;
   private pendingRequests = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-  private sessionId: string | null = null;
+  private sessionMap = new Map<number, string>(); // chatId → sessionId
+  private activeChatId: number | null = null;
+  private messageBuffer = "";
+  private flushTimer: NodeJS.Timeout | null = null;
+  private connected = false;
 
   constructor(token: string) {
     this.bot = new Bot(token);
   }
 
   async start(): Promise<void> {
-    // Connect to agent-manager via ACP WebSocket
     await this.connectAcp();
-
-    // Initialize ACP connection
     await this.acpInitialize();
 
-    // Set up Telegram bot handlers
     this.bot.on("message:text", async (ctx) => {
+      if (!this.isAllowed(ctx)) return;
       const text = ctx.message.text;
       const chatId = ctx.chat.id;
+      log.info({ chatId, text: text.slice(0, 50) }, "received message");
+      this.activeChatId = chatId;
 
-      log.info({ chatId, text: text.slice(0, 50) }, "received telegram message");
-
-      // Ensure we have a session
-      if (!this.sessionId) {
-        this.sessionId = await this.acpNewSession();
+      let sessionId = this.sessionMap.get(chatId);
+      if (!sessionId) {
+        sessionId = await this.acpNewSession();
+        this.sessionMap.set(chatId, sessionId);
       }
 
-      // Send prompt via ACP
-      await this.acpPrompt(this.sessionId, text);
+      try { await ctx.react("👀"); } catch { /* ignore */ }
+      await this.acpPrompt(sessionId, text);
     });
-
-    // Listen for ACP notifications (agent responses)
-    // These come back over the WebSocket and we forward to Telegram
-    this.setupNotificationHandler();
 
     await this.bot.start();
     log.info("telegram adapter started");
   }
 
+  private isAllowed(ctx: Context): boolean {
+    if (ALLOWED_USERS.length === 0) return true;
+    const username = ctx.from?.username;
+    if (!username) return false;
+    return ALLOWED_USERS.includes(`@${username}`) || ALLOWED_USERS.includes(username);
+  }
+
   private async connectAcp(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(AGENT_MANAGER_URL);
-      this.ws.on("open", () => {
-        log.info({ url: AGENT_MANAGER_URL }, "connected to agent-manager");
-        resolve();
-      });
-      this.ws.on("error", (err) => {
-        log.error({ err }, "WebSocket error");
-        reject(err);
-      });
-      this.ws.on("message", (data) => {
-        this.handleAcpMessage(JSON.parse(data.toString()));
-      });
-      this.ws.on("close", () => {
-        log.warn("WebSocket closed — agent-manager disconnected");
-        // TODO: reconnect logic
-      });
+      this.ws.on("open", () => { log.info({ url: AGENT_MANAGER_URL }, "connected"); this.connected = true; resolve(); });
+      this.ws.on("error", (err) => { log.error({ err }, "WS error"); if (!this.connected) reject(err); });
+      this.ws.on("message", (data) => { try { this.handleAcpMessage(JSON.parse(data.toString())); } catch {} });
+      this.ws.on("close", () => { this.connected = false; setTimeout(() => this.reconnect(), RECONNECT_DELAY_MS); });
     });
   }
 
+  private async reconnect(): Promise<void> {
+    try { await this.connectAcp(); await this.acpInitialize(); log.info("reconnected"); }
+    catch { setTimeout(() => this.reconnect(), RECONNECT_DELAY_MS); }
+  }
+
   private handleAcpMessage(msg: JsonRpcMessage): void {
-    // Response to a request we sent
     if (msg.id && this.pendingRequests.has(msg.id)) {
-      const pending = this.pendingRequests.get(msg.id)!;
+      const p = this.pendingRequests.get(msg.id)!;
       this.pendingRequests.delete(msg.id);
-      if (msg.error) {
-        pending.reject(new Error(msg.error.message));
-      } else {
-        pending.resolve(msg.result);
-      }
+      msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
       return;
     }
-
-    // Notification from agent (session/update)
     if (msg.method === "session/update") {
-      this.handleSessionUpdate(msg.params as Record<string, unknown>);
+      this.handleSessionUpdate(msg.params as unknown as SessionUpdate);
     }
   }
 
-  private handleSessionUpdate(_params: Record<string, unknown>): void {
-    // TODO: Parse session update, extract agent message chunks, send to Telegram
-    log.debug({ params: _params }, "session update notification");
+  private handleSessionUpdate(params: SessionUpdate): void {
+    const { update } = params;
+    if (update.sessionUpdate === "agent_message_chunk" && update.content?.text) {
+      this.messageBuffer += update.content.text;
+      this.scheduleFlush();
+    }
   }
 
-  private setupNotificationHandler(): void {
-    // Notifications are handled in handleAcpMessage above
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => this.flushMessage(), 500);
+  }
+
+  private async flushMessage(): Promise<void> {
+    this.flushTimer = null;
+    if (!this.messageBuffer || !this.activeChatId) return;
+    const text = this.messageBuffer;
+    this.messageBuffer = "";
+    const chunks = text.length <= MAX_TELEGRAM_MSG_LENGTH ? [text] : [];
+    if (chunks.length === 0) {
+      let r = text;
+      while (r.length > 0) { chunks.push(r.slice(0, MAX_TELEGRAM_MSG_LENGTH)); r = r.slice(MAX_TELEGRAM_MSG_LENGTH); }
+    }
+    for (const chunk of chunks) {
+      try { await this.bot.api.sendMessage(this.activeChatId, chunk, { parse_mode: "Markdown" }); }
+      catch { try { await this.bot.api.sendMessage(this.activeChatId!, chunk); } catch (e) { log.error({ err: e }, "send failed"); } }
+    }
   }
 
   private async acpSend(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     const id = this.nextId++;
     const msg: JsonRpcMessage = { jsonrpc: "2.0", id, method, params };
-
-    return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-      this.ws!.send(JSON.stringify(msg));
-    });
+    return new Promise((resolve, reject) => { this.pendingRequests.set(id, { resolve, reject }); this.ws!.send(JSON.stringify(msg)); });
   }
 
   private async acpInitialize(): Promise<void> {
-    const result = await this.acpSend("initialize", {
-      protocolVersion: "1",
-      clientCapabilities: {},
-    });
+    const result = await this.acpSend("initialize", { protocolVersion: "1", clientCapabilities: {} });
     log.info({ result }, "ACP initialized");
   }
 
   private async acpNewSession(): Promise<string> {
-    const result = await this.acpSend("session/new", {
-      cwd: "/home/agent/workspace",
-    }) as { sessionId: string };
-    log.info({ sessionId: result.sessionId }, "session created");
+    const result = await this.acpSend("session/new", { cwd: "/home/agent/workspace" }) as { sessionId: string };
     return result.sessionId;
   }
 
   private async acpPrompt(sessionId: string, text: string): Promise<void> {
-    await this.acpSend("session/prompt", {
-      sessionId,
-      prompt: [{ type: "text", text }],
-    });
+    await this.acpSend("session/prompt", { sessionId, prompt: [{ type: "text", text }] });
+    await this.flushMessage();
   }
 
-  stop(): void {
-    this.bot.stop();
-    this.ws?.close();
-  }
+  stop(): void { this.bot.stop(); this.ws?.close(); }
 }
 
 const adapter = new TelegramAdapter(BOT_TOKEN);
-
-adapter.start().catch((err) => {
-  log.fatal({ error: err }, "fatal error");
-  process.exit(1);
-});
-
-process.on("SIGTERM", () => {
-  adapter.stop();
-  process.exit(0);
-});
+adapter.start().catch((err) => { log.fatal({ error: err }, "fatal"); process.exit(1); });
+process.on("SIGTERM", () => { adapter.stop(); process.exit(0); });
