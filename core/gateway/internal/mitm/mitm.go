@@ -17,12 +17,6 @@ import (
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
 
-// SecretProvider is implemented by components that hold sensitive values (e.g. tokens)
-// that should be redacted from logs.
-type SecretProvider interface {
-	Secrets() []string
-}
-
 // Handler implements proxy.RequestHandler for MITM domains.
 // It terminates TLS using the sandbox CA, parses HTTP requests,
 // applies middleware, and forwards to the real destination.

@@ -146,6 +146,10 @@ func main() {
 // registerBuiltinMiddleware instantiates built-in middleware from config.
 func registerBuiltinMiddleware(cfgs []proxy.MiddlewareConfig) {
 	for _, mc := range cfgs {
+		if len(mc.Domains) == 0 {
+			slog.Warn("middleware entry has no domains, skipping", "type", mc.Type)
+			continue
+		}
 		switch mc.Type {
 		case "auth-header":
 			if err := mitm.RegisterAuthHeaderMiddleware(
