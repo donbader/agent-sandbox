@@ -68,6 +68,16 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 				})
 			}
 		}
+		// Collect auth-header entries from declared headers
+		for header, value := range svc.Headers {
+			ev, valueFormat := envvar.ParseTemplate(value)
+			out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
+				Domain:      domain,
+				Header:      header,
+				EnvVar:      ev,
+				ValueFormat: valueFormat,
+			})
+		}
 	}
 
 	// Plugin-contributed services
@@ -86,6 +96,16 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 						Domains: []string{domain},
 					})
 				}
+			}
+			// Collect auth-header entries from plugin-contributed headers
+			for header, value := range svc.Headers {
+				ev, valueFormat := envvar.ParseTemplate(value)
+				out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
+					Domain:      domain,
+					Header:      header,
+					EnvVar:      ev,
+					ValueFormat: valueFormat,
+				})
 			}
 		}
 	}
@@ -106,17 +126,6 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			continue
 		}
 		rc.MITMDomains = append(rc.MITMDomains, domain)
-
-		// Collect auth-header entries (generated as .go files, not runtime YAML)
-		for header, value := range svc.Headers {
-			ev, valueFormat := envvar.ParseTemplate(value)
-			gwCfg.AuthHeaders = append(gwCfg.AuthHeaders, AuthHeaderEntry{
-				Domain:      domain,
-				Header:      header,
-				EnvVar:      ev,
-				ValueFormat: valueFormat,
-			})
-		}
 	}
 
 	data, err := yaml.Marshal(rc)
