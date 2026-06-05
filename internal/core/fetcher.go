@@ -59,6 +59,5 @@ func cacheBase() string {
 }
 
 func download(version, destDir string) error {
-	// TODO: implement GitHub release tarball download
 	return fmt.Errorf("remote fetch not yet implemented for version %s (use local core)", version)
 }

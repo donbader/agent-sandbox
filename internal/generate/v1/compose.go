@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/donbader/agent-sandbox/internal/config"
+	"github.com/donbader/agent-sandbox/internal/envvar"
 	"github.com/donbader/agent-sandbox/internal/plugin"
 	"gopkg.in/yaml.v3"
 )
@@ -85,36 +86,7 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 	// Sidecar services from plugins
 	if contribs != nil {
 		for name, svc := range contribs.Sidecar.Services {
-			sidecarSvc := map[string]any{
-				"networks": []string{"sandbox"},
-			}
-			if svc.Build != "" {
-				// Make build path relative to .build/ directory
-				relPath, err := filepath.Rel(buildDir, svc.Build)
-				if err != nil {
-					relPath = svc.Build
-				}
-				sidecarSvc["build"] = relPath
-			}
-			if svc.Image != "" {
-				sidecarSvc["image"] = svc.Image
-			}
-			if len(svc.Environment) > 0 {
-				sidecarSvc["environment"] = svc.Environment
-			}
-			if len(svc.Volumes) > 0 {
-				sidecarSvc["volumes"] = svc.Volumes
-			}
-			if len(svc.Ports) > 0 {
-				sidecarSvc["ports"] = svc.Ports
-			}
-			if svc.Healthcheck != nil {
-				sidecarSvc["healthcheck"] = svc.Healthcheck
-			}
-			if svc.DependsOn != nil {
-				sidecarSvc["depends_on"] = svc.DependsOn
-			}
-			compose.Services[name] = sidecarSvc
+			compose.Services[name] = buildSidecarService(svc, buildDir)
 		}
 	}
 
@@ -149,6 +121,39 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 	return string(data), nil
 }
 
+// buildSidecarService constructs the compose service definition for a plugin sidecar.
+func buildSidecarService(svc plugin.ComposeService, buildDir string) map[string]any {
+	s := map[string]any{
+		"networks": []string{"sandbox"},
+	}
+	if svc.Build != "" {
+		relPath, err := filepath.Rel(buildDir, svc.Build)
+		if err != nil {
+			relPath = svc.Build
+		}
+		s["build"] = relPath
+	}
+	if svc.Image != "" {
+		s["image"] = svc.Image
+	}
+	if len(svc.Environment) > 0 {
+		s["environment"] = svc.Environment
+	}
+	if len(svc.Volumes) > 0 {
+		s["volumes"] = svc.Volumes
+	}
+	if len(svc.Ports) > 0 {
+		s["ports"] = svc.Ports
+	}
+	if svc.Healthcheck != nil {
+		s["healthcheck"] = svc.Healthcheck
+	}
+	if svc.DependsOn != nil {
+		s["depends_on"] = svc.DependsOn
+	}
+	return s
+}
+
 func extractVolumeName(volume string) string {
 	// Named volumes have format "name:/path" (no leading . or /)
 	for i, c := range volume {
@@ -173,8 +178,8 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 	// From user gateway config
 	for _, svc := range cfg.Gateway.Services {
 		for _, value := range svc.Headers {
-			if envVar := extractEnvVar(value); envVar != "" {
-				seen[envVar] = true
+			if ev := envvar.Extract(value); ev != "" {
+				seen[ev] = true
 			}
 		}
 	}
@@ -183,8 +188,8 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 	if contribs != nil {
 		for _, svc := range contribs.Gateway.Services {
 			for _, value := range svc.Headers {
-				if envVar := extractEnvVar(value); envVar != "" {
-					seen[envVar] = true
+				if ev := envvar.Extract(value); ev != "" {
+					seen[ev] = true
 				}
 			}
 		}
@@ -197,22 +202,3 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 	return envVars
 }
 
-// extractEnvVar finds ${VAR_NAME} in a string and returns the var name.
-func extractEnvVar(s string) string {
-	start := -1
-	for i := 0; i < len(s)-1; i++ {
-		if s[i] == '$' && s[i+1] == '{' {
-			start = i + 2
-			break
-		}
-	}
-	if start == -1 {
-		return ""
-	}
-	for i := start; i < len(s); i++ {
-		if s[i] == '}' {
-			return s[start:i]
-		}
-	}
-	return ""
-}

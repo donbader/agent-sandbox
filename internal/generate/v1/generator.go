@@ -272,29 +272,5 @@ func extractFS(srcFS fs.FS, root, dest string) error {
 
 // copyDir recursively copies a directory from src to dst.
 func copyDir(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		destPath := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(destPath, 0755)
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			return err
-		}
-		return os.WriteFile(destPath, data, 0644)
-	})
+	return extractFS(os.DirFS(src), ".", dst)
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/donbader/agent-sandbox/internal/config"
+	"github.com/donbader/agent-sandbox/internal/envvar"
 	"github.com/donbader/agent-sandbox/internal/plugin"
 	"gopkg.in/yaml.v3"
 )
@@ -109,12 +110,12 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 		// For each header, create an auth-header middleware entry
 		for header, value := range svc.Headers {
 			// Value might be "Bearer ${ENV_VAR}" — extract env var reference
-			envVar, valueFormat := parseHeaderValue(value)
+			ev, valueFormat := envvar.ParseTemplate(value)
 			rc.Middlewares = append(rc.Middlewares, gatewayMiddlewareConfig{
 				Type:        "auth-header",
 				Domains:     []string{domain},
 				Header:      header,
-				EnvVar:      envVar,
+				EnvVar:      ev,
 				ValueFormat: valueFormat,
 			})
 		}
@@ -144,38 +145,4 @@ func extractDomain(rawURL string) string {
 		return ""
 	}
 	return u.Hostname()
-}
-
-// parseHeaderValue extracts env var name and value format from a header value template.
-// Examples:
-//   "Bearer ${TOKEN}" → envVar="TOKEN", valueFormat="Bearer ${value}"
-//   "${API_KEY}" → envVar="API_KEY", valueFormat="${value}"
-//   "static-value" → envVar="", valueFormat=""
-func parseHeaderValue(value string) (envVar, valueFormat string) {
-	// Find ${...} pattern
-	start := -1
-	for i := 0; i < len(value)-1; i++ {
-		if value[i] == '$' && value[i+1] == '{' {
-			start = i
-			break
-		}
-	}
-	if start == -1 {
-		return "", ""
-	}
-	end := -1
-	for i := start + 2; i < len(value); i++ {
-		if value[i] == '}' {
-			end = i
-			break
-		}
-	}
-	if end == -1 {
-		return "", ""
-	}
-
-	envVar = value[start+2 : end]
-	// Replace the ${VAR} with ${value} for the gateway's value_format
-	valueFormat = value[:start] + "${value}" + value[end+1:]
-	return envVar, valueFormat
 }
