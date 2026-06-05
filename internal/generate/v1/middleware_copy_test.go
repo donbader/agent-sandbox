@@ -83,3 +83,83 @@ func TestCopyCustomMiddleware_MissingFile(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "read middleware")
 }
+
+func TestGenerateAuthHeaderMiddleware(t *testing.T) {
+	outDir := t.TempDir()
+	t.Setenv("TEST_API_KEY", "sk-secret-123")
+
+	entries := []AuthHeaderEntry{
+		{
+			Domain:      "api.example.com",
+			Header:      "Authorization",
+			EnvVar:      "TEST_API_KEY",
+			ValueFormat: "Bearer ${value}",
+		},
+	}
+
+	err := GenerateAuthHeaderMiddleware(outDir, entries)
+	require.NoError(t, err)
+
+	// Verify generated file exists and contains expected code
+	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "auth_header_api_example_com_0.go")
+	data, err := os.ReadFile(dest)
+	require.NoError(t, err)
+
+	content := string(data)
+	assert.Contains(t, content, "package custom")
+	assert.Contains(t, content, `gateway.RegisterSecret`)
+	assert.Contains(t, content, `"Bearer sk-secret-123"`)
+	assert.Contains(t, content, `"api.example.com"`)
+	assert.Contains(t, content, `"Authorization"`)
+}
+
+func TestGenerateAuthHeaderMiddleware_Base64Basic(t *testing.T) {
+	outDir := t.TempDir()
+	t.Setenv("TEST_GH_TOKEN", "ghp_abc123")
+
+	entries := []AuthHeaderEntry{
+		{
+			Domain:      "github.com",
+			Header:      "Authorization",
+			EnvVar:      "TEST_GH_TOKEN",
+			ValueFormat: "Basic ${base64_basic}",
+		},
+	}
+
+	err := GenerateAuthHeaderMiddleware(outDir, entries)
+	require.NoError(t, err)
+
+	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "auth_header_github_com_0.go")
+	data, err := os.ReadFile(dest)
+	require.NoError(t, err)
+
+	content := string(data)
+	assert.Contains(t, content, "Basic ")
+	assert.NotContains(t, content, "${base64_basic}")
+}
+
+func TestGenerateAuthHeaderMiddleware_SkipsMissingEnvVar(t *testing.T) {
+	outDir := t.TempDir()
+
+	entries := []AuthHeaderEntry{
+		{
+			Domain:      "api.example.com",
+			Header:      "Authorization",
+			EnvVar:      "NONEXISTENT_VAR_12345",
+			ValueFormat: "Bearer ${value}",
+		},
+	}
+
+	err := GenerateAuthHeaderMiddleware(outDir, entries)
+	require.NoError(t, err)
+
+	// No file should be generated for missing env var
+	dest := filepath.Join(outDir, "gateway-src", "middlewares", "custom", "auth_header_api_example_com_0.go")
+	_, err = os.Stat(dest)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestGenerateAuthHeaderMiddleware_Empty(t *testing.T) {
+	err := GenerateAuthHeaderMiddleware("", nil)
+	require.NoError(t, err)
+}
