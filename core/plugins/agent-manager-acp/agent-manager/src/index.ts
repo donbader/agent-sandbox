@@ -11,6 +11,7 @@ interface ManagerConfig {
 }
 
 async function main(): Promise<void> {
+  const port = parseInt(process.env.AGENT_MANAGER_PORT ?? "3100", 10);
   const configPath = process.env.AGENT_MANAGER_CONFIG ?? "/opt/agent-manager/config.json";
   const raw = readFileSync(configPath, "utf-8");
   const config: ManagerConfig = JSON.parse(raw);
@@ -55,11 +56,11 @@ async function main(): Promise<void> {
   log.info("agent ACP authenticated");
 
   // Upstream: expose ACP over HTTP/WebSocket for channel adapters
-  const server = new AcpServer(agent, { port: 3100 });
+  const server = new AcpServer(agent, { port });
   server.setInitResult(initResp.result);
   await server.start();
 
-  log.info({ port: 3100 }, "agent manager ready — ACP endpoint available");
+  log.info({ port }, "agent manager ready — ACP endpoint available");
 
   // Graceful shutdown
   process.on("SIGTERM", async () => {

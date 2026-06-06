@@ -15,6 +15,8 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_USERS = (process.env.ALLOWED_USERS ?? "").split(",").filter(Boolean);
 const RECONNECT_DELAY_MS = 3000;
 const MAX_TELEGRAM_MSG_LENGTH = 4096;
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 1000;
 
 if (!BOT_TOKEN) {
   log.fatal("TELEGRAM_BOT_TOKEN is required");
@@ -68,14 +70,30 @@ class TelegramAdapter {
       log.info({ chatId, text: text.slice(0, 50) }, "received message");
       this.activeChatId = chatId;
 
-      let sessionId = this.sessionMap.get(chatId);
-      if (!sessionId) {
-        sessionId = await this.acpNewSession();
-        this.sessionMap.set(chatId, sessionId);
-      }
-
       try { await ctx.react("👀"); } catch { /* ignore */ }
-      await this.acpPrompt(sessionId, text);
+
+      try {
+        await this.withRetry(async () => {
+          let sessionId = this.sessionMap.get(chatId);
+          if (!sessionId) {
+            try {
+              sessionId = await this.acpNewSession();
+            } catch (err) {
+              this.sessionMap.delete(chatId);
+              throw err;
+            }
+            this.sessionMap.set(chatId, sessionId);
+          }
+          await this.acpPrompt(sessionId, text);
+        });
+      } catch (err) {
+        log.error({ err, chatId }, "all retries exhausted");
+        try {
+          await ctx.reply("Sorry, the agent is temporarily unavailable. Please try again.");
+        } catch (replyErr) {
+          log.error({ err: replyErr, chatId }, "failed to send error reply");
+        }
+      }
     });
 
     await this.bot.start();
@@ -87,6 +105,23 @@ class TelegramAdapter {
     const username = ctx.from?.username;
     if (!username) return false;
     return ALLOWED_USERS.includes(`@${username}`) || ALLOWED_USERS.includes(username);
+  }
+
+  private async withRetry<T>(fn: () => Promise<T>, retries = RETRY_ATTEMPTS): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (attempt < retries - 1) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          log.warn({ attempt: attempt + 1, retries, delay }, "retrying after failure");
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+    }
+    throw lastErr;
   }
 
   private async connectAcp(): Promise<void> {
@@ -157,7 +192,7 @@ class TelegramAdapter {
   }
 
   private async acpNewSession(): Promise<string> {
-    const result = await this.acpSend("session/new", { cwd: "/home/agent/workspace", mcpServers: [] }) as { sessionId: string };
+    const result = await this.acpSend("session/new", { cwd: "/home/agent/workspace" }) as { sessionId: string };
     return result.sessionId;
   }
 
