@@ -1,0 +1,3 @@
+name: agent-002
+runtime:
+  image: "@builtin/claude-code"

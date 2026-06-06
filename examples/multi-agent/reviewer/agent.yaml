@@ -1,4 +1,0 @@
-# Reviewer agent — reviews PRs, runs linters
-name: reviewer
-runtime:
-  image: "@builtin/claude-code"

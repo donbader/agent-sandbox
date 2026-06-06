@@ -1,6 +1,0 @@
-# Coder agent — writes code, runs tests
-name: coder
-runtime:
-  image: "@builtin/codex"
-  volumes:
-    - "coder-workspace:/home/agent/workspace"

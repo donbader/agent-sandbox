@@ -1,8 +1,8 @@
 # Multi-agent fleet example
 # Run: agent-sandbox generate -C examples/multi-agent
 agents:
-  - coder
-  - reviewer
+  - agent-001
+  - agent-002
 
 shared:
   gateway:

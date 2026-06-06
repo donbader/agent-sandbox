@@ -1,0 +1,5 @@
+name: agent-001
+runtime:
+  image: "@builtin/codex"
+  volumes:
+    - "agent-001-data:/home/agent/workspace"
