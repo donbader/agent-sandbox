@@ -1,0 +1,10 @@
+model = "claude-sonnet-4.6"
+model_provider = "agent_gateway"
+
+model_catalog_json = "/home/agent/.codex/models.json"
+
+[model_providers.agent_gateway]
+name = "Agent Gateway"
+base_url = "https://agent-gateway.stx-ai.net/kiro/v1"
+http_headers = { Authorization = "Bearer dummy" }
+wire_api = "responses"

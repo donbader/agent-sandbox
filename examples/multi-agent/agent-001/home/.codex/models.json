@@ -1,0 +1,30 @@
+{
+  "models": [
+    {
+      "slug": "claude-sonnet-4.6",
+      "display_name": "Claude Sonnet 4.6",
+      "description": "Claude Sonnet 4.6 via Agent Gateway",
+      "supported_reasoning_levels": [],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 9,
+      "upgrade": null,
+      "base_instructions": "You are a helpful coding assistant.",
+      "model_messages": null,
+      "supports_reasoning_summaries": false,
+      "default_reasoning_summary": "auto",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": { "mode": "bytes", "limit": 10000 },
+      "supports_parallel_tool_calls": true,
+      "supports_image_detail_original": false,
+      "context_window": 200000,
+      "auto_compact_token_limit": null,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": ["text", "image"]
+    }
+  ]
+}
