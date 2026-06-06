@@ -284,14 +284,28 @@ func TestForwarder_PipesData(t *testing.T) {
 		}
 	}()
 
-	fwd := NewForwarder("127.0.0.1:0", echoLn.Addr().String())
+	// Get a free port for the forwarder
+	tmpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	fwdAddr := tmpLn.Addr().String()
+	_ = tmpLn.Close()
+
+	fwd := NewForwarder(fwdAddr, echoLn.Addr().String())
 	go func() { _ = fwd.ListenAndServe() }()
 	defer func() { _ = fwd.Close() }()
 
-	time.Sleep(50 * time.Millisecond)
-	require.NotNil(t, fwd.listener)
+	// Wait for forwarder to be ready (no race — we use known address)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.DialTimeout("tcp", fwdAddr, 100*time.Millisecond)
+		if err == nil {
+			_ = c.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
-	conn, err := net.DialTimeout("tcp", fwd.listener.Addr().String(), 2*time.Second)
+	conn, err := net.DialTimeout("tcp", fwdAddr, 2*time.Second)
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 
