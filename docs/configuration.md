@@ -52,6 +52,41 @@ my-agent/
   .env                ← secrets
 ```
 
+## Container Runtime
+
+By default, agent-sandbox uses Docker. To use Podman instead:
+
+```yaml
+# agent.yaml
+runtime_engine: podman
+```
+
+Or set the environment variable (takes priority over config):
+
+```bash
+AGENT_SANDBOX_RUNTIME=podman agent-sandbox compose up --build
+```
+
+| Runtime | Compose command | Notes |
+|---------|----------------|-------|
+| docker (default) | `docker compose` | Standard Docker Engine |
+| podman | `podman compose` | Rootless by default, `userns_mode: keep-id` auto-applied |
+
+## Gateway Services
+
+Services proxied through the gateway use plain `host:port` for internal sidecars or full HTTPS URLs for external endpoints:
+
+```yaml
+gateway:
+  services:
+    - url: https://api.github.com        # external HTTPS (MITM'd for credential injection)
+    - url: sidecar:8080                   # internal service on compose network
+      headers:
+        Authorization: Bearer ${TOKEN}
+```
+
+> **Migration note:** The `docker://` URL scheme is deprecated. Replace `docker://svc:port` with `svc:port`.
+
 ```yaml
 # agent.yaml
 name: coder
