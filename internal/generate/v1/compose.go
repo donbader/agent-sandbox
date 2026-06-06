@@ -42,7 +42,8 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"context":    "..",
 			"dockerfile": ".build/Dockerfile",
 		},
-		"cap_add": []string{"NET_ADMIN"},
+		"cap_drop": []string{"ALL"},
+		"cap_add":  []string{"NET_ADMIN"},
 		"depends_on": map[string]any{
 			gatewayName: map[string]any{
 				"condition": "service_healthy",
@@ -50,6 +51,10 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 		},
 		"networks": []string{"sandbox"},
 		"volumes":  agentVolumes,
+	}
+	// Podman rootless requires userns_mode: keep-id for file ownership mapping
+	if cfg.RuntimeEngine == "podman" {
+		agentSvc["userns_mode"] = "keep-id"
 	}
 	// Expose ports from plugin contributions (e.g. SSH)
 	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
@@ -65,6 +70,8 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"context":    "./gateway-src",
 			"dockerfile": "Dockerfile",
 		},
+		"cap_drop": []string{"ALL"},
+		"cap_add":  []string{"NET_ADMIN", "NET_BIND_SERVICE"},
 		"networks": map[string]any{
 			"sandbox": map[string]any{
 				"aliases": []string{"gateway"},
