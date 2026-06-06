@@ -1,6 +1,7 @@
 # Minimal agent config for sandbox integration tests.
 # Uses gateway services to trigger MITM proxy mode.
 name: sandbox-test
+core_version: latest
 log_level: debug
 runtime:
   image: "@builtin/codex"
