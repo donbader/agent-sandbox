@@ -15,7 +15,7 @@ func getFreeUDPAddr(t *testing.T) string {
 	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := conn.LocalAddr().String()
-	conn.Close()
+	_ = conn.Close()
 	return addr
 }
 
@@ -27,7 +27,7 @@ func startMockDNS(t *testing.T, handler func([]byte) []byte) string {
 	udpAddr, _ := net.ResolveUDPAddr("udp", addr)
 	conn, err := net.ListenUDP("udp", udpAddr)
 	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	go func() {
 		buf := make([]byte, 4096)
@@ -86,7 +86,7 @@ func sendQuery(t *testing.T, addr string, query []byte, deadline time.Duration) 
 	t.Helper()
 	conn, err := net.Dial("udp", addr)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	require.NoError(t, conn.SetDeadline(time.Now().Add(deadline)))
 
