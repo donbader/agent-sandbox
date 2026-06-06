@@ -58,7 +58,7 @@ func TestProxy_HTTPDetection(t *testing.T) {
 	p.RegisterHTTPHandler(handler)
 
 	client, server := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -75,7 +75,7 @@ func TestProxy_HTTPDetection(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	_ = resp.Body.Close()
-	client.Close()
+	_ = client.Close()
 	wg.Wait()
 }
 
@@ -88,7 +88,7 @@ func TestProxy_TLSDetection_HandlerMatch(t *testing.T) {
 	p.RegisterHandler(handler)
 
 	client, server := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	go p.handleConn(&pipeConn{server})
 
@@ -123,7 +123,7 @@ func TestProxy_TLSDetection_NoSNI(t *testing.T) {
 	data := []byte{0x16, 0x03, 0x01, 0x00, 0x05, 0x01, 0x00, 0x00, 0x01, 0x00}
 	_, err := client.Write(data)
 	require.NoError(t, err)
-	client.Close()
+	_ = client.Close()
 
 	select {
 	case <-done:
@@ -151,7 +151,7 @@ func TestProxy_NoHTTPHandler_DropsConnection(t *testing.T) {
 
 	_, err := client.Write([]byte("GET / HTTP/1.1\r\nHost: test.local\r\n\r\n"))
 	require.NoError(t, err)
-	client.Close()
+	_ = client.Close()
 
 	select {
 	case <-done:
@@ -184,7 +184,7 @@ func TestHTTPHandler_MiddlewareApplied(t *testing.T) {
 	handler.services["injected.local"] = upAddr
 
 	client, server := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -200,7 +200,7 @@ func TestHTTPHandler_MiddlewareApplied(t *testing.T) {
 	resp, err := http.ReadResponse(bufio.NewReader(client), nil)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-	client.Close()
+	_ = client.Close()
 	wg.Wait()
 
 	assert.Equal(t, "secret-token", receivedHeader)
@@ -219,7 +219,7 @@ func TestHTTPHandler_UnknownHost_ForwardsWithHostHeader(t *testing.T) {
 	handler := NewHTTPHandler([]HTTPService{})
 
 	client, server := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -236,7 +236,7 @@ func TestHTTPHandler_UnknownHost_ForwardsWithHostHeader(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	_ = resp.Body.Close()
-	client.Close()
+	_ = client.Close()
 	wg.Wait()
 }
 
@@ -262,14 +262,14 @@ func TestHTTPHandler_MissingHost_Returns400(t *testing.T) {
 
 	assert.Contains(t, response, "400")
 	assert.Contains(t, response, "missing Host header")
-	client.Close()
+	_ = client.Close()
 	wg.Wait()
 }
 
 func TestForwarder_PipesData(t *testing.T) {
 	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer echoLn.Close()
+	defer func() { _ = echoLn.Close() }()
 
 	go func() {
 		for {
@@ -278,7 +278,7 @@ func TestForwarder_PipesData(t *testing.T) {
 				return
 			}
 			go func() {
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 				_, _ = io.Copy(conn, conn)
 			}()
 		}
@@ -286,14 +286,14 @@ func TestForwarder_PipesData(t *testing.T) {
 
 	fwd := NewForwarder("127.0.0.1:0", echoLn.Addr().String())
 	go func() { _ = fwd.ListenAndServe() }()
-	defer fwd.Close()
+	defer func() { _ = fwd.Close() }()
 
 	time.Sleep(50 * time.Millisecond)
 	require.NotNil(t, fwd.listener)
 
 	conn, err := net.DialTimeout("tcp", fwd.listener.Addr().String(), 2*time.Second)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	msg := "hello forwarder"
 	_, err = conn.Write([]byte(msg))
