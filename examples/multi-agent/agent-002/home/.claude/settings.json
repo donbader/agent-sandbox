@@ -8,11 +8,8 @@
     ],
     "deny": []
   },
-  "apiKeyHelper": "echo dummy",
-  "primaryProvider": "custom",
-  "providers": {
-    "custom": {
-      "baseURL": "https://agent-gateway.stx-ai.net/anthropic/v1"
-    }
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://agent-gateway.stx-ai.net/anthropic",
+    "ANTHROPIC_API_KEY": "dummy"
   }
 }
