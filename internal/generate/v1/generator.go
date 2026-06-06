@@ -197,6 +197,19 @@ func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDi
 					rendered.Sidecar.Services[name] = svc
 				}
 			}
+		} else if g.bundledFS != nil {
+			// Bundled plugin: extract middleware files from embedded FS to buildDir
+			for i, svc := range rendered.Gateway.Services {
+				for j, mw := range svc.Middlewares {
+					if mw.Custom != "" {
+						extractedPath, err := g.extractBundledMiddleware(pluginDef.Name, mw.Custom, buildDir)
+						if err != nil {
+							return nil, fmt.Errorf("extract middleware %q from plugin %q: %w", mw.Custom, inst.Plugin, err)
+						}
+						rendered.Gateway.Services[i].Middlewares[j].Custom = extractedPath
+					}
+				}
+			}
 		}
 
 		resolved[inst.Plugin] = &resolvedPlugin{def: pluginDef, rendered: rendered}
@@ -229,7 +242,7 @@ func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDi
 	}
 	if len(gwCfg.Middlewares) > 0 {
 		allOpts := collectAllOptions(cfg)
-		if err := CopyCustomMiddleware(agentDir, buildDir, gwCfg.Middlewares, allOpts); err != nil {
+		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares, allOpts); err != nil {
 			return nil, fmt.Errorf("copy middleware: %w", err)
 		}
 	}
