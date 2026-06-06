@@ -101,12 +101,23 @@ func sendQuery(t *testing.T, addr string, query []byte, deadline time.Duration) 
 	return buf[:n], nil
 }
 
+// setUpstreams safely replaces upstreamServers and returns a restore func.
+func setUpstreams(t *testing.T, addrs []string) {
+	t.Helper()
+	upstreamMu.Lock()
+	orig := upstreamServers
+	upstreamServers = addrs
+	upstreamMu.Unlock()
+	t.Cleanup(func() {
+		upstreamMu.Lock()
+		upstreamServers = orig
+		upstreamMu.Unlock()
+	})
+}
+
 // TestDNS_ForwardsQuery verifies that the server forwards a query to the upstream
 // and returns the upstream's response to the client with matching transaction ID.
 func TestDNS_ForwardsQuery(t *testing.T) {
-	orig := upstreamServers
-	defer func() { upstreamServers = orig }()
-
 	mockAddr := startMockDNS(t, func(query []byte) []byte {
 		if len(query) < 12 {
 			return nil
@@ -120,7 +131,7 @@ func TestDNS_ForwardsQuery(t *testing.T) {
 		return resp
 	})
 
-	upstreamServers = []string{mockAddr}
+	setUpstreams(t, []string{mockAddr})
 	srvAddr := startServer(t)
 
 	const queryID uint16 = 0xABCD
@@ -137,9 +148,6 @@ func TestDNS_ForwardsQuery(t *testing.T) {
 // TestDNS_FallbackOnNXDOMAIN verifies that when the first upstream returns no answer
 // (ANCOUNT=0), the server tries the second upstream and returns its response.
 func TestDNS_FallbackOnNXDOMAIN(t *testing.T) {
-	orig := upstreamServers
-	defer func() { upstreamServers = orig }()
-
 	// First mock: returns NXDOMAIN-style response (QR bit set, ANCOUNT=0).
 	mock1Addr := startMockDNS(t, func(query []byte) []byte {
 		if len(query) < 12 {
@@ -161,14 +169,14 @@ func TestDNS_FallbackOnNXDOMAIN(t *testing.T) {
 		}
 		resp := make([]byte, 12)
 		copy(resp, query[:12])
-		resp[2] |= 0x80  // QR bit
-		resp[6] = 0x00   // ANCOUNT high byte
-		resp[7] = 0x01   // ANCOUNT low byte = 1
+		resp[2] |= 0x80       // QR bit
+		resp[6] = 0x00        // ANCOUNT high byte
+		resp[7] = 0x01        // ANCOUNT low byte = 1
 		resp[11] = markerByte // marker to identify this came from mock2
 		return resp
 	})
 
-	upstreamServers = []string{mock1Addr, mock2Addr}
+	setUpstreams(t, []string{mock1Addr, mock2Addr})
 	srvAddr := startServer(t)
 
 	query := buildDNSQuery(0x1234)
@@ -184,11 +192,8 @@ func TestDNS_FallbackOnNXDOMAIN(t *testing.T) {
 // TestDNS_AllUpstreamsFail verifies that the server does not crash when all upstreams
 // are unreachable. The client should receive no response within the deadline.
 func TestDNS_AllUpstreamsFail(t *testing.T) {
-	orig := upstreamServers
-	defer func() { upstreamServers = orig }()
-
 	// TEST-NET (RFC 5737) addresses — routable but guaranteed never to respond.
-	upstreamServers = []string{"192.0.2.1:53", "192.0.2.2:53"}
+	setUpstreams(t, []string{"192.0.2.1:53", "192.0.2.2:53"})
 
 	srvAddr := startServer(t)
 	query := buildDNSQuery(0xDEAD)
