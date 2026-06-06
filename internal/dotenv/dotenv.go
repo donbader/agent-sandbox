@@ -16,7 +16,7 @@ func Load(path string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // best-effort close on read-only file
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -41,7 +41,7 @@ func Load(path string) {
 		}
 
 		if _, exists := os.LookupEnv(key); !exists {
-			os.Setenv(key, value)
+			_ = os.Setenv(key, value)
 		}
 	}
 }
