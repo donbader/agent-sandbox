@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 )
 
 // upstreamServers lists DNS servers to try in order.
 // Docker embedded DNS resolves container names on joined networks.
 // Public DNS resolves internet hostnames.
-var upstreamServers = []string{"127.0.0.11:53", "8.8.8.8:53"}
+var (
+	upstreamMu      sync.RWMutex
+	upstreamServers = []string{"127.0.0.11:53", "8.8.8.8:53"}
+)
 
 // Server is a UDP DNS forwarder.
 type Server struct {
@@ -56,7 +60,12 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 
 	resp := make([]byte, 4096)
 
-	for i, upstream := range upstreamServers {
+	upstreamMu.RLock()
+	upstreams := make([]string, len(upstreamServers))
+	copy(upstreams, upstreamServers)
+	upstreamMu.RUnlock()
+
+	for i, upstream := range upstreams {
 		upConn, err := net.Dial("udp", upstream)
 		if err != nil {
 			slog.Debug("dns dial upstream failed", "upstream", upstream, "error", err)
@@ -79,7 +88,7 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 		// If Docker DNS returned an answer, use it immediately.
 		// If NXDOMAIN from Docker DNS, try next upstream (public DNS).
 		hasAnswer := n > 7 && (resp[6] > 0 || resp[7] > 0)
-		isLast := i == len(upstreamServers)-1
+		isLast := i == len(upstreams)-1
 
 		if hasAnswer || isLast {
 			if _, err := conn.WriteToUDP(resp[:n], clientAddr); err != nil {
