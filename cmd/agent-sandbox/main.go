@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -68,7 +69,7 @@ func ensureSchemaComment(yamlPath string, schemaRelPath string) error {
 func composeCmd(dir *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "compose",
-		Short:              "Docker compose passthrough (auto-injects -f .build/docker-compose.yml)",
+		Short:              "Compose passthrough (auto-injects -f .build/docker-compose.yml)",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			composePath := filepath.Join(*dir, ".build", "docker-compose.yml")
@@ -83,7 +84,9 @@ func composeCmd(dir *string) *cobra.Command {
 				composeArgs = append(composeArgs, "--env-file", envPath)
 			}
 			composeArgs = append(composeArgs, args...)
-			c := exec.Command("docker", append([]string{"compose"}, composeArgs...)...)
+
+			runtime := runtimeBinary(*dir)
+			c := exec.Command(runtime, append([]string{"compose"}, composeArgs...)...)
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
@@ -93,6 +96,25 @@ func composeCmd(dir *string) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// runtimeBinary determines the container runtime CLI to use.
+// Priority: AGENT_SANDBOX_RUNTIME env var > agent.yaml runtime_engine > "docker"
+func runtimeBinary(dir string) string {
+	if rt := os.Getenv("AGENT_SANDBOX_RUNTIME"); rt != "" {
+		return rt
+	}
+	// Try to load config for runtime_engine setting
+	cfg, err := loadConfigSafe(dir)
+	if err == nil && cfg.RuntimeEngine != "" {
+		return cfg.RuntimeEngineBinary()
+	}
+	return "docker"
+}
+
+// loadConfigSafe attempts to load config without failing fatally.
+func loadConfigSafe(dir string) (*config.Config, error) {
+	return config.Load(dir)
 }
 
 func initCmd() *cobra.Command {

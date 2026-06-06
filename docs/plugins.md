@@ -56,7 +56,7 @@ Feature plugins are hybrid — YAML metadata + optional Go code (gateway) + opti
 | Plugin | Hosts | Injection | Has gateway/ | Status |
 |--------|-------|-----------|-------------|--------|
 | `github-pat` | github.com, *.github.com | Header: `Authorization: token <PAT>` | yes | available |
-| `external-services` | user-defined (docker:// or https://) | Static header injection | yes | available |
+| `external-services` | user-defined (host:port or https://) | Static header injection | yes | available |
 | `mcp-oauth` | user-defined MCP server URL | OAuth2 token refresh | yes | **planned** |
 
 Note: LLM API credentials (OpenAI, Anthropic) are handled by the runtime itself (codex device flow, claude login). No dedicated plugins needed.
