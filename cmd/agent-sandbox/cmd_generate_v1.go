@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	sandbox "github.com/donbader/agent-sandbox"
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/core"
+	"github.com/donbader/agent-sandbox/internal/dotenv"
 	v1 "github.com/donbader/agent-sandbox/internal/generate/v1"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +25,7 @@ func generateV1Cmd(dir *string) *cobra.Command {
 			}
 
 			// Load .env file so secrets are available for auth-header baking.
-			loadDotEnv(filepath.Join(projectDir, ".env"))
+			dotenv.Load(filepath.Join(projectDir, ".env"))
 
 			cfg, err := config.Load(projectDir)
 			if err != nil {
@@ -56,36 +55,5 @@ func generateV1Cmd(dir *string) *cobra.Command {
 			fmt.Fprintf(os.Stderr, "Generated .build/ in %s\n", projectDir)
 			return nil
 		},
-	}
-}
-
-// loadDotEnv loads key=value pairs from a .env file into the process environment.
-// Only sets variables not already present in the environment (no override).
-func loadDotEnv(path string) {
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		// Strip surrounding quotes
-		if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
-			value = value[1 : len(value)-1]
-		}
-		if _, exists := os.LookupEnv(key); !exists {
-			os.Setenv(key, value)
-		}
 	}
 }
