@@ -66,6 +66,9 @@ func generateSingleAgent(cfg *config.Config, projectDir string) error {
 		return err
 	}
 
+	// Inject schema comment into agent.yaml
+	_ = ensureSchemaComment(filepath.Join(projectDir, "agent.yaml"), ".build/schema.json")
+
 	fmt.Fprintf(os.Stderr, "Generated .build/ in %s\n", projectDir)
 	return nil
 }
@@ -79,6 +82,17 @@ func generateFleet(agents []config.FleetAgent, projectDir string) error {
 
 	if err := g.RunFleet(agents); err != nil {
 		return err
+	}
+
+	// Inject schema comments into fleet.yaml and per-agent agent.yaml files
+	_ = ensureSchemaComment(filepath.Join(projectDir, "fleet.yaml"), ".build/fleet-schema.json")
+	for _, agent := range agents {
+		agentYAML := filepath.Join(agent.Dir, "agent.yaml")
+		relSchema, err := filepath.Rel(agent.Dir, filepath.Join(projectDir, ".build", "schema.json"))
+		if err != nil {
+			relSchema = ".build/schema.json"
+		}
+		_ = ensureSchemaComment(agentYAML, relSchema)
 	}
 
 	fmt.Fprintf(os.Stderr, "Generated .build/ for %d agents in %s\n", len(agents), projectDir)

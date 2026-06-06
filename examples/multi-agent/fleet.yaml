@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=.build/fleet-schema.json
 # Multi-agent fleet example
 # Run: agent-sandbox generate -C examples/multi-agent
 agents:

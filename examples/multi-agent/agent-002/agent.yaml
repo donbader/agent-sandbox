@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../.build/schema.json
 name: agent-002
 runtime:
   image: "@builtin/claude-code"
