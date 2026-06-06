@@ -108,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [telegram, local-coding]
+        example: [telegram, local-coding, multi-agent]
     steps:
       - uses: actions/checkout@v6
 
