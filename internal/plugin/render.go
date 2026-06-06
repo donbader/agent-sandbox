@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
@@ -33,6 +34,13 @@ func RenderContributions(p *PluginDef, opts map[string]any) (*Contributions, err
 			}
 			// Fallback: return as-is (local plugins reference relative to project)
 			return name
+		},
+		"toJSON": func(v any) (string, error) {
+			b, err := json.Marshal(v)
+			if err != nil {
+				return "", fmt.Errorf("toJSON: %w", err)
+			}
+			return string(b), nil
 		},
 	}
 

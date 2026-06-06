@@ -13,6 +13,11 @@ options:
     description: "Telegram usernames allowed to interact"
     items:
       type: string
+  agent_manager_port:
+    type: string
+    required: false
+    default: "3100"
+    description: "Port the agent-manager ACP endpoint listens on"
 
 contributes:
   gateway:
@@ -25,5 +30,5 @@ contributes:
       telegram:
         build: ./telegram-adapter
         environment:
-          AGENT_MANAGER_URL: "ws://agent:3100/acp"
+          AGENT_MANAGER_URL: "ws://agent:{{ .options.agent_manager_port }}/acp"
           TELEGRAM_BOT_TOKEN: "{{ .options.bot_token }}"

@@ -29,10 +29,16 @@ export class AcpServer {
   private wsClients = new Set<WebSocket>();
   private sseClients = new Set<ServerResponse>();
   private pendingRequests = new Map<number | string, PendingRequest>();
+  private initResult: JsonRpcMessage["result"] | null = null;
 
   constructor(agent: AgentProcess, options: AcpServerOptions) {
     this.agent = agent;
     this.port = options.port;
+  }
+
+  /** Store the cached init result so we can replay it to connecting clients. */
+  setInitResult(result: JsonRpcMessage["result"]): void {
+    this.initResult = result;
   }
 
   async start(): Promise<void> {
@@ -95,7 +101,27 @@ export class AcpServer {
     });
   }
 
-  private interceptCommand(msg: JsonRpcMessage): JsonRpcMessage | null {
+  /**
+   * Intercept or mutate a message before it reaches the agent.
+   * Returns a JsonRpcMessage to short-circuit (don't forward), or null to continue.
+   */
+  private interceptMessage(msg: JsonRpcMessage): JsonRpcMessage | null {
+    if (msg.method === "initialize") {
+      // Agent is already initialized — return cached result to client.
+      return { jsonrpc: "2.0", id: msg.id, result: this.initResult };
+    }
+    if (msg.method === "auth/authenticate") {
+      // Agent is already authenticated — accept any client auth.
+      return { jsonrpc: "2.0", id: msg.id, result: {} };
+    }
+    if (msg.method === "session/new") {
+      // Inject mcpServers requirement — protocol detail handled here so adapters don't need to.
+      if (!msg.params) msg.params = {};
+      if (!(msg.params as Record<string, unknown>).mcpServers) {
+        (msg.params as Record<string, unknown>).mcpServers = [];
+      }
+      return null; // continue forwarding with mutated params
+    }
     if (msg.method !== "session/prompt") return null;
     const params = msg.params as { prompt?: Array<{ type: string; text: string }>; sessionId?: string } | undefined;
     const text = params?.prompt?.[0]?.text?.trim();
@@ -132,7 +158,7 @@ export class AcpServer {
       try {
         const message: JsonRpcMessage = JSON.parse(body);
         log.debug({ method: message.method, id: message.id }, "HTTP POST");
-        const intercepted = this.interceptCommand(message);
+        const intercepted = this.interceptMessage(message);
         if (intercepted) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(intercepted)); return; }
         if (message.method === "initialize") {
           const response = await this.forwardAndWait(message, 10000);
@@ -173,7 +199,7 @@ export class AcpServer {
       try {
         const message: JsonRpcMessage = JSON.parse(data.toString());
         log.debug({ method: message.method, id: message.id }, "WS received");
-        const intercepted = this.interceptCommand(message);
+        const intercepted = this.interceptMessage(message);
         if (intercepted) { ws.send(JSON.stringify(intercepted)); return; }
         if (message.id !== undefined) {
           const response = await this.forwardAndWait(message);

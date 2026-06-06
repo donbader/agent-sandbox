@@ -187,39 +187,121 @@ The CLI extracts gateway source + active feature handlers into `.build/gateway-s
 
 ## Channel Manager & Channel Protocol
 
-The channel manager is a generic TypeScript runtime that spawns the agent process and routes messages. Channel implementations are owned by plugins.
+Channel adapters are **sidecars** — separate Docker containers defined via `contributes.sidecar.services` in the plugin's `plugin.yaml`. They connect to the agent-manager over WebSocket at `ws://agent:<port>/acp`.
 
-### Protocol
-
-1. Plugin provides `channel/channel.ts` — exports default a class implementing `Channel`
-2. Constructor signature: `constructor(config: Record<string, unknown>)` — receives the full channel manager config
-3. Plugin's Go code declares `ChannelName: "telegram"` in FeatureContributions
-4. Plugin's Go code populates `ChannelConfig` with channel-specific config
-
-### Generator Assembly
-
-During `agent-sandbox generate`, the generator:
-
-1. Copies channel manager core (`channel-manager/`) to `.build/channel-manager-src/`
-2. For each plugin with `ChannelName` set, copies `channel/channel.ts` → `.build/channel-manager-src/src/channel/<name>.ts`
-3. Generates `.build/channel-manager-src/src/channel/channels.gen.ts` — import map of all channels
+### Architecture
 
 ```
-.build/channel-manager-src/
-  src/
-    index.ts              ← channel manager core (generic, never modified)
-    acp-client.ts         ← ACP client (spawns agent adapter via @agentclientprotocol/sdk)
-    channel/
-      types.ts            ← Channel interface
-      telegram.ts         ← copied from internal/plugins/telegram/channel/channel.ts
-      channels.gen.ts     ← auto-generated registry
+┌─────────────────────┐       WebSocket        ┌────────────────────┐
+│  telegram-adapter   │ ───────────────────────▶│   agent-manager    │
+│  (sidecar container)│   ws://agent:3100/acp   │  (main container)  │
+└─────────────────────┘                         │  spawns agent CLI  │
+                                                └────────────────────┘
+```
+
+The `agent-manager-acp` plugin provides the ACP proxy that spawns the agent process and exposes it over HTTP/WebSocket. Channel plugins declare it as a dependency:
+
+```yaml
+requires: ["@builtin/agent-manager-acp"]
 ```
 
 ### Adding a New Channel
 
-1. Create `internal/plugins/<name>/channel/channel.ts` implementing Channel
-2. In plugin.go: `ChannelName: "<name>"` + `ChannelConfig: map[string]any{...}`
-3. Run `agent-sandbox generate` — channel is automatically assembled
+1. Create a plugin with a sidecar service that speaks ACP over WebSocket to agent-manager
+2. Declare `requires: ["@builtin/agent-manager-acp"]` in your `plugin.yaml`
+3. Add gateway middleware if the channel needs credential injection (e.g., bot token rewrite)
+4. Define the sidecar container via `contributes.sidecar.services`
+
+Example plugin.yaml for a channel adapter:
+
+```yaml
+name: telegram
+description: "Telegram channel adapter (sidecar)"
+
+requires: ["@builtin/agent-manager-acp"]
+
+config_schema:
+  bot_token:
+    type: string
+    required: true
+    env: true
+  allowed_users:
+    type: array
+    items: string
+  agent_manager_port:
+    type: string
+    default: "3100"
+
+gateway:
+  hosts:
+    - "api.telegram.org"
+  mode: mitm
+
+contributes:
+  sidecar:
+    services:
+      telegram-adapter:
+        build: .build/telegram-adapter
+        environment:
+          AGENT_MANAGER_URL: "ws://agent:{{ .agent_manager_port }}/acp"
+          BOT_TOKEN: "{{ .bot_token }}"
+```
+
+## Template Functions
+
+Templates used in Dockerfiles and compose generation support Go `text/template` syntax with the following custom functions:
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `toJSON` | Serializes a value to JSON. Useful for baking structured config (arrays, maps) into Dockerfiles or entrypoint scripts. | `{{ .mcp_servers \| toJSON }}` |
+
+### toJSON
+
+Converts any Go value into its JSON string representation. Particularly useful when you need to embed structured data (arrays, objects) into generated files where YAML or shell expansion wouldn't work.
+
+```dockerfile
+# In a Dockerfile template:
+ENV MCP_SERVERS='{{ .mcp_servers | toJSON }}'
+
+# Produces:
+ENV MCP_SERVERS='[{"url":"https://mcp.notion.com","name":"notion"}]'
+```
+
+```yaml
+# In an entrypoint hook template:
+echo '{{ .allowed_users | toJSON }}' > /etc/agent/allowed-users.json
+```
+
+## Plugin Metadata Fields
+
+### requires
+
+Declares plugin dependencies. The generator ensures required plugins are present and ordered before the dependent plugin.
+
+```yaml
+requires: ["@builtin/agent-manager-acp"]
+```
+
+- Values use `@builtin/<name>` for core plugins
+- If a required plugin is missing from the agent's `features:` list, generation fails with a clear error
+- Dependency order is respected during compose and Dockerfile generation
+
+### assets
+
+Declares directories containing source files to extract/copy during Docker build. Used by plugins that bundle their own application code (e.g., the agent-manager TypeScript source).
+
+```yaml
+assets:
+  - dir: agent-manager
+    target: /opt/agent-manager
+```
+
+| Field | Description |
+|-------|-------------|
+| `dir` | Directory path relative to the plugin root |
+| `target` | Destination path inside the container |
+
+During `agent-sandbox generate`, asset directories are copied to `.build/<plugin-name>/<dir>/` and a corresponding `COPY` instruction is added to the Dockerfile. The asset code is compiled or executed during Docker build (not at CLI time).
 
 ## Command Plugins
 

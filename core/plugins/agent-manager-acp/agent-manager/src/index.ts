@@ -11,6 +11,7 @@ interface ManagerConfig {
 }
 
 async function main(): Promise<void> {
+  const port = parseInt(process.env.AGENT_MANAGER_PORT ?? "3100", 10);
   const configPath = process.env.AGENT_MANAGER_CONFIG ?? "/opt/agent-manager/config.json";
   const raw = readFileSync(configPath, "utf-8");
   const config: ManagerConfig = JSON.parse(raw);
@@ -30,13 +31,36 @@ async function main(): Promise<void> {
   // Downstream: spawn the actual agent via ACP over stdio
   const agent = new AgentProcess(config.acp_command, config.cwd);
 
-  // Upstream: expose ACP over HTTP/WebSocket for channel adapters
-  const server = new AcpServer(agent, { port: 3100 });
-
   await agent.start();
+
+  // Perform ACP handshake: initialize + authenticate the agent before accepting clients.
+  const initResp = await agent.sendAndWait({
+    jsonrpc: "2.0", id: -1, method: "initialize",
+    params: { protocolVersion: 1, clientCapabilities: {} },
+  });
+  if (initResp.error) {
+    log.fatal({ error: initResp.error }, "agent initialize failed");
+    process.exit(1);
+  }
+  log.info("agent ACP initialized");
+
+  // Authenticate with a placeholder key — the gateway rewrites the real credentials on outbound calls.
+  const authResp = await agent.sendAndWait({
+    jsonrpc: "2.0", id: -2, method: "auth/authenticate",
+    params: { id: "api-key", secret: process.env.OPENAI_API_KEY ?? "sk-placeholder" },
+  });
+  if (authResp.error) {
+    log.fatal({ error: authResp.error }, "agent auth/authenticate failed");
+    process.exit(1);
+  }
+  log.info("agent ACP authenticated");
+
+  // Upstream: expose ACP over HTTP/WebSocket for channel adapters
+  const server = new AcpServer(agent, { port });
+  server.setInitResult(initResp.result);
   await server.start();
 
-  log.info({ port: 3100 }, "agent manager ready — ACP endpoint available");
+  log.info({ port }, "agent manager ready — ACP endpoint available");
 
   // Graceful shutdown
   process.on("SIGTERM", async () => {

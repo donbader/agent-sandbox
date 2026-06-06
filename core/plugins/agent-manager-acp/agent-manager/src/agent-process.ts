@@ -91,6 +91,28 @@ export class AgentProcess extends EventEmitter {
     return true;
   }
 
+  /** Send a JSON-RPC request and wait for the matching response. */
+  sendAndWait(msg: JsonRpcMessage, timeoutMs = 10000): Promise<JsonRpcMessage> {
+    return new Promise((resolve, reject) => {
+      if (!this.send(msg)) {
+        reject(new Error("Agent not running"));
+        return;
+      }
+      const timer = setTimeout(() => {
+        this.removeListener("message", handler);
+        reject(new Error(`Timeout waiting for response to ${msg.method} (id=${msg.id})`));
+      }, timeoutMs);
+      const handler = (response: JsonRpcMessage) => {
+        if (response.id === msg.id) {
+          clearTimeout(timer);
+          this.removeListener("message", handler);
+          resolve(response);
+        }
+      };
+      this.on("message", handler);
+    });
+  }
+
   async stop(): Promise<void> {
     if (this.proc) {
       this.reader?.close();

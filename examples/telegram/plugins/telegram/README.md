@@ -11,6 +11,12 @@ The agent container never has access to the real bot token.
 ## Usage
 
 ```yaml
+# plugin.yaml
+name: telegram
+requires: ["@builtin/agent-manager-acp"]
+```
+
+```yaml
 # agent.yaml
 installations:
   - plugin: telegram
@@ -27,14 +33,16 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
 
 ## Options
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `bot_token` | string | yes | Telegram bot token. Use `${ENV_VAR}` to reference `.env` |
-| `allowed_users` | array | no | Telegram usernames allowed to interact |
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `bot_token` | string | yes | — | Telegram bot token. Use `${ENV_VAR}` to reference `.env` |
+| `allowed_users` | array | no | — | Telegram usernames allowed to interact |
+| `agent_manager_port` | string | no | `"3100"` | Port the agent-manager ACP endpoint listens on |
 
 ## What It Contributes
 
-- **Gateway:** MITM for `api.telegram.org` with URL path token rewrite middleware
+- **Gateway:** Custom middleware for Telegram API token rewriting (MITM for `api.telegram.org` with URL path token rewrite)
+- **Sidecar:** `telegram` service (telegram-adapter) that connects to agent-manager via WebSocket and bridges Telegram messages to ACP
 
 ## Middleware Template
 

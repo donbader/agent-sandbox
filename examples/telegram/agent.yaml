@@ -6,6 +6,7 @@ runtime:
   image: "@builtin/codex"
   extra_builds:
     - "RUN npm install -g @agentclientprotocol/codex-acp"
+    - "ENV OPENAI_API_KEY=gateway-managed"
   entrypoint: ["node", "/opt/agent-manager/dist/index.js"]
 
 gateway:
@@ -15,6 +16,11 @@ gateway:
         Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
 
 installations:
+  - plugin: "@builtin/home-override"
+    options:
+      home_directory: "./home"
+      volume: true
+
   - plugin: "@builtin/agent-manager-acp"
     options:
       acp_command: ["codex-acp"]

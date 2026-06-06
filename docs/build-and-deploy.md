@@ -6,6 +6,7 @@
 agent-sandbox generate
   │
   ├── Detect mode: agent.yaml (single) or fleet.yaml (multi)
+  ├── Load project .env file (resolves secret references for plugins)
   ├── Read preset: core/presets/<runtime>/
   ├── Read feature plugins: core/plugins/<feature>/
   ├── Merge shared features (if fleet mode)
@@ -114,6 +115,26 @@ CMD ["sleep", "infinity"]
 | Root go.mod + go.sum | Gateway build dependencies | ~5KB |
 
 Gateway rewriters (auth-header, telegram-url) are config-driven — instantiated at runtime from `config.yaml`, not compiled per-plugin.
+
+## Secret Resolution via .env
+
+The `generate` command loads the project's `.env` file early in the build flow. This resolves `${SECRET_NAME}` references in plugin options to their actual values. The primary consumer is the `auth-header` gateway middleware — resolved credentials are baked into the gateway binary's `config.yaml` at compile time so the gateway can inject auth headers without runtime env var access.
+
+## Generated Compose Behavior
+
+The generated `docker-compose.yml` includes several conveniences:
+
+- **Network alias:** The agent service gets a `agent` network alias, so sidecar containers can reach it via hostname `agent` (e.g. `ws://agent:3100/acp`).
+- **Healthcheck:** If the agent runtime exposes ports (declared in `preset.yaml`), a healthcheck is added using `curl` against the first declared port's `/health` endpoint.
+- **Sidecar dependency:** Any sidecar services defined by plugins implicitly get `depends_on: { agent: { condition: service_healthy } }`, ensuring the agent is healthy before sidecars start.
+
+## Template Functions
+
+Plugin `contributes.runtime.extra_builds` lines are evaluated as Go templates. Available functions:
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `toJSON` | Serializes any value to a JSON string | `{{ toJSON .options.my_config }}` |
 
 ## Gateway Compilation
 

@@ -61,14 +61,40 @@ Feature plugins are hybrid — YAML metadata + optional Go code (gateway) + opti
 
 Note: LLM API credentials (OpenAI, Anthropic) are handled by the runtime itself (codex device flow, claude login). No dedicated plugins needed.
 
+### Agent Manager
+
+| Plugin | What it does | Status |
+|--------|-------------|--------|
+| `agent-manager-acp` | ACP proxy — spawns agent, exposes HTTP/WebSocket for channel adapters | available (core built-in) |
+
+#### agent-manager-acp
+
+Spawns an ACP-compatible agent process and exposes it over HTTP/WebSocket. Channel adapter sidecars connect to this service to send/receive messages.
+
+- Performs ACP handshake at startup (initialize + authenticate)
+- Intercepts client init/auth, injects `mcpServers` into session/new
+- Assets: contains the agent-manager TypeScript source (compiled during Docker build)
+
+```yaml
+features:
+  - plugin: agent-manager-acp
+    acp_command: ["codex", "exec", "--headless"]  # required — command to spawn
+    port: "3100"                                   # optional, default "3100"
+```
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `acp_command` | yes | Array — the command to spawn as the agent process |
+| `port` | no | HTTP/WebSocket listen port (default: `"3100"`) |
+
 ### Channel Features
 
-Contribute both gateway rules AND channel TypeScript. One plugin, two directories.
+Channel adapters are **sidecars** — separate Docker containers that connect to agent-manager via WebSocket. Each channel plugin contributes gateway middleware (for credential injection) plus a sidecar service definition.
 
-| Plugin | Gateway | Channel | Status |
-|--------|---------|---------|--------|
-| `telegram` | MITM api.telegram.org, inject bot token | grammy bot, long-poll | available |
-| `slack` | MITM slack.com, OAuth token refresh | Slack socket mode | **planned** |
+| Plugin | Gateway | Sidecar | Requires | Status |
+|--------|---------|---------|----------|--------|
+| `telegram` | MITM api.telegram.org, inject bot token | telegram-adapter (WebSocket → agent-manager) | `@builtin/agent-manager-acp` | available |
+| `slack` | MITM slack.com, OAuth token refresh | slack-adapter | `@builtin/agent-manager-acp` | **planned** |
 
 ### Infrastructure Features
 
@@ -125,15 +151,28 @@ Handles: RFC 9728 discovery, PKCE authorization, token exchange, auto-refresh. U
 
 ### telegram
 
+A sidecar-based channel adapter that connects to agent-manager via WebSocket. Contributes gateway middleware (telegram token rewrite) and a sidecar service (telegram-adapter).
+
+Requires `@builtin/agent-manager-acp`.
+
 ```yaml
 features:
+  - plugin: agent-manager-acp
+    acp_command: ["codex", "exec", "--headless"]
   - plugin: telegram
-    access_control:
-      allowed_users: ["@donbader"]
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_users: ["@donbader"]         # optional
+    agent_manager_port: "3100"           # optional, default "3100"
 ```
 
+| Option | Required | Description |
+|--------|----------|-------------|
+| `bot_token` | yes | Telegram bot token (env var reference) |
+| `allowed_users` | no | Array of allowed Telegram usernames |
+| `agent_manager_port` | no | Port to connect to agent-manager (default: `"3100"`) |
+
 Gateway: MITM on api.telegram.org, injects bot token via URL rewrite.
-Channel Manager: grammy-based long-poll bot, filters by allowed_users.
+Sidecar: telegram-adapter container connects to `ws://agent:<port>/acp`, bridges Telegram messages to the agent via ACP.
 
 ### github-pat
 

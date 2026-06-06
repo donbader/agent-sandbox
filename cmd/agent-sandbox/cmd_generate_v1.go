@@ -9,6 +9,7 @@ import (
 	sandbox "github.com/donbader/agent-sandbox"
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/core"
+	"github.com/donbader/agent-sandbox/internal/dotenv"
 	v1 "github.com/donbader/agent-sandbox/internal/generate/v1"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,9 @@ func generateV1Cmd(dir *string) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve dir: %w", err)
 			}
+
+			// Load .env file so secrets are available for auth-header baking.
+			dotenv.Load(filepath.Join(projectDir, ".env"))
 
 			cfg, err := config.Load(projectDir)
 			if err != nil {

@@ -1,25 +1,39 @@
 # Telegram Bot Example
 
-A sandboxed codex agent accessible via Telegram. The channel-manager bridges Telegram messages to codex using the ACP (Agent Client Protocol).
+A sandboxed codex agent accessible via Telegram. Uses ACP (Agent Client Protocol) over stdio to manage codex, with a sidecar adapter bridging Telegram messages via WebSocket.
 
 ## Architecture
 
 ```
-Telegram API (api.telegram.org)
-     ↕ (real bot token injected by gateway)
-  Gateway (MITM for api.telegram.org + agent-gateway.stx-ai.net)
-     ↕
-  Agent Container
-    └─ channel-manager (entrypoint)
-         └─ codex (child process, ACP stdin/stdout)
+Telegram API (long-polling via grammY)
+     |
+  telegram-adapter (sidecar container)
+     | WebSocket (ws://agent:3100/acp)
+  agent-manager (entrypoint, inside agent container)
+     | ACP over stdio
+  codex-acp (child process)
+     | HTTPS (transparent proxy via iptables DNAT)
+  gateway (MITM proxy container)
+     | HTTPS (real credentials injected)
+  LLM API (agent-gateway.stx-ai.net)
 ```
 
-The channel-manager:
-1. Receives Telegram updates via long-polling (using a dummy bot token)
-2. Routes messages to codex via ACP protocol (stdin/stdout subprocess)
-3. Streams codex responses back to Telegram
+**agent-manager** — spawns codex-acp, performs ACP handshake (initialize + authenticate), exposes an ACP endpoint over HTTP/WebSocket on port 3100.
 
-The gateway transparently rewrites the dummy token to the real one in all api.telegram.org requests.
+**telegram-adapter** — connects to agent-manager via WebSocket, receives Telegram messages via grammY long-polling, forwards them as ACP prompts.
+
+**gateway** — transparent HTTPS proxy that MITMs traffic, injects auth headers, rewrites credentials.
+
+## Startup Sequence
+
+1. `agent-sandbox generate` reads `agent.yaml`, loads `.env`, generates Dockerfile + compose + gateway config
+2. `agent-sandbox compose up --build` builds and starts all containers
+3. Gateway starts first (healthcheck), agent container waits for it
+4. Agent container sets up iptables DNAT redirect (transparent proxy), installs CA cert
+5. Agent-manager starts, spawns codex-acp, performs ACP init + auth handshake
+6. Agent-manager exposes HTTP/WS endpoint on port 3100 (healthcheck)
+7. Telegram-adapter starts (depends_on agent healthy), connects to `ws://agent:3100/acp`
+8. User messages flow: Telegram -> adapter -> agent-manager -> codex-acp -> gateway -> LLM API -> response back
 
 ## Setup
 
@@ -39,42 +53,59 @@ agent-sandbox compose up --build -d
 agent-sandbox compose logs -f
 ```
 
+### Required Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token (from @BotFather) |
+| `TELEGRAM_USERNAME` | Allowed Telegram username (without @) |
+| `STX_LLM_GATEWAY_API_KEY` | API key for the LLM gateway |
+
 ## Configuration
 
-- `agent.yaml` — agent config (runtime, gateway, plugins)
-- `channel-manager-config.json` — channel-manager settings (ACP command, working directory, access control)
-- `channel-manager/` — channel-manager TypeScript source (builds inside the agent image)
-- `plugins/telegram/` — local plugin (gateway middleware for token rewrite)
+- `agent.yaml` — agent config (runtime, gateway, plugins, adapter)
+- `plugins/telegram/` — local plugin (telegram-adapter sidecar definition)
 
-## Customization
+### agent.yaml
 
-### Change the agent command
+```yaml
+name: telegram-agent
+log_level: debug
 
-Edit `channel-manager-config.json`:
-```json
-{
-  "acp_command": ["codex", "--full-auto"],
-  "cwd": "/home/agent/workspace"
-}
-```
+runtime:
+  image: "@builtin/codex"
+  extra_builds:
+    - "RUN npm install -g @agentclientprotocol/codex-acp"
+    - "ENV OPENAI_API_KEY=gateway-managed"
+  entrypoint: ["node", "/opt/agent-manager/dist/index.js"]
 
-### Access control
+gateway:
+  services:
+    - url: https://agent-gateway.stx-ai.net
+      headers:
+        Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
 
-Edit `channel-manager-config.json` to restrict who can interact:
-```json
-{
-  "access_control": {
-    "allowed_users": ["@yourusername"],
-    "require_mention": false
-  }
-}
+installations:
+  - plugin: "@builtin/home-override"
+    options:
+      home_directory: "./home"
+      volume: true
+
+  - plugin: "@builtin/agent-manager-acp"
+    options:
+      acp_command: ["codex-acp"]
+
+  - plugin: ./plugins/telegram
+    options:
+      bot_token: "${TELEGRAM_BOT_TOKEN}"
+      allowed_users:
+        - "@${TELEGRAM_USERNAME}"
 ```
 
 ## How It Works
 
-1. `agent-sandbox generate` produces `.build/` with Dockerfile, compose, gateway config
-2. The agent Dockerfile builds the channel-manager from source and installs codex
-3. On startup, the entrypoint sets up iptables DNAT → gateway for transparent HTTPS proxying
-4. The channel-manager starts, spawns codex as a subprocess, and begins polling Telegram
-5. All HTTPS traffic from the agent (including Telegram API calls) flows through the gateway
-6. The gateway MITM intercepts api.telegram.org and rewrites the dummy token to the real one
+The agent container runs `agent-manager` as its entrypoint. Agent-manager spawns `codex-acp` as a child process and communicates via ACP over stdio. After completing the ACP handshake, it exposes an HTTP/WebSocket server on port 3100.
+
+The telegram-adapter runs as a separate sidecar container. It connects to the agent-manager's WebSocket endpoint and polls Telegram for messages using grammY. When a message arrives from an allowed user, the adapter sends it as an ACP prompt over the WebSocket. Responses stream back the same way.
+
+All outbound HTTPS from the agent container is transparently redirected through the gateway via iptables DNAT. The gateway MITMs connections and injects real credentials (LLM API key) so the agent never sees actual secrets.

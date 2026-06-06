@@ -1,12 +1,12 @@
-# Channel Manager Protocol
+# Agent Manager ACP Protocol
 
 ## Overview
 
-The channel manager connects AI agents to messaging platforms via ACP (Agent Client Protocol). It's designed as a thin adapter layer — channels handle platform UX, the ACP wrapper enriches the agent, and the agent does all the real work.
+The agent-manager-acp plugin spawns and manages the ACP agent process, performing handshake and authentication on behalf of clients, then proxying ACP over HTTP and WebSocket. Channel adapters connect as sidecars via WebSocket, bridging external messaging platforms (Telegram, Slack, etc.) to the agent through ACP.
 
 ```
-User ←→ [Platform] ←→ [Channel] ←→ [AcpAgent] ←→ [ACP Adapter] ←→ [Agent]
-         Telegram      grammy         SDK client    codex-acp        Codex
+User ←→ [Platform] ←→ [Channel Adapter] ←→ WS ←→ [agent-manager-acp] ←→ stdio ←→ [ACP Agent]
+         Telegram      telegram-adapter              core plugin             codex-acp → Codex
 ```
 
 ## ACP (Agent Client Protocol)
@@ -14,7 +14,7 @@ User ←→ [Platform] ←→ [Channel] ←→ [AcpAgent] ←→ [ACP Adapter] �
 ACP is a JSON-RPC 2.0 protocol over stdio for communicating with AI coding agents. It's the industry standard — supported by Codex, Claude Code, Pi, Gemini, Copilot, and others.
 
 - **Spec**: https://agentclientprotocol.com
-- **TypeScript SDK**: `@agentclientprotocol/sdk` (used by channel manager client)
+- **TypeScript SDK**: `@agentclientprotocol/sdk`
 - **Protocol version**: 1
 
 ### Why ACP?
@@ -28,43 +28,6 @@ ACP is a JSON-RPC 2.0 protocol over stdio for communicating with AI coding agent
 | Standard protocol | ✅ | ❌ (proprietary) | ❌ |
 | Works with any agent | ✅ | ❌ (custom per agent) | ❌ |
 
-### ACP Lifecycle (JSON-RPC 2.0)
-
-```jsonc
-// 1. Client → Agent: Initialize
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1","clientCapabilities":{}}}
-
-// Agent → Client: Initialize response
-{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1","agentCapabilities":{}}}
-
-// 2. Client → Agent: Create session
-{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/workspace","mcpServers":[]}}
-
-// Agent → Client: Session created
-{"jsonrpc":"2.0","id":2,"result":{"sessionId":"abc-123"}}
-
-// 3. Client → Agent: Send prompt
-{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"abc-123","prompt":[{"type":"text","text":"Fix the bug"}]}}
-
-// Agent → Client: Streaming updates (notifications, no id)
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"abc-123","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Looking at..."}}}}
-
-// Agent → Client: Permission request (request, has id)
-{"jsonrpc":"2.0","id":4,"method":"client/requestPermission","params":{"toolCall":{"title":"Read file"},"options":[{"optionId":"allow","name":"Allow","kind":"allow"}]}}
-
-// Client → Agent: Auto-approve (headless mode)
-{"jsonrpc":"2.0","id":4,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}
-
-// Agent → Client: Prompt complete
-{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}
-
-// 4. Client → Agent: Resume session (optional, agent must support)
-{"jsonrpc":"2.0","id":5,"method":"session/load","params":{"sessionId":"abc-123"}}
-
-// Agent → Client: Session loaded
-{"jsonrpc":"2.0","id":5,"result":{"sessionId":"abc-123"}}
-```
-
 ### ACP Adapters per Runtime
 
 | Runtime | ACP Command | Package |
@@ -77,177 +40,206 @@ ACP is a JSON-RPC 2.0 protocol over stdio for communicating with AI coding agent
 
 ## Architecture
 
+### Two-Part Design
+
+The old monolithic "channel manager" is now split into two concerns:
+
+| Component | Role | Runs as |
+|-----------|------|---------|
+| **agent-manager-acp** | Spawns agent, handshake, auth, proxy ACP over HTTP/WS | Core plugin (in-container process) |
+| **Channel adapters** | Bridge external platforms to ACP | Sidecars (connect to agent-manager via WebSocket) |
+
 ### Process Model
 
-Two processes in the same container, connected by stdio pipes:
-
 ```
-┌─ Agent Container ─────────────────────────────────────────────────┐
-│                                                                   │
-│  [Process 1] Channel Manager (Node.js)                             │
-│    ├── Channel plugins (Telegram, Slack, etc.)                    │
-│    ├── AcpAgent (ClientSideConnection → spawns process 2)         │
-│    ├── Prompt interceptor (handles /sh, /diagnose, plugins)       │
-│    └── Session mapping (chatId → sessionId, in-memory)            │
-│         │                                                         │
-│         │ stdio pipe                                              │
-│         ▼                                                         │
-│  [Process 2] ACP Adapter (e.g., codex-acp → Codex)               │
-│                                                                   │
-│                              egress (default route → gateway)     │
-└───────────────────────────────────────────────────────────────────┘
+┌─ Agent Container ───────────────────────────────────────────────────┐
+│                                                                     │
+│  [agent-manager-acp]  (core plugin, listens on :3100)               │
+│    ├── Spawns ACP agent process via stdio                           │
+│    ├── Performs initialize + auth handshake                         │
+│    ├── Exposes HTTP/WS endpoints for clients                        │
+│    ├── Caches initialize result                                     │
+│    ├── Injects mcpServers into session/new                          │
+│    └── Broadcasts agent responses to all connected clients          │
+│         │                                                           │
+│         │ stdio pipe                                                │
+│         ▼                                                           │
+│  [ACP Agent]  (e.g., codex-acp → Codex)                            │
+│                                                                     │
+│  [Channel Adapter: telegram]  ──── WS ────┐                        │
+│  [Channel Adapter: slack]     ──── WS ────┼──► agent-manager :3100  │
+│  [Channel Adapter: discord]   ──── WS ────┘                        │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Multi-Channel, Single Agent
+### Multi-Client, Single Agent
 
-Multiple channels share one agent connection. Different sessions run concurrently:
+Multiple channel adapters share one agent connection. Different sessions run concurrently:
 
 ```
 Telegram DM @alice ──┐
-                     │     ┌────────────────┐
-Telegram DM @bob ───┼────►│  Channel Mgr   │──► codex-acp
-                     │     │                │
-Slack #general ─────┘     │ sessions:      │
-                          │  alice → s1    │
-                          │  bob → s2      │
-                          │  general → s3  │
-                          └────────────────┘
+                     │     ┌──────────────────┐       ┌─────────────┐
+Telegram DM @bob ───┼────►│ telegram-adapter  │──WS──►│             │
+                     │     └──────────────────┘       │  agent-mgr  │──stdio──► codex-acp
+Slack #general ─────┘     ┌──────────────────┐       │             │
+                    ──────►│  slack-adapter   │──WS──►│  sessions:  │
+                           └──────────────────┘       │   alice→s1  │
+                                                      │   bob→s2    │
+                                                      │   general→s3│
+                                                      └─────────────┘
 ```
 
 - Each chat/channel maps to a separate ACP session
 - Different sessions can be processed concurrently (async, non-blocking)
 - Same session is serial (one prompt at a time, conversationally correct)
 
-### Per-Agent Bots
+## ACP Lifecycle (Agent-Manager Handles)
 
-Each agent gets its own bot. No routing ambiguity:
+The agent-manager performs the full ACP handshake with the agent on startup, then intercepts and simplifies requests from clients.
 
-```
-Agent: coder    → Bot: @MyCoderBot     (TELEGRAM_BOT_TOKEN_001)
-Agent: reviewer → Bot: @MyReviewerBot  (TELEGRAM_BOT_TOKEN_002)
-```
+### Startup Sequence (agent-manager → agent, via stdio)
 
-## Channel Manager Implementation
+```jsonc
+// 1. agent-manager → agent: Initialize
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1","clientCapabilities":{}}}
 
-### Responsibilities by Layer
+// agent → agent-manager: Initialize response (cached)
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1","agentCapabilities":{}}}
 
-| Layer | Responsibility | Doesn't do |
-|-------|---------------|------------|
-| **Channel** | Platform UX (ack, typing, formatting, ACL, bot menu) | Session management logic, command handling |
-| **AcpAgent** | ACP client (spawn, connect, prompt, collect chunks) | Platform-specific anything |
-| **Prompt Interceptor** | Enriched commands (/sh, /diagnose, command plugins) | Session management, platform UX |
-| **ACP Adapter** | Agent commands, conversation, tools | Infrastructure concerns |
+// 2. agent-manager → agent: Authenticate
+{"jsonrpc":"2.0","id":2,"method":"auth/authenticate","params":{"id":"api-key","secret":"<from OPENAI_API_KEY env>"}}
 
-### Message Flow
-
-```
-Channel.onMessage(chatId, text)
-  → getOrCreateSession(chatId)              // lazy session creation (in-memory Map)
-  → agent.prompt(sessionId, text)           // ACP client → adapter → agent
-    → interceptor: handle /sh, /diagnose, command plugins?
-      → yes: respond locally (never reaches agent)
-      → no: forward to real agent
-  → Channel.sendMessage(chatId, response)   // format + deliver
+// agent → agent-manager: Auth success
+{"jsonrpc":"2.0","id":2,"result":{"status":"authenticated"}}
 ```
 
-### AcpAgent Class
+### Client Request Interception
 
-```typescript
-class AcpAgent {
-  start(): Promise<void>;                    // spawn wrapper + adapter, initialize ACP
-  stop(): void;                              // graceful shutdown
-  reset(): Promise<void>;                    // kill and restart
-  abort(): void;                             // SIGTERM current operation
-  isReady(): boolean;                        // connection active?
-  getConnection(): ClientSideConnection;     // raw ACP connection
-  prompt(sessionId: string, text: string): Promise<string>;  // prompt + collect chunks
-  getAgentCommands(): AgentCommand[];        // last known commands from agent
-  onCommandsUpdate(cb): void;               // subscribe to command changes
-}
+When a client (channel adapter or HTTP caller) connects:
+
+| Client sends | Agent-manager behavior |
+|---|---|
+| `initialize` | Returns cached result immediately (does NOT forward to agent) |
+| `auth/authenticate` | Returns success immediately (does NOT forward to agent) |
+| `session/new` | Injects `mcpServers: []` into params, then forwards to agent |
+| Any other method | Forwards directly to agent, broadcasts response to connected clients |
+
+### Full Session Flow (client → agent-manager → agent)
+
+```jsonc
+// 1. Client → agent-manager: Initialize (intercepted)
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1","clientCapabilities":{}}}
+// agent-manager → Client: Cached response
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1","agentCapabilities":{}}}
+
+// 2. Client → agent-manager: Auth (intercepted)
+{"jsonrpc":"2.0","id":2,"method":"auth/authenticate","params":{"id":"api-key","secret":"anything"}}
+// agent-manager → Client: Success
+{"jsonrpc":"2.0","id":2,"result":{"status":"authenticated"}}
+
+// 3. Client → agent-manager: Create session
+{"jsonrpc":"2.0","id":3,"method":"session/new","params":{"cwd":"/workspace"}}
+// agent-manager injects mcpServers, forwards:
+// {"jsonrpc":"2.0","id":3,"method":"session/new","params":{"cwd":"/workspace","mcpServers":[]}}
+// agent → agent-manager → Client: Session created
+{"jsonrpc":"2.0","id":3,"result":{"sessionId":"abc-123"}}
+
+// 4. Client → agent-manager: Send prompt (forwarded as-is)
+{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"abc-123","prompt":[{"type":"text","text":"Fix the bug"}]}}
+
+// agent → agent-manager → Client: Streaming updates (notifications, no id)
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"abc-123","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Looking at..."}}}}
+
+// agent → agent-manager → Client: Turn completed
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"abc-123","update":{"sessionUpdate":"turn_completed"}}}
+
+// agent → agent-manager → Client: Prompt complete
+{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}
 ```
-
-### Channel Interface
-
-Channels are pure platform adapters — no ACP knowledge:
-
-```typescript
-export interface Channel {
-  start(): Promise<void>;
-  stop(): void;
-}
-
-export type ChannelFactory = (config: ChannelConfig, agent: AcpAgent) => Channel;
-```
-
-The channel receives the `AcpAgent` as a dependency and uses it to send prompts. Session management (chatId → sessionId mapping) lives in the channel as a simple in-memory Map.
 
 ### Headless Permission Handling
 
-The channel manager auto-approves all tool permissions (headless, no user to ask):
+The agent-manager auto-approves all tool permissions (headless, no user to ask):
 
-```typescript
-async requestPermission(params) {
-  const allowOption = params.options.find(o => o.kind === "allow");
-  return {
-    outcome: { outcome: "selected", optionId: allowOption?.optionId ?? params.options[0].optionId },
-  };
-}
+```jsonc
+// agent → agent-manager: Permission request
+{"jsonrpc":"2.0","id":5,"method":"client/requestPermission","params":{"toolCall":{"title":"Read file"},"options":[{"optionId":"allow","name":"Allow","kind":"allow"}]}}
+
+// agent-manager → agent: Auto-approve
+{"jsonrpc":"2.0","id":5,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}
 ```
 
-### Configuration
+## HTTP Endpoints (Agent-Manager)
 
-Channel manager config (generated by CLI):
+The agent-manager exposes the following endpoints on its configured port:
 
-```json
-{
-  "channel": "telegram",
-  "acp_command": ["npx", "codex-acp"],
-  "cwd": "/workspace",
-  "bot_token": "dummy:token",
-  "allowed_users": [123456789]
-}
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check: `{"status":"ok","agent_running":true/false}` |
+| `POST` | `/acp` | JSON-RPC request. `initialize` returns synchronously; other methods return `202 Accepted` |
+| `GET` | `/acp` | SSE stream for agent notifications |
+| `WS` | `/acp` | Full-duplex WebSocket (preferred by channel adapters) |
 
-## Prompt Interceptor
+### Port Configuration
 
-The prompt interceptor is an in-process middleware chain in the channel manager that short-circuits certain commands before they reach the agent.
+The agent-manager listens on port **3100** by default. Configurable via:
 
-### Interceptor Commands
+- Environment variable: `AGENT_MANAGER_PORT=3100`
+- Plugin option: `port: 3100` in agent.yaml
 
-Commands handled by the interceptor (never reach the real agent):
+## Channel Adapter Protocol
 
-| Command | Description |
-|---------|-------------|
-| `/sh <cmd>` | Execute shell command in agent container |
-| `/diagnose` | Show diagnostics: PID, memory, uptime, perf stats |
+Channel adapters are sidecars that connect to the agent-manager over WebSocket and bridge external messaging platforms to ACP.
 
-Command plugins (e.g., `/oauth`) are also handled by the interceptor chain.
-
-### How Interception Works
+### Connection Flow
 
 ```
-agent.prompt(sessionId, text)
-  → interceptor chain:
-    1. Wrapper commands (/sh, /diagnose) — sync
-    2. Command plugins (/oauth, etc.) — async
-    3. onMessage interceptors (paste-back) — async
-  → none matched? Forward to ACP adapter
+1. Connect to ws://agent:<port>/acp (default port 3100)
+2. Send initialize → receive cached agent capabilities
+3. Call session/new with {cwd: "..."} (mcpServers injected by manager)
+4. Send session/prompt with prompt array
+5. Receive session/update notifications:
+   - agent_message_chunk (streaming text)
+   - turn_completed
+   - available_commands_update
+6. Receive prompt result (stopReason: "end_turn")
 ```
 
-### Why In-Process?
+### Adapter Responsibilities
 
-- Single process model — simpler deployment, no extra pipe management
-- Fully testable — interceptor is a function, not a process boundary
-- `/sh` runs in the **agent container** (correct filesystem context)
-- `/diagnose` reports **agent-side** metrics (memory, CPU, disk)
-- Any ACP client (Telegram, Slack, CLI) automatically benefits
+| Concern | Channel Adapter | Agent-Manager |
+|---------|----------------|---------------|
+| Platform connection (bot API, webhooks) | ✅ | ❌ |
+| User ACL / filtering | ✅ | ❌ |
+| Platform UX (typing, reactions, formatting) | ✅ | ❌ |
+| Session mapping (chatId → sessionId) | ✅ | ❌ |
+| Agent process lifecycle | ❌ | ✅ |
+| ACP handshake + auth | ❌ | ✅ |
+| mcpServers injection | ❌ | ✅ |
+| Permission auto-approval | ❌ | ✅ |
+| Broadcasting responses | ❌ | ✅ |
+
+### Example: Telegram Adapter
+
+1. **Connect** — WebSocket to `ws://agent:3100/acp`
+2. **Initialize** — Send `initialize`, get cached capabilities
+3. **Poll Telegram** — Long-poll via grammy (dummy token, real one injected by gateway)
+4. **Filter** — Check `allowed_users` ACL
+5. **Ack** — React with 👀 emoji on message receipt
+6. **Typing** — Send typing indicator while agent works
+7. **Session** — Get or create ACP session for this chatId via `session/new`
+8. **Prompt** — Send `session/prompt` with user message
+9. **Stream** — Collect `session/update` notifications (agent_message_chunk)
+10. **Format** — Convert markdown to Telegram HTML, split at 4096 char limit
+11. **Respond** — Send formatted response with retry + rate limiting
 
 ## Agent-Provided Commands
 
 Agents declare commands dynamically via ACP `available_commands_update` session notification:
 
 ```jsonc
-// Agent → Client (after session/new or session/load)
+// Agent → agent-manager → all clients (after session/new or session/load)
 {"jsonrpc":"2.0","method":"session/update","params":{
   "sessionId":"abc-123",
   "update":{
@@ -261,43 +253,22 @@ Agents declare commands dynamically via ACP `available_commands_update` session 
 }}
 ```
 
-The channel registers these as bot menu items (Telegram `setMyCommands`). All agent commands are forwarded via `session/prompt` — the agent handles them internally.
-
-### Command Resolution
-
-```
-/sh, /diagnose       → handled by prompt interceptor (never reaches agent)
-/oauth, etc.         → handled by command plugins (never reaches agent)
-/model, /new, etc.   → forwarded to agent via prompt (agent handles internally)
-Plain text           → forwarded to agent via prompt
-```
-
-## Telegram Channel Behavior
-
-1. **Connect** — Long-poll Telegram API via grammy (dummy token, real one injected by gateway)
-2. **Filter** — Check `allowed_users` ACL
-3. **Ack** — React with 👀 emoji on message receipt
-4. **Typing** — Send typing indicator while agent works
-5. **Session** — Get or create ACP session for this chatId
-6. **Forward** — All messages (including /commands) sent as prompts to agent
-7. **Format** — Convert markdown to Telegram HTML, split at 4096 char limit
-8. **Respond** — Send formatted response with retry + rate limiting
-9. **Bot menu** — Register agent-declared commands via `setMyCommands`
+Channel adapters register these as platform-native UI (e.g., Telegram `setMyCommands`). All agent commands are forwarded via `session/prompt` — the agent handles them internally.
 
 ## Error Handling
 
 | Scenario | Behavior |
 |----------|----------|
-| Agent adapter crashes | AcpAgent auto-restarts, new session on next message |
-| Prompt fails | Send error message to user ("⚠️ Agent unavailable") |
-| Rate limit (Telegram) | Queue messages, respect backoff (429 retry-after) |
-| Unauthorized user | Silently ignore (log for audit) |
-| Agent not ready | Buffer messages (simple array, drain when ready) |
+| Agent process crashes | agent-manager auto-restarts, new session on next request |
+| Prompt fails | Return JSON-RPC error to client; adapter sends error to user |
+| WebSocket disconnect | Adapter reconnects with backoff |
+| Health check fails | Orchestrator can restart container |
+| Agent not ready | agent-manager buffers or returns 503 until handshake completes |
 
 ## Security
 
-- Agent adapter runs inside the sandbox container (no internet except via gateway)
+- Agent process runs inside the sandbox container (no internet except via gateway)
 - All API keys injected by gateway MITM (agent never sees real credentials)
-- Channel manager uses dummy tokens — gateway rewrites to real ones
-- ACP adapter inherits the sandbox's network restrictions
-- `/sh` executes in agent container (same security boundary as the agent)
+- Channel adapters use dummy tokens — gateway rewrites to real ones
+- ACP agent inherits the sandbox's network restrictions
+- Agent-manager only accepts connections from within the container network
