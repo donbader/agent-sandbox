@@ -29,10 +29,16 @@ export class AcpServer {
   private wsClients = new Set<WebSocket>();
   private sseClients = new Set<ServerResponse>();
   private pendingRequests = new Map<number | string, PendingRequest>();
+  private initResult: JsonRpcMessage["result"] | null = null;
 
   constructor(agent: AgentProcess, options: AcpServerOptions) {
     this.agent = agent;
     this.port = options.port;
+  }
+
+  /** Store the cached init result so we can replay it to connecting clients. */
+  setInitResult(result: JsonRpcMessage["result"]): void {
+    this.initResult = result;
   }
 
   async start(): Promise<void> {
@@ -96,6 +102,14 @@ export class AcpServer {
   }
 
   private interceptCommand(msg: JsonRpcMessage): JsonRpcMessage | null {
+    if (msg.method === "initialize") {
+      // Agent is already initialized — return cached result to client.
+      return { jsonrpc: "2.0", id: msg.id, result: this.initResult };
+    }
+    if (msg.method === "auth/authenticate") {
+      // Agent is already authenticated — accept any client auth.
+      return { jsonrpc: "2.0", id: msg.id, result: {} };
+    }
     if (msg.method !== "session/prompt") return null;
     const params = msg.params as { prompt?: Array<{ type: string; text: string }>; sessionId?: string } | undefined;
     const text = params?.prompt?.[0]?.text?.trim();
