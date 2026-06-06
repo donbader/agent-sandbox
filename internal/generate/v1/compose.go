@@ -48,8 +48,22 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 				"condition": "service_healthy",
 			},
 		},
-		"networks": []string{"sandbox"},
-		"volumes":  agentVolumes,
+		"networks": map[string]any{
+			"sandbox": map[string]any{
+				"aliases": []string{"agent"},
+			},
+		},
+		"volumes": agentVolumes,
+	}
+	// Add healthcheck if the agent exposes ports (agent-manager listens on the first declared port).
+	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
+		port := contribs.Runtime.Ports[0]
+		agentSvc["healthcheck"] = map[string]any{
+			"test":     []string{"CMD", "curl", "-sf", fmt.Sprintf("http://localhost:%s/health", port)},
+			"interval": "3s",
+			"timeout":  "3s",
+			"retries":  5,
+		}
 	}
 	// Expose ports from plugin contributions (e.g. SSH)
 	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
@@ -86,7 +100,16 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 	// Sidecar services from plugins
 	if contribs != nil {
 		for name, svc := range contribs.Sidecar.Services {
-			compose.Services[name] = buildSidecarService(svc, buildDir)
+			sidecar := buildSidecarService(svc, buildDir)
+			// Sidecars implicitly depend on the agent service being started.
+			if sidecar["depends_on"] == nil {
+				sidecar["depends_on"] = map[string]any{
+					agentName: map[string]any{
+						"condition": "service_healthy",
+					},
+				}
+			}
+			compose.Services[name] = sidecar
 		}
 	}
 
