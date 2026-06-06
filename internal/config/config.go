@@ -216,4 +216,65 @@ func LoadFleet(dir string) (*FleetConfig, error) {
 	return &cfg, nil
 }
 
+// FleetAgent pairs an agent config with its source directory.
+type FleetAgent struct {
+	Config *Config
+	Dir    string // absolute path to the agent's directory
+}
+
+// LoadFleetAgents loads fleet.yaml and all referenced agent configs,
+// merging shared installations into each agent. Returns configs ready for generation.
+func LoadFleetAgents(dir string) (*FleetConfig, []FleetAgent, error) {
+	fleet, err := LoadFleet(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var agents []FleetAgent
+	for _, agentName := range fleet.Agents {
+		agentDir := filepath.Join(dir, agentName)
+		cfg, err := Load(agentDir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("loading agent %q: %w", agentName, err)
+		}
+
+		// Merge shared installations into agent config (per-agent overrides shared)
+		cfg.Installations = MergeInstallations(fleet.Shared.Features, cfg.Installations)
+
+		agents = append(agents, FleetAgent{Config: cfg, Dir: agentDir})
+	}
+
+	return fleet, agents, nil
+}
+
+// MergeInstallations merges shared features with per-agent installations.
+// Per-agent wins when the same plugin name appears in both.
+func MergeInstallations(shared []FeatureEntry, perAgent []Installation) []Installation {
+	if len(shared) == 0 {
+		return perAgent
+	}
+
+	// Build set of per-agent plugin names for override detection
+	agentPlugins := make(map[string]bool, len(perAgent))
+	for _, inst := range perAgent {
+		agentPlugins[inst.Plugin] = true
+	}
+
+	// Start with shared features that aren't overridden
+	var merged []Installation
+	for _, feat := range shared {
+		if agentPlugins[feat.Plugin] {
+			continue // per-agent overrides
+		}
+		merged = append(merged, Installation{
+			Plugin:  feat.Plugin,
+			Options: feat.Config,
+		})
+	}
+
+	// Append all per-agent installations
+	merged = append(merged, perAgent...)
+	return merged
+}
+
 

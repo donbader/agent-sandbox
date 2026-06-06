@@ -1,0 +1,10 @@
+# Reviewer agent — reviews PRs, runs linters
+name: reviewer
+runtime:
+  image: "@builtin/codex"
+
+gateway:
+  services:
+    - url: https://api.anthropic.com
+      headers:
+        x-api-key: ${ANTHROPIC_API_KEY}

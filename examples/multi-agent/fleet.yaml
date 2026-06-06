@@ -1,0 +1,10 @@
+# Multi-agent fleet example
+# Run: agent-sandbox generate -C examples/multi-agent
+agents:
+  - coder
+  - reviewer
+
+shared:
+  features:
+    - plugin: "@builtin/github-pat"
+      token: "${GITHUB_PAT}"

@@ -52,39 +52,133 @@ func (g *Generator) SetBundledPluginsFS(pluginsFS fs.FS) {
 	}
 }
 
-// Run executes the full generation pipeline.
+// Run executes the full generation pipeline for a single-agent project.
 func (g *Generator) Run() error {
-	// 1. Load config
 	cfg, err := config.Load(g.projectDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// 2. Create output directory (needed early for asset extraction)
+	return g.RunWithConfig(cfg, g.projectDir)
+}
+
+// RunWithConfig executes the generation pipeline for a pre-loaded config.
+// agentDir is the directory containing the agent's config and local plugins.
+func (g *Generator) RunWithConfig(cfg *config.Config, agentDir string) error {
 	buildDir := filepath.Join(g.projectDir, ".build")
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return fmt.Errorf("create .build dir: %w", err)
 	}
 
-	// 3. Resolve plugins, extract assets, then render
-	resolver := plugin.NewResolver(g.projectDir, g.bundledFS)
+	merged, err := g.generateAgentArtifacts(cfg, agentDir, buildDir)
+	if err != nil {
+		return err
+	}
+
+	// Generate docker-compose.yml (single-agent mode)
+	compose, err := BuildCompose(cfg, merged, g.projectDir)
+	if err != nil {
+		return fmt.Errorf("build compose: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
+		return fmt.Errorf("write docker-compose.yml: %w", err)
+	}
+
+	// Extract gateway source
+	if err := g.extractGatewaySource(buildDir); err != nil {
+		return fmt.Errorf("extract gateway source: %w", err)
+	}
+
+	// Generate JSON Schema
+	if err := generateSchema(buildDir); err != nil {
+		return fmt.Errorf("generate schema: %w", err)
+	}
+
+	return nil
+}
+
+// RunFleet executes the generation pipeline for a multi-agent fleet.
+// All agents share a single .build/ directory with a unified docker-compose.yml.
+func (g *Generator) RunFleet(agents []config.FleetAgent) error {
+	buildDir := filepath.Join(g.projectDir, ".build")
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
+		return fmt.Errorf("create .build dir: %w", err)
+	}
+
+	// Generate per-agent artifacts (Dockerfile, entrypoint, gateway config)
+	type agentBuild struct {
+		cfg      *config.Config
+		merged   *plugin.Contributions
+		buildDir string
+	}
+	var builds []agentBuild
+
+	for _, agent := range agents {
+		agentBuildDir := filepath.Join(buildDir, agent.Config.Name)
+		if err := os.MkdirAll(agentBuildDir, 0755); err != nil {
+			return fmt.Errorf("create build dir for %s: %w", agent.Config.Name, err)
+		}
+
+		merged, err := g.generateAgentArtifacts(agent.Config, agent.Dir, agentBuildDir)
+		if err != nil {
+			return fmt.Errorf("generate %s: %w", agent.Config.Name, err)
+		}
+
+		builds = append(builds, agentBuild{cfg: agent.Config, merged: merged, buildDir: agentBuildDir})
+	}
+
+	// Generate unified docker-compose.yml
+	var entries []ComposeAgentEntry
+	for _, b := range builds {
+		entries = append(entries, ComposeAgentEntry{
+			Config:   b.cfg,
+			Contribs: b.merged,
+			BuildDir: b.buildDir,
+		})
+	}
+
+	compose, err := BuildFleetCompose(entries, g.projectDir)
+	if err != nil {
+		return fmt.Errorf("build fleet compose: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
+		return fmt.Errorf("write docker-compose.yml: %w", err)
+	}
+
+	// Extract shared gateway source (once for all agents)
+	if err := g.extractGatewaySource(buildDir); err != nil {
+		return fmt.Errorf("extract gateway source: %w", err)
+	}
+
+	// Generate JSON Schema
+	if err := generateSchema(buildDir); err != nil {
+		return fmt.Errorf("generate schema: %w", err)
+	}
+
+	return nil
+}
+
+// generateAgentArtifacts resolves plugins, generates Dockerfile + entrypoint + gateway config.
+// Returns merged contributions for compose generation.
+func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDir string) (*plugin.Contributions, error) {
+	resolver := plugin.NewResolver(agentDir, g.bundledFS)
 	var allContribs []*plugin.Contributions
 	resolved := make(map[string]*resolvedPlugin)
 
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
 		if err != nil {
-			return fmt.Errorf("resolve plugin %q: %w", inst.Plugin, err)
+			return nil, fmt.Errorf("resolve plugin %q: %w", inst.Plugin, err)
 		}
 
 		// Resolve asset paths before rendering so {{ asset "X" }} works in templates
 		if err := g.resolveAssetPaths(pluginDef, buildDir); err != nil {
-			return fmt.Errorf("resolve assets for plugin %q: %w", inst.Plugin, err)
+			return nil, fmt.Errorf("resolve assets for plugin %q: %w", inst.Plugin, err)
 		}
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options)
 		if err != nil {
-			return fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
+			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
 		}
 
 		// Resolve middleware and sidecar paths relative to the plugin's base directory
@@ -111,62 +205,41 @@ func (g *Generator) Run() error {
 
 	// 4. Validate plugin dependencies
 	if err := validateRequires(resolved); err != nil {
-		return err
+		return nil, err
 	}
 
 	merged := plugin.MergeContributions(allContribs...)
 
-	// 4. Generate Dockerfile + entrypoint.sh (transparent proxy bootstrap)
+	// Generate Dockerfile + entrypoint.sh (transparent proxy bootstrap)
 	dockerfile, err := BuildDockerfile(cfg, merged)
 	if err != nil {
-		return fmt.Errorf("build dockerfile: %w", err)
+		return nil, fmt.Errorf("build dockerfile: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
-		return fmt.Errorf("write Dockerfile: %w", err)
+		return nil, fmt.Errorf("write Dockerfile: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(buildDir, "entrypoint.sh"), []byte(EntrypointScript(merged.Runtime.PreEntrypoint)), 0755); err != nil {
-		return fmt.Errorf("write entrypoint.sh: %w", err)
+		return nil, fmt.Errorf("write entrypoint.sh: %w", err)
 	}
 
-	// 5. Generate docker-compose.yml
-	compose, err := BuildCompose(cfg, merged, g.projectDir)
-	if err != nil {
-		return fmt.Errorf("build compose: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
-		return fmt.Errorf("write docker-compose.yml: %w", err)
-	}
-
-	// 6. Extract gateway source into .build/gateway-src/
-	if err := g.extractGatewaySource(buildDir); err != nil {
-		return fmt.Errorf("extract gateway source: %w", err)
-	}
-
-	// 7. Build gateway config + copy middleware
+	// Build gateway config + copy middleware
 	gwCfg := BuildGatewayConfig(cfg, merged)
 	if err := WriteGatewayRuntimeConfig(buildDir, gwCfg); err != nil {
-		return fmt.Errorf("write gateway runtime config: %w", err)
+		return nil, fmt.Errorf("write gateway runtime config: %w", err)
 	}
 	if len(gwCfg.Middlewares) > 0 {
-		// Collect all plugin options for middleware template rendering.
-		// Middleware templates can reference {{ .options.X }} to bake secrets at generate-time.
 		allOpts := collectAllOptions(cfg)
-		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares, allOpts); err != nil {
-			return fmt.Errorf("copy middleware: %w", err)
+		if err := CopyCustomMiddleware(agentDir, buildDir, gwCfg.Middlewares, allOpts); err != nil {
+			return nil, fmt.Errorf("copy middleware: %w", err)
 		}
 	}
 	if len(gwCfg.AuthHeaders) > 0 {
 		if err := GenerateAuthHeaderMiddleware(buildDir, gwCfg.AuthHeaders); err != nil {
-			return fmt.Errorf("generate auth-header middleware: %w", err)
+			return nil, fmt.Errorf("generate auth-header middleware: %w", err)
 		}
 	}
 
-	// 8. Generate JSON Schema
-	if err := generateSchema(buildDir); err != nil {
-		return fmt.Errorf("generate schema: %w", err)
-	}
-
-	return nil
+	return merged, nil
 }
 
 // collectAllOptions merges all installation options into a single map.

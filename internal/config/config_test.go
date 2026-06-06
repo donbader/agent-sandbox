@@ -187,3 +187,129 @@ func TestValidate_NoErrorsOnValidConfig(t *testing.T) {
 	err := cfg.Validate()
 	assert.NoError(t, err)
 }
+
+func TestMergeInstallations(t *testing.T) {
+	t.Run("shared only", func(t *testing.T) {
+		shared := []FeatureEntry{
+			{Plugin: "@builtin/github-pat", Config: map[string]any{"token": "${PAT}"}},
+		}
+		result := MergeInstallations(shared, nil)
+		require.Len(t, result, 1)
+		assert.Equal(t, "@builtin/github-pat", result[0].Plugin)
+		assert.Equal(t, "${PAT}", result[0].Options["token"])
+	})
+
+	t.Run("per-agent only", func(t *testing.T) {
+		perAgent := []Installation{
+			{Plugin: "@builtin/telegram", Options: map[string]any{"bot": "abc"}},
+		}
+		result := MergeInstallations(nil, perAgent)
+		require.Len(t, result, 1)
+		assert.Equal(t, "@builtin/telegram", result[0].Plugin)
+	})
+
+	t.Run("per-agent overrides shared same plugin", func(t *testing.T) {
+		shared := []FeatureEntry{
+			{Plugin: "@builtin/github-pat", Config: map[string]any{"token": "shared-token"}},
+			{Plugin: "@builtin/mcp-oauth", Config: map[string]any{"provider": "notion"}},
+		}
+		perAgent := []Installation{
+			{Plugin: "@builtin/github-pat", Options: map[string]any{"token": "agent-token"}},
+		}
+
+		result := MergeInstallations(shared, perAgent)
+		require.Len(t, result, 2)
+
+		// mcp-oauth from shared (not overridden)
+		assert.Equal(t, "@builtin/mcp-oauth", result[0].Plugin)
+		assert.Equal(t, "notion", result[0].Options["provider"])
+		// github-pat from per-agent (overrides shared)
+		assert.Equal(t, "@builtin/github-pat", result[1].Plugin)
+		assert.Equal(t, "agent-token", result[1].Options["token"])
+	})
+
+	t.Run("different plugins merge additively", func(t *testing.T) {
+		shared := []FeatureEntry{
+			{Plugin: "@builtin/github-pat", Config: map[string]any{"token": "${PAT}"}},
+		}
+		perAgent := []Installation{
+			{Plugin: "@builtin/telegram", Options: map[string]any{"bot": "abc"}},
+		}
+
+		result := MergeInstallations(shared, perAgent)
+		require.Len(t, result, 2)
+		assert.Equal(t, "@builtin/github-pat", result[0].Plugin)
+		assert.Equal(t, "@builtin/telegram", result[1].Plugin)
+	})
+}
+
+func TestLoadFleetAgents(t *testing.T) {
+	t.Run("loads and merges", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// fleet.yaml
+		fleetYAML := `
+agents:
+  - coder
+  - reviewer
+shared:
+  features:
+    - plugin: "@builtin/github-pat"
+      token: "${GITHUB_PAT}"
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(fleetYAML), 0644))
+
+		// coder/agent.yaml — has its own github-pat (should override)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "coder"), 0755))
+		coderYAML := `
+name: coder
+runtime:
+  image: "@builtin/codex"
+installations:
+  - plugin: "@builtin/github-pat"
+    options:
+      token: "${CODER_PAT}"
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "coder", "agent.yaml"), []byte(coderYAML), 0644))
+
+		// reviewer/agent.yaml — no github-pat (inherits from shared)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "reviewer"), 0755))
+		reviewerYAML := `
+name: reviewer
+runtime:
+  image: "@builtin/codex"
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer", "agent.yaml"), []byte(reviewerYAML), 0644))
+
+		fleet, agents, err := LoadFleetAgents(dir)
+		require.NoError(t, err)
+		assert.Len(t, fleet.Agents, 2)
+		require.Len(t, agents, 2)
+
+		// coder: per-agent github-pat wins
+		coder := agents[0]
+		assert.Equal(t, "coder", coder.Config.Name)
+		require.Len(t, coder.Config.Installations, 1)
+		assert.Equal(t, "@builtin/github-pat", coder.Config.Installations[0].Plugin)
+		assert.Equal(t, "${CODER_PAT}", coder.Config.Installations[0].Options["token"])
+
+		// reviewer: gets shared github-pat
+		reviewer := agents[1]
+		assert.Equal(t, "reviewer", reviewer.Config.Name)
+		require.Len(t, reviewer.Config.Installations, 1)
+		assert.Equal(t, "@builtin/github-pat", reviewer.Config.Installations[0].Plugin)
+		assert.Equal(t, "${GITHUB_PAT}", reviewer.Config.Installations[0].Options["token"])
+	})
+
+	t.Run("missing agent dir fails", func(t *testing.T) {
+		dir := t.TempDir()
+		fleetYAML := `
+agents:
+  - nonexistent
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(fleetYAML), 0644))
+
+		_, _, err := LoadFleetAgents(dir)
+		assert.ErrorContains(t, err, "loading agent")
+	})
+}

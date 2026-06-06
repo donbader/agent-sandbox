@@ -131,3 +131,111 @@ func TestBuildCompose_DockerNoUserns(t *testing.T) {
 
 	assert.NotContains(t, output, "userns_mode")
 }
+
+func TestBuildFleetCompose(t *testing.T) {
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "coder",
+				Runtime: config.RuntimeConfig{
+					Image:   "@builtin/codex",
+					Volumes: []string{"coder-data:/opt/data"},
+				},
+			},
+			Contribs: &plugin.Contributions{
+				Runtime: plugin.RuntimeContrib{
+					Ports: []string{"8080:8080"},
+				},
+				Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+			},
+			BuildDir: "/project/.build/coder",
+		},
+		{
+			Config: &config.Config{
+				Name: "reviewer",
+				Runtime: config.RuntimeConfig{
+					Image: "@builtin/codex",
+				},
+			},
+			Contribs: nil,
+			BuildDir: "/project/.build/reviewer",
+		},
+	}
+
+	output, err := BuildFleetCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Both agents present
+	assert.Contains(t, output, "coder:")
+	assert.Contains(t, output, "coder-gateway:")
+	assert.Contains(t, output, "reviewer:")
+	assert.Contains(t, output, "reviewer-gateway:")
+
+	// Per-agent Dockerfile paths
+	assert.Contains(t, output, ".build/coder/Dockerfile")
+	assert.Contains(t, output, ".build/reviewer/Dockerfile")
+
+	// Per-agent gateway config mount
+	assert.Contains(t, output, "./coder/config.yaml:/etc/gateway/config.yaml:ro")
+	assert.Contains(t, output, "./reviewer/config.yaml:/etc/gateway/config.yaml:ro")
+
+	// Shared network
+	assert.Contains(t, output, "sandbox:")
+
+	// Named volumes
+	assert.Contains(t, output, "coder-data:")
+	assert.Contains(t, output, "certs:")
+
+	// Ports from coder
+	assert.Contains(t, output, "8080:8080")
+}
+
+func TestBuildFleetCompose_SidecarNamespacing(t *testing.T) {
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "agent-a",
+				Runtime: config.RuntimeConfig{
+					Image: "@builtin/codex",
+				},
+			},
+			Contribs: &plugin.Contributions{
+				Sidecar: plugin.SidecarContrib{
+					Services: map[string]plugin.ComposeService{
+						"telegram": {
+							Build:       "/project/plugins/telegram",
+							Environment: map[string]string{"BOT": "a-bot"},
+						},
+					},
+				},
+			},
+			BuildDir: "/project/.build/agent-a",
+		},
+		{
+			Config: &config.Config{
+				Name: "agent-b",
+				Runtime: config.RuntimeConfig{
+					Image: "@builtin/codex",
+				},
+			},
+			Contribs: &plugin.Contributions{
+				Sidecar: plugin.SidecarContrib{
+					Services: map[string]plugin.ComposeService{
+						"telegram": {
+							Build:       "/project/plugins/telegram",
+							Environment: map[string]string{"BOT": "b-bot"},
+						},
+					},
+				},
+			},
+			BuildDir: "/project/.build/agent-b",
+		},
+	}
+
+	output, err := BuildFleetCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Sidecars should be namespaced by agent name to avoid collisions
+	assert.Contains(t, output, "agent-a-telegram:")
+	assert.Contains(t, output, "agent-b-telegram:")
+}

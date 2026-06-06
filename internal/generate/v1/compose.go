@@ -232,3 +232,150 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 	return envVars
 }
 
+// ComposeAgentEntry holds the data needed to generate one agent's services in a fleet compose file.
+type ComposeAgentEntry struct {
+	Config   *config.Config
+	Contribs *plugin.Contributions
+	BuildDir string // absolute path to the agent's .build/<name>/ directory
+}
+
+// BuildFleetCompose generates a unified docker-compose.yml for multiple agents.
+// Each agent gets its own service + gateway, sharing a single sandbox network.
+func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, error) {
+	compose := composeFile{
+		Services: map[string]any{},
+		Volumes:  map[string]any{},
+		Networks: map[string]any{},
+	}
+
+	// Shared network for all agents
+	compose.Networks["sandbox"] = map[string]any{"driver": "bridge"}
+	// Shared certs volume
+	compose.Volumes["certs"] = nil
+
+	for _, agent := range agents {
+		cfg := agent.Config
+		agentName := cfg.Name
+		gatewayName := cfg.Name + "-gateway"
+
+		// Relative build dir from .build/ (e.g., "./<agent-name>")
+		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
+		if err != nil {
+			relBuildDir = agent.BuildDir
+		}
+
+		// Agent service
+		agentVolumes := []string{"certs:/shared/certs"}
+		agentVolumes = append(agentVolumes, cfg.Runtime.Volumes...)
+		if agent.Contribs != nil {
+			agentVolumes = append(agentVolumes, agent.Contribs.Runtime.Volumes...)
+		}
+
+		agentSvc := map[string]any{
+			"build": map[string]any{
+				"context":    "..",
+				"dockerfile": filepath.Join(".build", relBuildDir, "Dockerfile"),
+			},
+			"cap_drop": []string{"ALL"},
+			"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER"},
+			"depends_on": map[string]any{
+				gatewayName: map[string]any{
+					"condition": "service_healthy",
+				},
+			},
+			"networks": map[string]any{
+				"sandbox": map[string]any{
+					"aliases": []string{agentName},
+				},
+			},
+			"volumes": agentVolumes,
+		}
+
+		if agent.Contribs != nil && len(agent.Contribs.Runtime.Ports) > 0 {
+			port := agent.Contribs.Runtime.Ports[0]
+			agentSvc["healthcheck"] = map[string]any{
+				"test":     []string{"CMD", "curl", "-sf", fmt.Sprintf("http://localhost:%s/health", port)},
+				"interval": "3s",
+				"timeout":  "3s",
+				"retries":  5,
+			}
+			agentSvc["ports"] = agent.Contribs.Runtime.Ports
+		}
+
+		if cfg.RuntimeEngine == "podman" {
+			agentSvc["userns_mode"] = "keep-id"
+		}
+
+		compose.Services[agentName] = agentSvc
+
+		// Gateway service (per-agent, shares gateway-src build context)
+		gatewayEnv := collectGatewayEnvVars(cfg, agent.Contribs)
+		gatewaySvc := map[string]any{
+			"build": map[string]any{
+				"context":    "./gateway-src",
+				"dockerfile": "Dockerfile",
+			},
+			"cap_drop": []string{"ALL"},
+			"cap_add":  []string{"NET_ADMIN", "NET_BIND_SERVICE"},
+			"networks": map[string]any{
+				"sandbox": map[string]any{
+					"aliases": []string{gatewayName},
+				},
+			},
+			"volumes": []string{
+				"certs:/shared/certs",
+				fmt.Sprintf("./%s/config.yaml:/etc/gateway/config.yaml:ro", relBuildDir),
+			},
+			"healthcheck": map[string]any{
+				"test":     []string{"CMD", "wget", "--spider", "-q", "http://localhost:8080/health"},
+				"interval": "5s",
+				"timeout":  "3s",
+				"retries":  3,
+			},
+		}
+		if len(gatewayEnv) > 0 {
+			gatewaySvc["environment"] = gatewayEnv
+		}
+		compose.Services[gatewayName] = gatewaySvc
+
+		// Sidecar services
+		if agent.Contribs != nil {
+			for name, svc := range agent.Contribs.Sidecar.Services {
+				sidecar := buildSidecarService(svc, agent.BuildDir)
+				if sidecar["depends_on"] == nil {
+					sidecar["depends_on"] = map[string]any{
+						agentName: map[string]any{
+							"condition": "service_healthy",
+						},
+					}
+				}
+				// Prefix sidecar name with agent name to avoid collisions
+				sidecarName := agentName + "-" + name
+				compose.Services[sidecarName] = sidecar
+			}
+		}
+
+		// Extract named volumes
+		for _, v := range cfg.Runtime.Volumes {
+			volName := extractVolumeName(v)
+			if volName != "" {
+				compose.Volumes[volName] = nil
+			}
+		}
+		if agent.Contribs != nil {
+			for _, v := range agent.Contribs.Runtime.Volumes {
+				volName := extractVolumeName(v)
+				if volName != "" {
+					compose.Volumes[volName] = nil
+				}
+			}
+		}
+	}
+
+	data, err := yaml.Marshal(compose)
+	if err != nil {
+		return "", fmt.Errorf("marshal fleet compose: %w", err)
+	}
+	return string(data), nil
+}
+
