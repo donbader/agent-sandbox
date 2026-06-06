@@ -7,6 +7,11 @@ options:
     type: array
     required: true
     description: "Command to spawn the agent via ACP over stdio (e.g. [codex-acp] or [claude, --dangerously-skip-permissions])"
+  port:
+    type: string
+    required: false
+    default: "3100"
+    description: "HTTP/WS port for the ACP server"
 
 contributes:
   runtime:
@@ -15,4 +20,4 @@ contributes:
       - "RUN cd /opt/agent-manager-src && npm install && npm run build && mkdir -p /opt/agent-manager && mv dist /opt/agent-manager/dist && mv node_modules /opt/agent-manager/node_modules && rm -rf /opt/agent-manager-src"
       - "RUN echo '{\"acp_command\":{{ toJSON (index .options \"acp_command\") }},\"cwd\":\"/home/agent\"}' > /opt/agent-manager/config.json"
     ports:
-      - "3100"
+      - "{{ .options.port }}"
