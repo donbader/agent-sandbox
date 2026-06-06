@@ -191,9 +191,10 @@ type FleetConfig struct {
 	Shared SharedBlock `yaml:"shared"`
 }
 
-// SharedBlock holds features shared across all agents.
+// SharedBlock holds configuration shared across all agents in a fleet.
 type SharedBlock struct {
-	Features []FeatureEntry `yaml:"features"`
+	Installations []FeatureEntry `yaml:"installations"`
+	Gateway       GatewayConfig  `yaml:"gateway"`
 }
 
 // LoadFleet reads and parses a fleet.yaml file from the given directory.
@@ -223,7 +224,8 @@ type FleetAgent struct {
 }
 
 // LoadFleetAgents loads fleet.yaml and all referenced agent configs,
-// merging shared installations into each agent. Returns configs ready for generation.
+// merging shared installations and gateway services into each agent.
+// Returns configs ready for generation.
 func LoadFleetAgents(dir string) (*FleetConfig, []FleetAgent, error) {
 	fleet, err := LoadFleet(dir)
 	if err != nil {
@@ -239,7 +241,10 @@ func LoadFleetAgents(dir string) (*FleetConfig, []FleetAgent, error) {
 		}
 
 		// Merge shared installations into agent config (per-agent overrides shared)
-		cfg.Installations = MergeInstallations(fleet.Shared.Features, cfg.Installations)
+		cfg.Installations = MergeInstallations(fleet.Shared.Installations, cfg.Installations)
+
+		// Merge shared gateway services (shared prepended, per-agent appended)
+		cfg.Gateway.Services = MergeGatewayServices(fleet.Shared.Gateway.Services, cfg.Gateway.Services)
 
 		agents = append(agents, FleetAgent{Config: cfg, Dir: agentDir})
 	}
@@ -273,6 +278,36 @@ func MergeInstallations(shared []FeatureEntry, perAgent []Installation) []Instal
 	}
 
 	// Append all per-agent installations
+	merged = append(merged, perAgent...)
+	return merged
+}
+
+// MergeGatewayServices merges shared gateway services with per-agent services.
+// Shared services are prepended; per-agent services with the same URL override shared.
+func MergeGatewayServices(shared, perAgent []GatewayServiceEntry) []GatewayServiceEntry {
+	if len(shared) == 0 {
+		return perAgent
+	}
+	if len(perAgent) == 0 {
+		return shared
+	}
+
+	// Build set of per-agent URLs for dedup
+	agentURLs := make(map[string]bool, len(perAgent))
+	for _, svc := range perAgent {
+		agentURLs[svc.URL] = true
+	}
+
+	// Shared services that aren't overridden by per-agent
+	var merged []GatewayServiceEntry
+	for _, svc := range shared {
+		if agentURLs[svc.URL] {
+			continue
+		}
+		merged = append(merged, svc)
+	}
+
+	// Append all per-agent services
 	merged = append(merged, perAgent...)
 	return merged
 }

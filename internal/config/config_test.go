@@ -253,7 +253,7 @@ agents:
   - coder
   - reviewer
 shared:
-  features:
+  installations:
     - plugin: "@builtin/github-pat"
       token: "${GITHUB_PAT}"
 `
@@ -312,4 +312,107 @@ agents:
 		_, _, err := LoadFleetAgents(dir)
 		assert.ErrorContains(t, err, "loading agent")
 	})
+}
+
+func TestMergeGatewayServices(t *testing.T) {
+	t.Run("shared only", func(t *testing.T) {
+		shared := []GatewayServiceEntry{
+			{URL: "https://gateway.example.com", Headers: map[string]string{"Auth": "Bearer x"}},
+		}
+		result := MergeGatewayServices(shared, nil)
+		require.Len(t, result, 1)
+		assert.Equal(t, "https://gateway.example.com", result[0].URL)
+	})
+
+	t.Run("per-agent only", func(t *testing.T) {
+		perAgent := []GatewayServiceEntry{
+			{URL: "https://api.openai.com"},
+		}
+		result := MergeGatewayServices(nil, perAgent)
+		require.Len(t, result, 1)
+		assert.Equal(t, "https://api.openai.com", result[0].URL)
+	})
+
+	t.Run("per-agent overrides shared same URL", func(t *testing.T) {
+		shared := []GatewayServiceEntry{
+			{URL: "https://gateway.example.com", Headers: map[string]string{"Auth": "shared-token"}},
+		}
+		perAgent := []GatewayServiceEntry{
+			{URL: "https://gateway.example.com", Headers: map[string]string{"Auth": "agent-token"}},
+		}
+
+		result := MergeGatewayServices(shared, perAgent)
+		require.Len(t, result, 1)
+		assert.Equal(t, "agent-token", result[0].Headers["Auth"])
+	})
+
+	t.Run("different URLs merge additively", func(t *testing.T) {
+		shared := []GatewayServiceEntry{
+			{URL: "https://gateway.example.com"},
+		}
+		perAgent := []GatewayServiceEntry{
+			{URL: "https://api.openai.com"},
+		}
+
+		result := MergeGatewayServices(shared, perAgent)
+		require.Len(t, result, 2)
+		assert.Equal(t, "https://gateway.example.com", result[0].URL)
+		assert.Equal(t, "https://api.openai.com", result[1].URL)
+	})
+}
+
+func TestLoadFleetAgents_SharedGateway(t *testing.T) {
+	dir := t.TempDir()
+
+	fleetYAML := `
+agents:
+  - coder
+  - reviewer
+shared:
+  gateway:
+    services:
+      - url: https://agent-gateway.stx-ai.net
+        headers:
+          Authorization: Bearer ${STX_TOKEN}
+  installations:
+    - plugin: "@builtin/github-pat"
+      token: "${GITHUB_PAT}"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(fleetYAML), 0644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "coder"), 0755))
+	coderYAML := `
+name: coder
+runtime:
+  image: "@builtin/codex"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "coder", "agent.yaml"), []byte(coderYAML), 0644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "reviewer"), 0755))
+	reviewerYAML := `
+name: reviewer
+runtime:
+  image: "@builtin/claude-code"
+gateway:
+  services:
+    - url: https://api.anthropic.com
+      headers:
+        x-api-key: ${ANTHROPIC_KEY}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer", "agent.yaml"), []byte(reviewerYAML), 0644))
+
+	_, agents, err := LoadFleetAgents(dir)
+	require.NoError(t, err)
+	require.Len(t, agents, 2)
+
+	// coder: gets shared gateway only
+	coder := agents[0]
+	require.Len(t, coder.Config.Gateway.Services, 1)
+	assert.Equal(t, "https://agent-gateway.stx-ai.net", coder.Config.Gateway.Services[0].URL)
+
+	// reviewer: gets shared + own gateway (additive)
+	reviewer := agents[1]
+	require.Len(t, reviewer.Config.Gateway.Services, 2)
+	assert.Equal(t, "https://agent-gateway.stx-ai.net", reviewer.Config.Gateway.Services[0].URL)
+	assert.Equal(t, "https://api.anthropic.com", reviewer.Config.Gateway.Services[1].URL)
 }

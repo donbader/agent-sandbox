@@ -117,12 +117,17 @@ agents:
   - reviewer
 
 shared:
-  features:
-    - plugin: github
+  gateway:
+    services:
+      - url: https://agent-gateway.stx-ai.net
+        headers:
+          Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+  installations:
+    - plugin: "@builtin/github-pat"
       token: "${GITHUB_PAT}"
 ```
 
-Per-agent features **override** shared (same name → per-agent wins). Different features merge additively.
+Per-agent installations **override** shared (same plugin name → per-agent wins). Different plugins merge additively. Shared gateway services are merged into each agent's gateway (same URL → per-agent wins).
 
 ## Home & Packages
 
