@@ -28,7 +28,7 @@ func TestLoad_MissingRuntimeImage(t *testing.T) {
 	assert.ErrorContains(t, err, "runtime.image is required")
 }
 
-func TestLoad_DockerURLRequiresNetwork(t *testing.T) {
+func TestLoad_DockerURLDeprecated(t *testing.T) {
 	dir := t.TempDir()
 	yaml := `
 name: test
@@ -40,7 +40,7 @@ gateway:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
 	_, err := Load(dir)
-	assert.ErrorContains(t, err, "network is required for docker:// URLs")
+	assert.ErrorContains(t, err, "docker:// URLs are deprecated")
 }
 
 func TestLoad_BasicConfig(t *testing.T) {
@@ -80,4 +80,64 @@ installations:
 	assert.Equal(t, "https://api.example.com", cfg.Gateway.Services[0].URL)
 	assert.Len(t, cfg.Installations, 1)
 	assert.Equal(t, "github-pat", cfg.Installations[0].Plugin)
+}
+
+func TestLoad_RuntimeEngine(t *testing.T) {
+	t.Run("defaults to docker", func(t *testing.T) {
+		dir := t.TempDir()
+		yaml := `
+name: test
+runtime:
+  image: "@builtin/codex"
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+		cfg, err := Load(dir)
+		require.NoError(t, err)
+		assert.Equal(t, "", cfg.RuntimeEngine)
+		assert.Equal(t, "docker", cfg.RuntimeEngineBinary())
+	})
+
+	t.Run("podman", func(t *testing.T) {
+		dir := t.TempDir()
+		yaml := `
+name: test
+runtime_engine: podman
+runtime:
+  image: "@builtin/codex"
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+		cfg, err := Load(dir)
+		require.NoError(t, err)
+		assert.Equal(t, "podman", cfg.RuntimeEngine)
+		assert.Equal(t, "podman", cfg.RuntimeEngineBinary())
+	})
+
+	t.Run("invalid engine rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		yaml := `
+name: test
+runtime_engine: containerd
+runtime:
+  image: "@builtin/codex"
+`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+		_, err := Load(dir)
+		assert.ErrorContains(t, err, "runtime_engine must be 'docker' or 'podman'")
+	})
+}
+
+func TestLoad_PlainHostPort(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+name: test
+runtime:
+  image: "@builtin/codex"
+gateway:
+  services:
+    - url: "sidecar:8080"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+	cfg, err := Load(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "sidecar:8080", cfg.Gateway.Services[0].URL)
 }

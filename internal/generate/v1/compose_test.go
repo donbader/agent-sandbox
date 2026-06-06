@@ -80,3 +80,54 @@ func TestBuildCompose_PluginPorts(t *testing.T) {
 
 	assert.Contains(t, output, "2222:2222")
 }
+
+func TestBuildCompose_CapDrop(t *testing.T) {
+	cfg := &config.Config{
+		Name: "secure-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	output, err := BuildCompose(cfg, nil, "/project")
+	require.NoError(t, err)
+
+	// Both agent and gateway should drop all capabilities
+	assert.Contains(t, output, "cap_drop:")
+	assert.Contains(t, output, "- ALL")
+	// Agent needs NET_ADMIN for iptables + user switching caps
+	assert.Contains(t, output, "- NET_ADMIN")
+	assert.Contains(t, output, "- SETUID")
+	assert.Contains(t, output, "- SETGID")
+	// Gateway needs NET_BIND_SERVICE for port 53
+	assert.Contains(t, output, "- NET_BIND_SERVICE")
+}
+
+func TestBuildCompose_PodmanUserns(t *testing.T) {
+	cfg := &config.Config{
+		Name:          "podman-agent",
+		RuntimeEngine: "podman",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	output, err := BuildCompose(cfg, nil, "/project")
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "userns_mode: keep-id")
+}
+
+func TestBuildCompose_DockerNoUserns(t *testing.T) {
+	cfg := &config.Config{
+		Name: "docker-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	output, err := BuildCompose(cfg, nil, "/project")
+	require.NoError(t, err)
+
+	assert.NotContains(t, output, "userns_mode")
+}

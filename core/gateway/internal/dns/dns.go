@@ -3,19 +3,61 @@
 package dns
 
 import (
+	"bufio"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"strings"
 	"sync"
 )
 
 // upstreamServers lists DNS servers to try in order.
-// Docker embedded DNS resolves container names on joined networks.
-// Public DNS resolves internet hostnames.
+// Populated at startup from /etc/resolv.conf (container's embedded DNS)
+// with a public DNS fallback for internet hostname resolution.
 var (
 	upstreamMu      sync.RWMutex
-	upstreamServers = []string{"127.0.0.11:53", "8.8.8.8:53"}
+	upstreamServers = initUpstreamServers()
 )
+
+// initUpstreamServers reads nameservers from /etc/resolv.conf and appends
+// a public DNS fallback. This makes the gateway work with any container runtime
+// (Docker, Podman, containerd) without hardcoding runtime-specific DNS addresses.
+func initUpstreamServers() []string {
+	servers := parseResolvConf("/etc/resolv.conf")
+	// Always add public DNS as final fallback
+	servers = append(servers, "8.8.8.8:53")
+	return servers
+}
+
+// parseResolvConf extracts nameserver entries from a resolv.conf file.
+func parseResolvConf(path string) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		slog.Debug("dns: could not read resolv.conf, using public DNS only", "error", err)
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+
+	var servers []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "nameserver") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				ip := fields[1]
+				// Skip loopback 127.0.0.53 (systemd-resolved stub) — it won't
+				// resolve container names. Keep 127.0.0.11 (Docker) and others.
+				if ip == "127.0.0.53" {
+					continue
+				}
+				servers = append(servers, net.JoinHostPort(ip, "53"))
+			}
+		}
+	}
+	return servers
+}
 
 // Server is a UDP DNS forwarder.
 type Server struct {

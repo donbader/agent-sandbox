@@ -10,11 +10,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DefaultRuntimeEngine is the default container runtime when not specified.
+const DefaultRuntimeEngine = "docker"
+
+// RuntimeEngineBinary returns the container runtime CLI binary name.
+func (c *Config) RuntimeEngineBinary() string {
+	switch c.RuntimeEngine {
+	case "podman":
+		return "podman"
+	default:
+		return "docker"
+	}
+}
+
 // Config represents an agent.yaml file.
 type Config struct {
 	Name          string         `yaml:"name" json:"name" jsonschema:"required,title=name,description=Agent instance name"`
 	LogLevel      string         `yaml:"log_level" json:"log_level,omitempty" jsonschema:"title=log_level,description=Logging verbosity,enum=info,enum=debug"`
 	CoreVersion   string         `yaml:"core_version" json:"core_version,omitempty" jsonschema:"title=core_version,description=Core version to use for generation"`
+	RuntimeEngine string         `yaml:"runtime_engine" json:"runtime_engine,omitempty" jsonschema:"title=runtime_engine,description=Container runtime engine (docker or podman),enum=docker,enum=podman,default=docker"`
 	Runtime       RuntimeConfig  `yaml:"runtime" json:"runtime" jsonschema:"required,title=runtime,description=Agent container configuration"`
 	Gateway       GatewayConfig  `yaml:"gateway" json:"gateway,omitempty" jsonschema:"title=gateway,description=Transparent egress proxy configuration"`
 	Installations []Installation `yaml:"installations" json:"installations,omitempty" jsonschema:"title=installations,description=Plugins to install"`
@@ -35,8 +49,8 @@ type GatewayConfig struct {
 
 // GatewayServiceEntry represents an allowed upstream service.
 type GatewayServiceEntry struct {
-	URL         string            `yaml:"url" json:"url" jsonschema:"required,title=url,description=HTTPS endpoint or docker://<service>:<port> for sidecars"`
-	Network     string            `yaml:"network" json:"network,omitempty" jsonschema:"title=network,description=Docker network to attach (required for docker:// URLs)"`
+	URL         string            `yaml:"url" json:"url" jsonschema:"required,title=url,description=Service endpoint: HTTPS URL (https://api.example.com) or internal host:port (sidecar:8080)"`
+	Network     string            `yaml:"network" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach (optional, defaults to sandbox network)"`
 	Headers     map[string]string `yaml:"headers" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway on every proxied request"`
 	Middlewares []MiddlewareEntry `yaml:"middlewares" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=Custom middleware chain"`
 }
@@ -73,9 +87,15 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("agent.yaml: runtime.image is required")
 	}
 
+	// Validate runtime_engine if specified
+	if cfg.RuntimeEngine != "" && cfg.RuntimeEngine != "docker" && cfg.RuntimeEngine != "podman" {
+		return nil, fmt.Errorf("agent.yaml: runtime_engine must be 'docker' or 'podman', got %q", cfg.RuntimeEngine)
+	}
+
+	// Validate service URLs
 	for i, svc := range cfg.Gateway.Services {
-		if strings.HasPrefix(svc.URL, "docker://") && svc.Network == "" {
-			return nil, fmt.Errorf("agent.yaml: gateway.services[%d]: network is required for docker:// URLs", i)
+		if strings.HasPrefix(svc.URL, "docker://") {
+			return nil, fmt.Errorf("agent.yaml: gateway.services[%d]: docker:// URLs are deprecated, use plain host:port (e.g. %s)", i, strings.TrimPrefix(svc.URL, "docker://"))
 		}
 	}
 

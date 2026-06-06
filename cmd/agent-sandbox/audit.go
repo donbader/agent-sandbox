@@ -106,27 +106,37 @@ func auditAgent(cfg *config.Config) []auditCheck {
 }
 
 func containerRunning(name string) bool {
-	out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", name).Output()
+	rt := runtimeFromEnv()
+	out, err := exec.Command(rt, "inspect", "-f", "{{.State.Running}}", name).Output()
 	if err != nil {
 		return false
 	}
 	return strings.TrimSpace(string(out)) == "true"
 }
 
-func dockerExec(container string, args ...string) (string, error) {
+func containerExec(container string, args ...string) (string, error) {
+	rt := runtimeFromEnv()
 	cmdArgs := append([]string{"exec", container}, args...)
-	out, err := exec.Command("docker", cmdArgs...).CombinedOutput()
+	out, err := exec.Command(rt, cmdArgs...).CombinedOutput()
 	return string(out), err
+}
+
+// runtimeFromEnv returns the container runtime binary from env or default.
+func runtimeFromEnv() string {
+	if rt := os.Getenv("AGENT_SANDBOX_RUNTIME"); rt != "" {
+		return rt
+	}
+	return "docker"
 }
 
 // checkHTTPS verifies the agent can reach an external HTTPS endpoint.
 func checkHTTPS(container string) auditCheck {
 	// Use -o /dev/null -w %{http_code} to check connectivity regardless of HTTP status.
 	// Any HTTP response (even 4xx/5xx) proves the TLS proxy chain works.
-	out, err := dockerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "15", "https://httpbin.org/get")
+	out, err := containerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "15", "https://httpbin.org/get")
 	if err != nil {
 		// Retry once — first request may be slow due to cold DNS + TLS
-		out, err = dockerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "15", "https://httpbin.org/get")
+		out, err = containerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "15", "https://httpbin.org/get")
 	}
 	if err != nil {
 		return auditCheck{
@@ -152,7 +162,7 @@ func checkHTTPS(container string) auditCheck {
 
 // checkSecretIsolation verifies the agent env doesn't contain gateway credentials.
 func checkSecretIsolation(container string, cfg *config.Config) auditCheck {
-	env, err := dockerExec(container, "env")
+	env, err := containerExec(container, "env")
 	if err != nil {
 		return auditCheck{
 			Name:   "Secret isolation",
@@ -197,7 +207,7 @@ func checkSecretIsolation(container string, cfg *config.Config) auditCheck {
 
 // checkDNS verifies DNS resolves through the gateway.
 func checkDNS(container string) auditCheck {
-	resolv, err := dockerExec(container, "cat", "/etc/resolv.conf")
+	resolv, err := containerExec(container, "cat", "/etc/resolv.conf")
 	if err != nil {
 		return auditCheck{
 			Name:   "DNS through gateway",
@@ -206,7 +216,7 @@ func checkDNS(container string) auditCheck {
 		}
 	}
 
-	route, err := dockerExec(container, "ip", "route", "show", "default")
+	route, err := containerExec(container, "ip", "route", "show", "default")
 	if err != nil {
 		return auditCheck{
 			Name:   "DNS through gateway",
@@ -260,7 +270,7 @@ func checkDNS(container string) auditCheck {
 
 // checkCACert verifies the gateway CA is installed in the agent.
 func checkCACert(container string) auditCheck {
-	_, err := dockerExec(container, "test", "-f", "/usr/local/share/ca-certificates/ca.crt")
+	_, err := containerExec(container, "test", "-f", "/usr/local/share/ca-certificates/ca.crt")
 	if err != nil {
 		return auditCheck{
 			Name:   "Gateway CA trusted",
@@ -277,7 +287,7 @@ func checkCACert(container string) auditCheck {
 
 // checkDNATRules verifies OUTPUT DNAT rules are active in the agent.
 func checkDNATRules(container string) auditCheck {
-	out, err := dockerExec(container, "iptables", "-t", "nat", "-L", "OUTPUT", "-n")
+	out, err := containerExec(container, "iptables", "-t", "nat", "-L", "OUTPUT", "-n")
 	if err != nil {
 		return auditCheck{
 			Name:   "Traffic interception rules",
@@ -301,8 +311,8 @@ func checkDNATRules(container string) auditCheck {
 
 // checkDefaultRoute verifies the default route goes through the gateway.
 func checkDefaultRoute(container string) auditCheck {
-	resolv, _ := dockerExec(container, "cat", "/etc/resolv.conf")
-	route, err := dockerExec(container, "ip", "route", "show", "default")
+	resolv, _ := containerExec(container, "cat", "/etc/resolv.conf")
+	route, err := containerExec(container, "ip", "route", "show", "default")
 	if err != nil {
 		return auditCheck{
 			Name:   "Default route to gateway",

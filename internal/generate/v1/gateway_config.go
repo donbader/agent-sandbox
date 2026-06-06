@@ -2,9 +2,11 @@ package v1
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/envvar"
@@ -145,11 +147,21 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 	return nil
 }
 
-// extractDomain extracts the hostname from a URL.
+// extractDomain extracts the hostname from a URL or host:port string.
 func extractDomain(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
+	// If it looks like a URL with a scheme, parse it
+	if strings.Contains(rawURL, "://") {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return ""
+		}
+		return u.Hostname()
 	}
-	return u.Hostname()
+	// Plain host:port — extract host
+	host, _, err := net.SplitHostPort(rawURL)
+	if err != nil {
+		// No port, treat as bare hostname
+		return rawURL
+	}
+	return host
 }

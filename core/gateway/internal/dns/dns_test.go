@@ -2,6 +2,7 @@ package dns
 
 import (
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -203,4 +204,41 @@ func TestDNS_AllUpstreamsFail(t *testing.T) {
 	// Verify it's a timeout, not some other error.
 	netErr, ok := err.(net.Error)
 	assert.True(t, ok && netErr.Timeout(), "error should be a network timeout, got: %v", err)
+}
+
+func TestParseResolvConf(t *testing.T) {
+	t.Run("extracts nameservers", func(t *testing.T) {
+		tmp := t.TempDir()
+		path := tmp + "/resolv.conf"
+		content := "# comment\nnameserver 10.0.0.1\nnameserver 172.17.0.1\nsearch example.com\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+		servers := parseResolvConf(path)
+		assert.Equal(t, []string{"10.0.0.1:53", "172.17.0.1:53"}, servers)
+	})
+
+	t.Run("skips systemd-resolved stub", func(t *testing.T) {
+		tmp := t.TempDir()
+		path := tmp + "/resolv.conf"
+		content := "nameserver 127.0.0.53\nnameserver 8.8.4.4\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+		servers := parseResolvConf(path)
+		assert.Equal(t, []string{"8.8.4.4:53"}, servers)
+	})
+
+	t.Run("missing file returns nil", func(t *testing.T) {
+		servers := parseResolvConf("/nonexistent/resolv.conf")
+		assert.Nil(t, servers)
+	})
+
+	t.Run("keeps docker DNS 127.0.0.11", func(t *testing.T) {
+		tmp := t.TempDir()
+		path := tmp + "/resolv.conf"
+		content := "nameserver 127.0.0.11\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+		servers := parseResolvConf(path)
+		assert.Equal(t, []string{"127.0.0.11:53"}, servers)
+	})
 }
