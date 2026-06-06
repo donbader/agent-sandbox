@@ -4,9 +4,3 @@ runtime:
   image: "@builtin/codex"
   volumes:
     - "coder-workspace:/home/agent/workspace"
-
-gateway:
-  services:
-    - url: https://api.openai.com
-      headers:
-        Authorization: Bearer ${OPENAI_API_KEY}

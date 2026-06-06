@@ -8,3 +8,8 @@ shared:
   features:
     - plugin: "@builtin/github-pat"
       token: "${GITHUB_PAT}"
+    - plugin: "@builtin/external-services"
+      services:
+        - url: https://agent-gateway.stx-ai.net
+          headers:
+            Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
