@@ -43,7 +43,7 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"dockerfile": ".build/Dockerfile",
 		},
 		"cap_drop": []string{"ALL"},
-		"cap_add":  []string{"NET_ADMIN"},
+		"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER"},
 		"depends_on": map[string]any{
 			gatewayName: map[string]any{
 				"condition": "service_healthy",
