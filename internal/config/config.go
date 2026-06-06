@@ -13,6 +13,28 @@ import (
 // DefaultRuntimeEngine is the default container runtime when not specified.
 const DefaultRuntimeEngine = "docker"
 
+// ValidationError collects multiple config validation failures.
+type ValidationError struct {
+	Errors []string
+}
+
+func (e *ValidationError) Error() string {
+	if len(e.Errors) == 1 {
+		return e.Errors[0]
+	}
+	return fmt.Sprintf("%d validation errors:\n- %s", len(e.Errors), strings.Join(e.Errors, "\n- "))
+}
+
+// Add appends an error message to the collection.
+func (e *ValidationError) Add(msg string) {
+	e.Errors = append(e.Errors, msg)
+}
+
+// HasErrors returns true if any validation errors were collected.
+func (e *ValidationError) HasErrors() bool {
+	return len(e.Errors) > 0
+}
+
 // RuntimeEngineBinary returns the container runtime CLI binary name.
 func (c *Config) RuntimeEngineBinary() string {
 	switch c.RuntimeEngine {
@@ -80,26 +102,45 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("parse agent.yaml: %w", err)
 	}
 
-	if cfg.Name == "" {
-		return nil, fmt.Errorf("agent.yaml: name is required")
-	}
-	if cfg.Runtime.Image == "" {
-		return nil, fmt.Errorf("agent.yaml: runtime.image is required")
-	}
-
-	// Validate runtime_engine if specified
-	if cfg.RuntimeEngine != "" && cfg.RuntimeEngine != "docker" && cfg.RuntimeEngine != "podman" {
-		return nil, fmt.Errorf("agent.yaml: runtime_engine must be 'docker' or 'podman', got %q", cfg.RuntimeEngine)
-	}
-
-	// Validate service URLs
-	for i, svc := range cfg.Gateway.Services {
-		if strings.HasPrefix(svc.URL, "docker://") {
-			return nil, fmt.Errorf("agent.yaml: gateway.services[%d]: docker:// URLs are deprecated, use plain host:port (e.g. %s)", i, strings.TrimPrefix(svc.URL, "docker://"))
-		}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil
+}
+
+// Validate checks all config fields and returns a ValidationError collecting
+// all problems found (not just the first one).
+func (c *Config) Validate() error {
+	ve := &ValidationError{}
+
+	if c.Name == "" {
+		ve.Add("name is required")
+	}
+	if c.Runtime.Image == "" {
+		ve.Add("runtime.image is required")
+	}
+
+	// Validate runtime_engine if specified
+	if c.RuntimeEngine != "" && c.RuntimeEngine != "docker" && c.RuntimeEngine != "podman" {
+		ve.Add(fmt.Sprintf("runtime_engine must be 'docker' or 'podman', got %q", c.RuntimeEngine))
+	}
+
+	// Validate service URLs
+	for i, svc := range c.Gateway.Services {
+		if svc.URL == "" {
+			ve.Add(fmt.Sprintf("gateway.services[%d]: url is required", i))
+			continue
+		}
+		if strings.HasPrefix(svc.URL, "docker://") {
+			ve.Add(fmt.Sprintf("gateway.services[%d]: docker:// URLs are deprecated, use plain host:port (e.g. %s)", i, strings.TrimPrefix(svc.URL, "docker://")))
+		}
+	}
+
+	if ve.HasErrors() {
+		return ve
+	}
+	return nil
 }
 
 // FeatureEntry represents a single feature plugin entry in the features array.

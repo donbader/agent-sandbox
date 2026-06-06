@@ -20,17 +20,39 @@ var (
 	upstreamServers = initUpstreamServers()
 )
 
+// PublicDNSFallbacks are well-known public resolvers used when resolv.conf
+// yields no usable nameservers. Two providers for redundancy.
+var PublicDNSFallbacks = []string{"8.8.8.8:53", "1.1.1.1:53"}
+
 // initUpstreamServers reads nameservers from /etc/resolv.conf and appends
-// a public DNS fallback. This makes the gateway work with any container runtime
+// public DNS fallbacks. This makes the gateway work with any container runtime
 // (Docker, Podman, containerd) without hardcoding runtime-specific DNS addresses.
 func initUpstreamServers() []string {
 	servers := parseResolvConf("/etc/resolv.conf")
-	// Always add public DNS as final fallback
-	servers = append(servers, "8.8.8.8:53")
+	if len(servers) == 0 {
+		slog.Warn("dns: no usable nameservers in /etc/resolv.conf, using public DNS only")
+	}
+	// Always add public DNS as final fallback (deduped against resolv.conf entries)
+	for _, fb := range PublicDNSFallbacks {
+		if !contains(servers, fb) {
+			servers = append(servers, fb)
+		}
+	}
 	return servers
 }
 
+// contains checks if a string exists in a slice.
+func contains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
 // parseResolvConf extracts nameserver entries from a resolv.conf file.
+// Entries with invalid IP addresses are skipped with a warning.
 func parseResolvConf(path string) []string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -47,6 +69,11 @@ func parseResolvConf(path string) []string {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
 				ip := fields[1]
+				// Validate IP format
+				if net.ParseIP(ip) == nil {
+					slog.Warn("dns: skipping invalid nameserver IP in resolv.conf", "ip", ip)
+					continue
+				}
 				// Skip loopback 127.0.0.53 (systemd-resolved stub) — it won't
 				// resolve container names. Keep 127.0.0.11 (Docker) and others.
 				if ip == "127.0.0.53" {

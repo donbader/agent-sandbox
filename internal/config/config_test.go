@@ -141,3 +141,49 @@ gateway:
 	require.NoError(t, err)
 	assert.Equal(t, "sidecar:8080", cfg.Gateway.Services[0].URL)
 }
+
+func TestValidate_CollectsAllErrors(t *testing.T) {
+	// Config with multiple problems — validation should report all of them.
+	cfg := &Config{
+		Name:          "", // missing
+		RuntimeEngine: "containerd",
+		Runtime: RuntimeConfig{
+			Image: "", // missing
+		},
+		Gateway: GatewayConfig{
+			Services: []GatewayServiceEntry{
+				{URL: "docker://old:8080"},
+				{URL: ""},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+
+	ve, ok := err.(*ValidationError)
+	require.True(t, ok, "expected *ValidationError, got %T", err)
+	assert.Len(t, ve.Errors, 5, "should collect all 5 validation errors")
+	assert.Contains(t, ve.Error(), "name is required")
+	assert.Contains(t, ve.Error(), "runtime.image is required")
+	assert.Contains(t, ve.Error(), "runtime_engine must be")
+	assert.Contains(t, ve.Error(), "docker:// URLs are deprecated")
+	assert.Contains(t, ve.Error(), "url is required")
+}
+
+func TestValidate_NoErrorsOnValidConfig(t *testing.T) {
+	cfg := &Config{
+		Name: "valid-agent",
+		Runtime: RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+		Gateway: GatewayConfig{
+			Services: []GatewayServiceEntry{
+				{URL: "https://api.example.com"},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	assert.NoError(t, err)
+}

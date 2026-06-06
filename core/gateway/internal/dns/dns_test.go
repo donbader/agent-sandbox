@@ -241,4 +241,66 @@ func TestParseResolvConf(t *testing.T) {
 		servers := parseResolvConf(path)
 		assert.Equal(t, []string{"127.0.0.11:53"}, servers)
 	})
+
+	t.Run("skips invalid IP addresses", func(t *testing.T) {
+		tmp := t.TempDir()
+		path := tmp + "/resolv.conf"
+		content := "nameserver not-an-ip\nnameserver 10.0.0.1\nnameserver abc.def\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+		servers := parseResolvConf(path)
+		assert.Equal(t, []string{"10.0.0.1:53"}, servers)
+	})
+
+	t.Run("empty file returns nil", func(t *testing.T) {
+		tmp := t.TempDir()
+		path := tmp + "/resolv.conf"
+		require.NoError(t, os.WriteFile(path, []byte("# just a comment\nsearch example.com\n"), 0644))
+
+		servers := parseResolvConf(path)
+		assert.Nil(t, servers)
+	})
+}
+
+func TestInitUpstreamServers_FallbackDedup(t *testing.T) {
+	// If resolv.conf already contains 8.8.8.8, it shouldn't appear twice.
+	tmp := t.TempDir()
+	path := tmp + "/resolv.conf"
+	content := "nameserver 8.8.8.8\nnameserver 10.0.0.1\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+	servers := parseResolvConf(path)
+	// Simulate initUpstreamServers logic
+	for _, fb := range PublicDNSFallbacks {
+		if !contains(servers, fb) {
+			servers = append(servers, fb)
+		}
+	}
+
+	// 8.8.8.8 should appear exactly once
+	count := 0
+	for _, s := range servers {
+		if s == "8.8.8.8:53" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "8.8.8.8:53 should not be duplicated")
+	// 1.1.1.1 added as fallback
+	assert.Contains(t, servers, "1.1.1.1:53")
+}
+
+func TestInitUpstreamServers_EmptyResolvConf(t *testing.T) {
+	// When resolv.conf has no nameservers, fallbacks must still be present.
+	tmp := t.TempDir()
+	path := tmp + "/resolv.conf"
+	require.NoError(t, os.WriteFile(path, []byte("# empty\n"), 0644))
+
+	servers := parseResolvConf(path)
+	for _, fb := range PublicDNSFallbacks {
+		if !contains(servers, fb) {
+			servers = append(servers, fb)
+		}
+	}
+
+	assert.Equal(t, PublicDNSFallbacks, servers)
 }
