@@ -1,5 +1,6 @@
 # yaml-language-server: $schema=../.build/schema.json
 name: agent-001
+core_version: latest
 runtime:
   image: "@builtin/codex"
   volumes:

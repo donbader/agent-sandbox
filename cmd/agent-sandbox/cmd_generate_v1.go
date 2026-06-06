@@ -48,7 +48,8 @@ func generateV1Cmd(dir *string) *cobra.Command {
 func generateSingleAgent(cfg *config.Config, projectDir string) error {
 	var coreDir string
 	var err error
-	if cfg.CoreVersion != "" {
+	// "latest" means use embedded core from the CLI binary
+	if cfg.CoreVersion != "" && cfg.CoreVersion != "latest" {
 		coreDir, err = core.Fetch(cfg.CoreVersion)
 		if err != nil {
 			return fmt.Errorf("fetch core %s: %w", cfg.CoreVersion, err)
