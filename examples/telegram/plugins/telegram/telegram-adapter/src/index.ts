@@ -57,6 +57,10 @@ class TelegramAdapter {
     await this.connectAcp();
     await this.acpInitialize();
 
+    this.bot.catch((err) => {
+      log.error({ err: err.error }, "bot error");
+    });
+
     this.bot.on("message:text", async (ctx) => {
       if (!this.isAllowed(ctx)) return;
       const text = ctx.message.text;
@@ -148,12 +152,12 @@ class TelegramAdapter {
   }
 
   private async acpInitialize(): Promise<void> {
-    const result = await this.acpSend("initialize", { protocolVersion: "1", clientCapabilities: {} });
+    const result = await this.acpSend("initialize", { protocolVersion: 1, clientCapabilities: {} });
     log.info({ result }, "ACP initialized");
   }
 
   private async acpNewSession(): Promise<string> {
-    const result = await this.acpSend("session/new", { cwd: "/home/agent/workspace" }) as { sessionId: string };
+    const result = await this.acpSend("session/new", { cwd: "/home/agent/workspace", mcpServers: [] }) as { sessionId: string };
     return result.sessionId;
   }
 
