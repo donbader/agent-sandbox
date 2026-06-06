@@ -9,7 +9,7 @@
     "deny": []
   },
   "env": {
-    "ANTHROPIC_BASE_URL": "https://agent-gateway.stx-ai.net/anthropic",
+    "ANTHROPIC_BASE_URL": "https://agent-gateway.stx-ai.net/kiro",
     "ANTHROPIC_API_KEY": "dummy"
   }
 }
