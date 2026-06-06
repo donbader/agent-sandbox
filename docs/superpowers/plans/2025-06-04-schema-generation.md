@@ -180,8 +180,8 @@ type GatewayConfig struct {
 }
 
 type GatewayServiceEntry struct {
-	URL         string            `yaml:"url" jsonschema:"required,title=url,description=HTTPS endpoint or docker://<service>:<port> for sidecars"`
-	Network     string            `yaml:"network" jsonschema:"title=network,description=Docker network to attach (required for docker:// URLs)"`
+	URL         string            `yaml:"url" jsonschema:"required,title=url,description=Service endpoint: HTTPS URL or plain host:port for sidecars"`
+	Network     string            `yaml:"network" jsonschema:"title=network,description=Compose network to attach (optional)"`
 	Headers     map[string]string `yaml:"headers" jsonschema:"title=headers,description=Headers injected by gateway on every proxied request"`
 	Middlewares []MiddlewareEntry `yaml:"middlewares" jsonschema:"title=middlewares,description=Custom middleware chain"`
 }

@@ -61,7 +61,7 @@ runtime:
 
 gateway:
   services:
-    - url: "docker://rkgw:8765"
+    - url: "rkgw:8765"
       network: rkgw-external
       headers:
         x-api-key: ${RKGW_API_KEY}
@@ -105,8 +105,8 @@ installations:
 ### Gateway Service Entry
 
 ```yaml
-- url: https://api.example.com       # HTTPS endpoint, or docker://<service>:<port> for sidecars
-  network: optional-external-network  # Docker network to attach (for docker:// URLs)
+- url: https://api.example.com       # HTTPS endpoint, or plain host:port for sidecars
+  network: optional-external-network  # Compose network to attach (optional)
   headers:                            # Headers injected by gateway on every request
     Authorization: Bearer ${TOKEN}
 ```
@@ -203,7 +203,7 @@ The CLI generates:
 - Sidecar containers have **no direct network access** except to the gateway
 - All egress (internet, cross-container) goes through the gateway
 - Gateway applies middleware (credential injection, rewriting, logging) on every request
-- Sidecars expose themselves to the agent via gateway service entries (`docker://<sidecar>:<port>`)
+- Sidecars expose themselves to the agent via gateway service entries (`<sidecar>:<port>`)
 
 ## Runtime Presets
 

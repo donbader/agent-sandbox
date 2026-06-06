@@ -64,8 +64,8 @@ type GatewayConfig struct {
 }
 
 type GatewayServiceEntry struct {
-    URL         string            `yaml:"url" jsonschema:"required,description=HTTPS endpoint or docker://<service>:<port>"`
-    Network     string            `yaml:"network" jsonschema:"description=Docker network to attach for docker:// URLs"`
+    URL         string            `yaml:"url" jsonschema:"required,description=Service endpoint: HTTPS URL (https://api.example.com) or internal host:port (sidecar:8080)"`
+    Network     string            `yaml:"network" jsonschema:"description=Compose network to attach (optional, defaults to sandbox network)"`
     Headers     map[string]string `yaml:"headers" jsonschema:"description=Headers injected on every proxied request"`
     Middlewares []MiddlewareEntry `yaml:"middlewares" jsonschema:"description=Custom middleware chain"`
 }
