@@ -1,9 +1,11 @@
 #!/bin/sh
 set -e
 
+GATEWAY_HOST="{{ .GatewayHost }}"
+
 # Wait for gateway to be healthy before setting up routing.
-echo "[entrypoint] waiting for gateway..."
-until curl -sf http://gateway:8080/health >/dev/null 2>&1; do
+echo "[entrypoint] waiting for gateway ($GATEWAY_HOST)..."
+until curl -sf http://$GATEWAY_HOST:8080/health >/dev/null 2>&1; do
     sleep 1
 done
 echo "[entrypoint] gateway ready"
@@ -11,10 +13,10 @@ echo "[entrypoint] gateway ready"
 # Resolve gateway IP (getent may not exist in slim images, fall back to ping).
 GATEWAY_IP=""
 if command -v getent >/dev/null 2>&1; then
-    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
+    GATEWAY_IP=$(getent hosts $GATEWAY_HOST | awk '{print $1}')
 fi
 if [ -z "$GATEWAY_IP" ]; then
-    GATEWAY_IP=$(ping -c1 -W1 gateway 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p')
+    GATEWAY_IP=$(ping -c1 -W1 $GATEWAY_HOST 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p')
 fi
 if [ -z "$GATEWAY_IP" ]; then
     echo "[entrypoint] ERROR: could not resolve gateway IP" >&2
@@ -40,6 +42,9 @@ fi
 # Plugin pre-entrypoint commands
 {{ .PreEntrypoint }}
 {{- end }}
+
+# Ensure the agent user owns its home directory (root may have created files during setup).
+chown -R agent:agent /home/agent
 
 # Drop privileges to the agent user for the actual process.
 exec gosu agent "$@"

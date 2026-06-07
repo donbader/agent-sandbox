@@ -78,7 +78,7 @@ func (g *Generator) RunWithConfig(cfg *config.Config, agentDir string) error {
 		return fmt.Errorf("create .build dir: %w", err)
 	}
 
-	merged, err := g.generateAgentArtifacts(cfg, agentDir, buildDir)
+	merged, err := g.generateAgentArtifacts(cfg, agentDir, buildDir, "gateway")
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,8 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 		if err := os.MkdirAll(agentBuildDir, 0755); err != nil {
 			return fmt.Errorf("create build dir for %s: %w", agent.Config.Name, err)
 		}
-		merged, err := g.generateAgentArtifacts(agent.Config, agent.Dir, agentBuildDir)
+		gatewayHost := agent.Config.Name + "-gateway"
+		merged, err := g.generateAgentArtifacts(agent.Config, agent.Dir, agentBuildDir, gatewayHost)
 		if err != nil {
 			return fmt.Errorf("generate %s: %w", agent.Config.Name, err)
 		}
@@ -175,7 +176,7 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 }
 
 // generateAgentArtifacts resolves plugins, generates Dockerfile + entrypoint + gateway config.
-func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDir string) (*plugin.Contributions, error) {
+func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDir, gatewayHost string) (*plugin.Contributions, error) {
 	resolver := plugin.NewResolver(agentDir, g.bundledFS)
 	var allContribs []*plugin.Contributions
 	resolved := make(map[string]*resolvedPlugin)
@@ -247,7 +248,7 @@ func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDi
 		return nil, fmt.Errorf("write Dockerfile: %w", err)
 	}
 
-	entrypoint, err := RenderEntrypointScript(g.templates, merged.Runtime.PreEntrypoint)
+	entrypoint, err := RenderEntrypointScript(g.templates, merged.Runtime.PreEntrypoint, gatewayHost)
 	if err != nil {
 		return nil, fmt.Errorf("build entrypoint: %w", err)
 	}

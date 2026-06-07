@@ -42,6 +42,7 @@ var Presets = map[string]struct {
 // entrypointData is the template data for entrypoint.sh.tmpl.
 type entrypointData struct {
 	PreEntrypoint string
+	GatewayHost   string
 }
 
 // dockerfileData is the template data for Dockerfile.tmpl.
@@ -62,8 +63,8 @@ func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions, entrypo
 
 // EntrypointScript returns the entrypoint script using the embedded templates.
 // This is a convenience wrapper around RenderEntrypointScript.
-func EntrypointScript(preEntrypoint []string) string {
-	s, err := RenderEntrypointScript(templates.NewEmbeddedLoader(), preEntrypoint)
+func EntrypointScript(preEntrypoint []string, gatewayHost string) string {
+	s, err := RenderEntrypointScript(templates.NewEmbeddedLoader(), preEntrypoint, gatewayHost)
 	if err != nil {
 		panic("entrypoint template error: " + err.Error())
 	}
@@ -71,7 +72,7 @@ func EntrypointScript(preEntrypoint []string) string {
 }
 
 // RenderEntrypointScript executes the entrypoint template with optional pre-entrypoint commands.
-func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string) (string, error) {
+func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string, gatewayHost string) (string, error) {
 	tmpl, err := loader.Load("entrypoint.sh.tmpl")
 	if err != nil {
 		return "", fmt.Errorf("load entrypoint template: %w", err)
@@ -82,8 +83,12 @@ func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string) (s
 		preCmd = strings.Join(preEntrypoint, "\n")
 	}
 
+	if gatewayHost == "" {
+		gatewayHost = "gateway"
+	}
+
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, entrypointData{PreEntrypoint: preCmd}); err != nil {
+	if err := tmpl.Execute(&buf, entrypointData{PreEntrypoint: preCmd, GatewayHost: gatewayHost}); err != nil {
 		return "", fmt.Errorf("execute entrypoint template: %w", err)
 	}
 	return buf.String(), nil
@@ -120,6 +125,9 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 			return "", fmt.Errorf("marshal entrypoint: %w", err)
 		}
 		cmd = string(ep)
+	} else if isPreset {
+		// Presets default to sleep infinity so containers stay alive for interactive use.
+		cmd = `["sleep","infinity"]`
 	}
 
 	var buf bytes.Buffer

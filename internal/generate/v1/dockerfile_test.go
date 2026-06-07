@@ -68,15 +68,17 @@ func TestBuildDockerfile_CustomImage(t *testing.T) {
 }
 
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
-	script := EntrypointScript(nil)
+	script := EntrypointScript(nil, "")
 	assert.Contains(t, script, `exec gosu agent "$@"`)
+	assert.Contains(t, script, `GATEWAY_HOST="gateway"`)
 	assert.NotContains(t, script, "pre-entrypoint")
 }
 
 func TestEntrypointScript_WithPreEntrypoint(t *testing.T) {
 	cmds := []string{"/usr/sbin/sshd -p 2222", "/usr/bin/other-daemon"}
-	script := EntrypointScript(cmds)
+	script := EntrypointScript(cmds, "my-agent-gateway")
 
+	assert.Contains(t, script, `GATEWAY_HOST="my-agent-gateway"`)
 	assert.Contains(t, script, "/usr/sbin/sshd -p 2222")
 	assert.Contains(t, script, "/usr/bin/other-daemon")
 	assert.Contains(t, script, "# Plugin pre-entrypoint commands")
