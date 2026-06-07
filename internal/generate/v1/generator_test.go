@@ -1,12 +1,15 @@
 package v1
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestGenerator_Run(t *testing.T) {
@@ -296,4 +299,154 @@ installations:
 	df, err := os.ReadFile(filepath.Join(projectDir, ".build", "Dockerfile"))
 	require.NoError(t, err)
 	assert.Contains(t, string(df), "COPY .build/plugins/my-bundled/my-src/ /opt/my-src/")
+}
+
+// TestGenerator_Contracts_SingleAgent verifies that generated artifacts are internally consistent:
+// - All bind-mount sources referenced in compose exist as files
+// - GATEWAY_HOST env var matches the gateway network alias
+// - Dockerfile has a CMD
+func TestGenerator_Contracts_SingleAgent(t *testing.T) {
+	projectDir := t.TempDir()
+
+	agentYAML := `
+name: test-agent
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+gateway:
+  services:
+    - url: https://api.example.com
+      headers:
+        Authorization: Bearer ${TOKEN}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	g := NewGenerator(projectDir, nil)
+	require.NoError(t, g.Run())
+
+	buildDir := filepath.Join(projectDir, ".build")
+
+	// Parse compose to extract volume mounts and env vars
+	composeData, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
+	require.NoError(t, err)
+
+	var compose composeFile
+	require.NoError(t, yaml.Unmarshal(composeData, &compose))
+
+	// Verify GATEWAY_HOST matches the gateway alias
+	agentSvcRaw, ok := compose.Services["test-agent"].(map[string]any)
+	require.True(t, ok, "test-agent service not found or wrong type")
+	envRaw, ok := agentSvcRaw["environment"].(map[string]any)
+	require.True(t, ok, "environment not found or wrong type")
+	assert.Equal(t, "gateway", envRaw["GATEWAY_HOST"])
+
+	// Verify gateway alias matches
+	gatewaySvcRaw, ok := compose.Services["test-agent-gateway"].(map[string]any)
+	require.True(t, ok, "test-agent-gateway service not found or wrong type")
+	networks, ok := gatewaySvcRaw["networks"].(map[string]any)
+	require.True(t, ok)
+	sandbox, ok := networks["sandbox"].(map[string]any)
+	require.True(t, ok)
+	aliases, ok := sandbox["aliases"].([]any)
+	require.True(t, ok)
+	assert.Contains(t, aliases, "gateway")
+
+	// Verify Dockerfile has CMD
+	df, err := os.ReadFile(filepath.Join(buildDir, "Dockerfile"))
+	require.NoError(t, err)
+	assert.Contains(t, string(df), "CMD")
+
+	// Verify gateway-src/config.yaml exists (Docker COPY target)
+	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "config.yaml"))
+
+	// Verify runtime config.yaml exists (for potential volume mount)
+	assert.FileExists(t, filepath.Join(buildDir, "config.yaml"))
+}
+
+// TestGenerator_Contracts_Fleet verifies internal consistency of fleet-mode generation.
+func TestGenerator_Contracts_Fleet(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Create two agent directories
+	for _, name := range []string{"coder", "reviewer"} {
+		agentDir := filepath.Join(projectDir, name)
+		require.NoError(t, os.MkdirAll(agentDir, 0755))
+		agentYAML := fmt.Sprintf(`
+name: %s
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+gateway:
+  services:
+    - url: https://api.example.com
+      headers:
+        Authorization: Bearer ${TOKEN}
+`, name)
+		require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+	}
+
+	fleetYAML := `agents:
+  - dir: ./coder
+  - dir: ./reviewer
+`
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "fleet.yaml"), []byte(fleetYAML), 0644))
+
+	g := NewGenerator(projectDir, nil)
+
+	agents := []config.FleetAgent{
+		{Config: mustParseConfig(t, filepath.Join(projectDir, "coder", "agent.yaml")), Dir: filepath.Join(projectDir, "coder")},
+		{Config: mustParseConfig(t, filepath.Join(projectDir, "reviewer", "agent.yaml")), Dir: filepath.Join(projectDir, "reviewer")},
+	}
+	require.NoError(t, g.RunFleet(agents))
+
+	buildDir := filepath.Join(projectDir, ".build")
+	composeData, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
+	require.NoError(t, err)
+
+	var compose composeFile
+	require.NoError(t, yaml.Unmarshal(composeData, &compose))
+
+	for _, name := range []string{"coder", "reviewer"} {
+		gatewayName := name + "-gateway"
+
+		// Verify GATEWAY_HOST env var matches gateway service name
+		agentSvcRaw, ok := compose.Services[name].(map[string]any)
+		require.True(t, ok, "service %s not found or wrong type", name)
+		envRaw, ok := agentSvcRaw["environment"].(map[string]any)
+		require.True(t, ok, "environment not found for %s", name)
+		assert.Equal(t, gatewayName, envRaw["GATEWAY_HOST"], "GATEWAY_HOST mismatch for %s", name)
+
+		// Verify gateway network alias matches GATEWAY_HOST
+		gatewaySvcRaw, ok := compose.Services[gatewayName].(map[string]any)
+		require.True(t, ok, "service %s not found or wrong type", gatewayName)
+		networks, ok := gatewaySvcRaw["networks"].(map[string]any)
+		require.True(t, ok)
+		sandbox, ok := networks["sandbox"].(map[string]any)
+		require.True(t, ok)
+		aliases, ok := sandbox["aliases"].([]any)
+		require.True(t, ok)
+		assert.Contains(t, aliases, gatewayName, "gateway alias mismatch for %s", name)
+
+		// Verify bind-mount config.yaml exists as a file (not a directory)
+		configPath := filepath.Join(buildDir, name, "config.yaml")
+		info, err := os.Stat(configPath)
+		require.NoError(t, err, "config.yaml missing for %s", name)
+		assert.False(t, info.IsDir(), "config.yaml should be a file, not a directory, for %s", name)
+
+		// Verify Dockerfile has CMD
+		df, err := os.ReadFile(filepath.Join(buildDir, name, "Dockerfile"))
+		require.NoError(t, err)
+		assert.Contains(t, string(df), "CMD", "Dockerfile missing CMD for %s", name)
+	}
+
+	// Verify shared gateway-src/config.yaml exists (Docker build context)
+	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "config.yaml"))
+}
+
+func mustParseConfig(t *testing.T, path string) *config.Config {
+	t.Helper()
+	dir := filepath.Dir(path)
+	cfg, err := config.Load(dir)
+	require.NoError(t, err)
+	return cfg
 }

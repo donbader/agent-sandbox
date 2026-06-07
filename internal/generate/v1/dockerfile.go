@@ -120,6 +120,9 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 			return "", fmt.Errorf("marshal entrypoint: %w", err)
 		}
 		cmd = string(ep)
+	} else if isPreset {
+		// Presets default to sleep infinity so containers stay alive for interactive use.
+		cmd = `["sleep","infinity"]`
 	}
 
 	var buf bytes.Buffer

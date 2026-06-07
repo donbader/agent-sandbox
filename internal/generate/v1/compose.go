@@ -55,6 +55,9 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			},
 		},
 		"volumes": agentVolumes,
+		"environment": map[string]string{
+			"GATEWAY_HOST": "gateway",
+		},
 	}
 	// Add healthcheck if the agent exposes ports (agent-manager listens on the first declared port).
 	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
@@ -289,6 +292,9 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 				},
 			},
 			"volumes": agentVolumes,
+			"environment": map[string]string{
+				"GATEWAY_HOST": gatewayName,
+			},
 		}
 
 		if agent.Contribs != nil && len(agent.Contribs.Runtime.Ports) > 0 {

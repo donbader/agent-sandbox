@@ -128,7 +128,20 @@ jobs:
           STX_LLM_GATEWAY_API_KEY: test-stub
           TELEGRAM_BOT_TOKEN: test-stub
         run: |
-          ./agent-sandbox -C examples/${{ matrix.example }} compose up -d --build --wait --wait-timeout 60
+          ./agent-sandbox -C examples/${{ matrix.example }} compose up -d --build
+          # Wait for gateway(s) to be healthy — proves mounts, config, and binary work.
+          # Sidecars with stub credentials may crash; that's expected in CI.
+          for i in $(seq 1 30); do
+            if docker ps --filter "name=gateway" --filter "health=healthy" --format '{{.Names}}' | grep -q gateway; then
+              echo "Gateway healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: No healthy gateway after 60s"
+          ./agent-sandbox -C examples/${{ matrix.example }} compose ps
+          ./agent-sandbox -C examples/${{ matrix.example }} compose logs
+          exit 1
 
       - name: Teardown
         if: always()

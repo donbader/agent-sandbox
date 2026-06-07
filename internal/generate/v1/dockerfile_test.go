@@ -69,7 +69,8 @@ func TestBuildDockerfile_CustomImage(t *testing.T) {
 
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
 	script := EntrypointScript(nil)
-	assert.Contains(t, script, `exec gosu agent "$@"`)
+	assert.Contains(t, script, `exec gosu "$AGENT_USER" "$@"`)
+	assert.Contains(t, script, `${GATEWAY_HOST:=gateway}`)
 	assert.NotContains(t, script, "pre-entrypoint")
 }
 
@@ -82,7 +83,7 @@ func TestEntrypointScript_WithPreEntrypoint(t *testing.T) {
 	assert.Contains(t, script, "# Plugin pre-entrypoint commands")
 	// pre_entrypoint must come before exec
 	sshdIdx := indexOf(script, "/usr/sbin/sshd -p 2222")
-	execIdx := indexOf(script, `exec gosu agent "$@"`)
+	execIdx := indexOf(script, `exec gosu "$AGENT_USER" "$@"`)
 	assert.Greater(t, execIdx, sshdIdx, "pre_entrypoint commands must come before exec")
 }
 
