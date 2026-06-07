@@ -1,7 +1,10 @@
 #!/bin/sh
 set -e
 
-GATEWAY_HOST="{{ .GatewayHost }}"
+# Configuration via environment (set by compose).
+: "${GATEWAY_HOST:=gateway}"
+: "${AGENT_USER:=agent}"
+: "${AGENT_HOME:=/home/agent}"
 
 # Wait for gateway to be healthy before setting up routing.
 echo "[entrypoint] waiting for gateway ($GATEWAY_HOST)..."
@@ -44,7 +47,7 @@ fi
 {{- end }}
 
 # Ensure the agent user owns its home directory (root may have created files during setup).
-chown -R agent:agent /home/agent
+chown -R "$AGENT_USER:$AGENT_USER" "$AGENT_HOME"
 
 # Drop privileges to the agent user for the actual process.
-exec gosu agent "$@"
+exec gosu "$AGENT_USER" "$@"

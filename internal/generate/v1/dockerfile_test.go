@@ -68,23 +68,22 @@ func TestBuildDockerfile_CustomImage(t *testing.T) {
 }
 
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
-	script := EntrypointScript(nil, "")
-	assert.Contains(t, script, `exec gosu agent "$@"`)
-	assert.Contains(t, script, `GATEWAY_HOST="gateway"`)
+	script := EntrypointScript(nil)
+	assert.Contains(t, script, `exec gosu "$AGENT_USER" "$@"`)
+	assert.Contains(t, script, `${GATEWAY_HOST:=gateway}`)
 	assert.NotContains(t, script, "pre-entrypoint")
 }
 
 func TestEntrypointScript_WithPreEntrypoint(t *testing.T) {
 	cmds := []string{"/usr/sbin/sshd -p 2222", "/usr/bin/other-daemon"}
-	script := EntrypointScript(cmds, "my-agent-gateway")
+	script := EntrypointScript(cmds)
 
-	assert.Contains(t, script, `GATEWAY_HOST="my-agent-gateway"`)
 	assert.Contains(t, script, "/usr/sbin/sshd -p 2222")
 	assert.Contains(t, script, "/usr/bin/other-daemon")
 	assert.Contains(t, script, "# Plugin pre-entrypoint commands")
 	// pre_entrypoint must come before exec
 	sshdIdx := indexOf(script, "/usr/sbin/sshd -p 2222")
-	execIdx := indexOf(script, `exec gosu agent "$@"`)
+	execIdx := indexOf(script, `exec gosu "$AGENT_USER" "$@"`)
 	assert.Greater(t, execIdx, sshdIdx, "pre_entrypoint commands must come before exec")
 }
 
