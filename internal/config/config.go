@@ -49,7 +49,7 @@ func (c *Config) RuntimeEngineBinary() string {
 type Config struct {
 	Name          string         `yaml:"name" json:"name" jsonschema:"required,title=name,description=Agent instance name"`
 	LogLevel      string         `yaml:"log_level" json:"log_level,omitempty" jsonschema:"title=log_level,description=Logging verbosity,enum=info,enum=debug"`
-	CoreVersion   string         `yaml:"core_version" json:"core_version,omitempty" jsonschema:"title=core_version,description=Core version to use for generation"`
+	CoreVersion   string         `yaml:"core_version" json:"core_version" jsonschema:"required,title=core_version,description=Core version to use for generation (semver tag or 'latest' for embedded)"`
 	RuntimeEngine string         `yaml:"runtime_engine" json:"runtime_engine,omitempty" jsonschema:"title=runtime_engine,description=Container runtime engine (docker or podman),enum=docker,enum=podman,default=docker"`
 	Runtime       RuntimeConfig  `yaml:"runtime" json:"runtime" jsonschema:"required,title=runtime,description=Agent container configuration"`
 	Gateway       GatewayConfig  `yaml:"gateway" json:"gateway,omitempty" jsonschema:"title=gateway,description=Transparent egress proxy configuration"`
@@ -116,6 +116,9 @@ func (c *Config) Validate() error {
 
 	if c.Name == "" {
 		ve.Add("name is required")
+	}
+	if c.CoreVersion == "" {
+		ve.Add("core_version is required (use 'latest' for the embedded version)")
 	}
 	if c.Runtime.Image == "" {
 		ve.Add("runtime.image is required")

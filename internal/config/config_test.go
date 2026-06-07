@@ -11,7 +11,8 @@ import (
 
 func TestLoad_MissingName(t *testing.T) {
 	dir := t.TempDir()
-	yaml := `runtime:
+	yaml := `core_version: latest
+runtime:
   image: "@builtin/codex"
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
@@ -22,6 +23,7 @@ func TestLoad_MissingName(t *testing.T) {
 func TestLoad_MissingRuntimeImage(t *testing.T) {
 	dir := t.TempDir()
 	yaml := `name: test
+core_version: latest
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
 	_, err := Load(dir)
@@ -32,6 +34,7 @@ func TestLoad_DockerURLDeprecated(t *testing.T) {
 	dir := t.TempDir()
 	yaml := `
 name: test
+core_version: latest
 runtime:
   image: "@builtin/codex"
 gateway:
@@ -87,6 +90,7 @@ func TestLoad_RuntimeEngine(t *testing.T) {
 		dir := t.TempDir()
 		yaml := `
 name: test
+core_version: latest
 runtime:
   image: "@builtin/codex"
 `
@@ -101,6 +105,7 @@ runtime:
 		dir := t.TempDir()
 		yaml := `
 name: test
+core_version: latest
 runtime_engine: podman
 runtime:
   image: "@builtin/codex"
@@ -116,6 +121,7 @@ runtime:
 		dir := t.TempDir()
 		yaml := `
 name: test
+core_version: latest
 runtime_engine: containerd
 runtime:
   image: "@builtin/codex"
@@ -130,6 +136,7 @@ func TestLoad_PlainHostPort(t *testing.T) {
 	dir := t.TempDir()
 	yaml := `
 name: test
+core_version: latest
 runtime:
   image: "@builtin/codex"
 gateway:
@@ -146,6 +153,7 @@ func TestValidate_CollectsAllErrors(t *testing.T) {
 	// Config with multiple problems — validation should report all of them.
 	cfg := &Config{
 		Name:          "", // missing
+		CoreVersion:   "", // missing
 		RuntimeEngine: "containerd",
 		Runtime: RuntimeConfig{
 			Image: "", // missing
@@ -163,8 +171,9 @@ func TestValidate_CollectsAllErrors(t *testing.T) {
 
 	ve, ok := err.(*ValidationError)
 	require.True(t, ok, "expected *ValidationError, got %T", err)
-	assert.Len(t, ve.Errors, 5, "should collect all 5 validation errors")
+	assert.Len(t, ve.Errors, 6, "should collect all 6 validation errors")
 	assert.Contains(t, ve.Error(), "name is required")
+	assert.Contains(t, ve.Error(), "core_version is required")
 	assert.Contains(t, ve.Error(), "runtime.image is required")
 	assert.Contains(t, ve.Error(), "runtime_engine must be")
 	assert.Contains(t, ve.Error(), "docker:// URLs are deprecated")
@@ -173,7 +182,8 @@ func TestValidate_CollectsAllErrors(t *testing.T) {
 
 func TestValidate_NoErrorsOnValidConfig(t *testing.T) {
 	cfg := &Config{
-		Name: "valid-agent",
+		Name:        "valid-agent",
+		CoreVersion: "latest",
 		Runtime: RuntimeConfig{
 			Image: "@builtin/codex",
 		},
@@ -186,6 +196,32 @@ func TestValidate_NoErrorsOnValidConfig(t *testing.T) {
 
 	err := cfg.Validate()
 	assert.NoError(t, err)
+}
+
+func TestLoad_MissingCoreVersion(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+name: test
+runtime:
+  image: "@builtin/codex"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+	_, err := Load(dir)
+	assert.ErrorContains(t, err, "core_version is required")
+}
+
+func TestLoad_CoreVersionLatest(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+name: test
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+	cfg, err := Load(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "latest", cfg.CoreVersion)
 }
 
 func TestMergeInstallations(t *testing.T) {
@@ -263,6 +299,7 @@ shared:
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "coder"), 0755))
 		coderYAML := `
 name: coder
+core_version: latest
 runtime:
   image: "@builtin/codex"
 installations:
@@ -276,6 +313,7 @@ installations:
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "reviewer"), 0755))
 		reviewerYAML := `
 name: reviewer
+core_version: latest
 runtime:
   image: "@builtin/codex"
 `
@@ -383,6 +421,7 @@ shared:
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "coder"), 0755))
 	coderYAML := `
 name: coder
+core_version: latest
 runtime:
   image: "@builtin/codex"
 `
@@ -391,6 +430,7 @@ runtime:
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "reviewer"), 0755))
 	reviewerYAML := `
 name: reviewer
+core_version: latest
 runtime:
   image: "@builtin/claude-code"
 gateway:

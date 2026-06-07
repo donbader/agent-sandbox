@@ -31,6 +31,7 @@ contributes:
 	// Write agent.yaml that uses the plugin
 	agentYAML := `
 name: test-agent
+core_version: latest
 log_level: debug
 runtime:
   image: "@builtin/codex"
@@ -100,6 +101,7 @@ contributes:
 
 	agentYAML := `
 name: test-agent
+core_version: latest
 runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
@@ -145,6 +147,7 @@ contributes:
 
 	agentYAML := `
 name: test-agent
+core_version: latest
 runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
@@ -184,6 +187,7 @@ contributes:
 
 	agentYAML := `
 name: test-agent
+core_version: latest
 runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
@@ -227,6 +231,7 @@ contributes:
 
 	agentYAML := `
 name: test-agent
+core_version: latest
 runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
@@ -271,6 +276,7 @@ contributes:
 
 	agentYAML := `
 name: test-agent
+core_version: latest
 runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
