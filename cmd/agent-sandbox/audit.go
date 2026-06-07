@@ -11,10 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	projectName = "agent-sandbox" // fallback; prefer dynamic resolution
-)
-
 // auditCheck represents a single audit check result.
 type auditCheck struct {
 	Name   string
