@@ -24,7 +24,7 @@ func TestBuildDockerfile(t *testing.T) {
 		},
 	}
 
-	output, err := BuildDockerfile(cfg, contribs)
+	output, err := BuildDockerfile(cfg, contribs, ".build/entrypoint.sh")
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "FROM node:24-slim")
@@ -43,7 +43,7 @@ func TestBuildDockerfile_BuiltinPreset(t *testing.T) {
 		},
 	}
 
-	output, err := BuildDockerfile(cfg, nil)
+	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh")
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "FROM node:24-slim")
@@ -59,7 +59,7 @@ func TestBuildDockerfile_CustomImage(t *testing.T) {
 		},
 	}
 
-	output, err := BuildDockerfile(cfg, nil)
+	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh")
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "FROM python:3.12-slim")

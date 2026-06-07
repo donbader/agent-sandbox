@@ -104,7 +104,11 @@ func EntrypointScript(preEntrypoint []string) string {
 // BuildDockerfile generates a Dockerfile string from config and plugin contributions.
 // The Dockerfile uses entrypoint.sh (expected alongside it in the build context) as
 // ENTRYPOINT, which sets up iptables routing before handing off to CMD.
-func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions) (string, error) {
+//
+// entrypointPath is the path to entrypoint.sh relative to the Docker build context
+// (the project root). For single-agent this is ".build/entrypoint.sh"; for fleet mode
+// it's ".build/<agent>/entrypoint.sh".
+func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions, entrypointPath string) (string, error) {
 	var lines []string
 
 	// Base image
@@ -153,7 +157,7 @@ func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions) (string
 	}
 
 	// Transparent proxy entrypoint wrapper
-	lines = append(lines, "COPY .build/entrypoint.sh /usr/local/bin/entrypoint.sh")
+	lines = append(lines, fmt.Sprintf("COPY %s /usr/local/bin/entrypoint.sh", entrypointPath))
 	lines = append(lines, "RUN chmod +x /usr/local/bin/entrypoint.sh")
 	lines = append(lines, `ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]`)
 	lines = append(lines, "")

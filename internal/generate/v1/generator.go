@@ -224,7 +224,13 @@ func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDi
 	merged := plugin.MergeContributions(allContribs...)
 
 	// Generate Dockerfile + entrypoint.sh (transparent proxy bootstrap)
-	dockerfile, err := BuildDockerfile(cfg, merged)
+	// Compute entrypoint path relative to the Docker build context (project root).
+	relBuildDir, err := filepath.Rel(g.projectDir, buildDir)
+	if err != nil {
+		return nil, fmt.Errorf("compute relative build dir: %w", err)
+	}
+	entrypointPath := filepath.Join(relBuildDir, "entrypoint.sh")
+	dockerfile, err := BuildDockerfile(cfg, merged, entrypointPath)
 	if err != nil {
 		return nil, fmt.Errorf("build dockerfile: %w", err)
 	}
