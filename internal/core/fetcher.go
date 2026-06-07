@@ -4,13 +4,16 @@ package core
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -18,6 +21,8 @@ const (
 	GitHubRepo = "donbader/agent-sandbox"
 	// AssetPrefix is the prefix for core tarball assets in GitHub Releases.
 	AssetPrefix = "agent-sandbox-core-"
+	// LatestCacheTTL is how long the "latest" resolution is cached before re-checking.
+	LatestCacheTTL = 1 * time.Hour
 )
 
 // CacheDir returns the path where a specific core version is cached.
@@ -39,19 +44,118 @@ func Fetch(version string) (string, error) {
 		return dir, nil
 	}
 
-	// Download from GitHub releases
 	if err := download(version, dir); err != nil {
-		// Clean up partial download
 		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("fetch core %s: %w", version, err)
 	}
 
-	// Mark complete
 	if err := os.WriteFile(filepath.Join(dir, ".complete"), []byte(version), 0644); err != nil {
 		return "", fmt.Errorf("mark complete: %w", err)
 	}
 
 	return dir, nil
+}
+
+// FetchLatest queries GitHub for the latest core-v* release, downloads it, and returns
+// the cache directory. Results are cached for LatestCacheTTL to avoid hitting the API
+// on every generate.
+func FetchLatest() (string, error) {
+	version, err := cachedLatestVersion()
+	if err == nil && version != "" {
+		dir := CacheDir(version)
+		if IsCachedAt(dir) {
+			return dir, nil
+		}
+	}
+
+	version, err = resolveLatestVersion()
+	if err != nil {
+		return "", fmt.Errorf("resolve latest core version: %w", err)
+	}
+
+	_ = saveLatestResolution(version)
+	return Fetch(version)
+}
+
+// resolveLatestVersion queries GitHub Releases API for the latest core-v* tag.
+func resolveLatestVersion() (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases", GitHubRepo)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("query releases: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
+	}
+
+	var releases []struct {
+		TagName string `json:"tag_name"`
+		Draft   bool   `json:"draft"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return "", fmt.Errorf("decode releases: %w", err)
+	}
+
+	var versions []string
+	for _, r := range releases {
+		if r.Draft {
+			continue
+		}
+		if strings.HasPrefix(r.TagName, "core-") {
+			versions = append(versions, strings.TrimPrefix(r.TagName, "core-"))
+		}
+	}
+
+	if len(versions) == 0 {
+		return "", fmt.Errorf("no core releases found in %s", GitHubRepo)
+	}
+
+	sort.Sort(sort.Reverse(sort.StringSlice(versions)))
+	return versions[0], nil
+}
+
+type latestResolution struct {
+	Version    string    `json:"version"`
+	ResolvedAt time.Time `json:"resolved_at"`
+}
+
+func latestCachePath() string {
+	return filepath.Join(cacheBase(), "latest.json")
+}
+
+func cachedLatestVersion() (string, error) {
+	data, err := os.ReadFile(latestCachePath())
+	if err != nil {
+		return "", err
+	}
+	var res latestResolution
+	if err := json.Unmarshal(data, &res); err != nil {
+		return "", err
+	}
+	if time.Since(res.ResolvedAt) > LatestCacheTTL {
+		return "", fmt.Errorf("cache expired")
+	}
+	return res.Version, nil
+}
+
+func saveLatestResolution(version string) error {
+	res := latestResolution{Version: version, ResolvedAt: time.Now()}
+	data, err := json.Marshal(res)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(latestCachePath()), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(latestCachePath(), data, 0644)
 }
 
 func cacheBase() string {
@@ -70,10 +174,6 @@ func cacheBase() string {
 	}
 }
 
-// download fetches a core tarball from GitHub Releases and extracts it to destDir.
-// Expected asset: agent-sandbox-core-{version}.tar.gz
-// Release tag: core-{version} (e.g. core-v1.5.0)
-// URL: https://github.com/{repo}/releases/download/core-{version}/{asset}
 func download(version, destDir string) error {
 	tag := "core-" + version
 	asset := AssetPrefix + version + ".tar.gz"
@@ -99,7 +199,6 @@ func download(version, destDir string) error {
 	return extractTarGz(resp.Body, destDir)
 }
 
-// extractTarGz extracts a .tar.gz stream into destDir.
 func extractTarGz(r io.Reader, destDir string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
@@ -117,7 +216,6 @@ func extractTarGz(r io.Reader, destDir string) error {
 			return fmt.Errorf("tar read: %w", err)
 		}
 
-		// Sanitize path to prevent traversal
 		name := filepath.Clean(hdr.Name)
 		if strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
 			continue

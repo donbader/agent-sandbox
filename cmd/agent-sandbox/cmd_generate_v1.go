@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
-	sandbox "github.com/donbader/agent-sandbox"
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/core"
 	"github.com/donbader/agent-sandbox/internal/dotenv"
@@ -36,7 +34,6 @@ func generateV1Cmd(dir *string) *cobra.Command {
 			// Try fleet mode
 			_, agents, fleetErr := config.LoadFleetAgents(projectDir)
 			if fleetErr != nil {
-				// Neither agent.yaml nor fleet.yaml found
 				return fmt.Errorf("cannot load agent.yaml or fleet.yaml:\n  agent: %w\n  fleet: %v", loadErr, fleetErr)
 			}
 
@@ -46,46 +43,38 @@ func generateV1Cmd(dir *string) *cobra.Command {
 }
 
 func generateSingleAgent(cfg *config.Config, projectDir string) error {
-	var coreDir string
-	var err error
-	// "latest" means use embedded core from the CLI binary
-	if cfg.CoreVersion != "" && cfg.CoreVersion != "latest" {
-		coreDir, err = core.Fetch(cfg.CoreVersion)
-		if err != nil {
-			return fmt.Errorf("fetch core %s: %w", cfg.CoreVersion, err)
-		}
-		fmt.Fprintf(os.Stderr, "Using core %s from %s\n", cfg.CoreVersion, coreDir)
+	coreDir, err := fetchCore(cfg.CoreVersion)
+	if err != nil {
+		return err
 	}
 
 	g := v1.NewGeneratorWithCore(projectDir, coreDir)
-	if coreDir == "" {
-		g.SetGatewayFS(sandbox.GatewaySource)
-		pluginsFS, _ := fs.Sub(sandbox.CorePlugins, "core/plugins")
-		g.SetBundledPluginsFS(pluginsFS)
-	}
 	if err := g.RunWithConfig(cfg, projectDir); err != nil {
 		return err
 	}
 
-	// Inject schema comment into agent.yaml
 	_ = ensureSchemaComment(filepath.Join(projectDir, "agent.yaml"), ".build/schema.json")
-
 	fmt.Fprintf(os.Stderr, "Generated .build/ in %s\n", projectDir)
 	return nil
 }
 
 func generateFleet(agents []config.FleetAgent, projectDir string) error {
-	// Fleet mode: use embedded core (core_version per-agent not yet supported in fleet)
-	g := v1.NewGeneratorWithCore(projectDir, "")
-	g.SetGatewayFS(sandbox.GatewaySource)
-	pluginsFS, _ := fs.Sub(sandbox.CorePlugins, "core/plugins")
-	g.SetBundledPluginsFS(pluginsFS)
+	// Fleet uses first agent's core_version (or "latest" if not set)
+	version := "latest"
+	if len(agents) > 0 && agents[0].Config.CoreVersion != "" {
+		version = agents[0].Config.CoreVersion
+	}
 
+	coreDir, err := fetchCore(version)
+	if err != nil {
+		return err
+	}
+
+	g := v1.NewGeneratorWithCore(projectDir, coreDir)
 	if err := g.RunFleet(agents); err != nil {
 		return err
 	}
 
-	// Inject schema comments into fleet.yaml and per-agent agent.yaml files
 	_ = ensureSchemaComment(filepath.Join(projectDir, "fleet.yaml"), ".build/fleet-schema.json")
 	for _, agent := range agents {
 		agentYAML := filepath.Join(agent.Dir, "agent.yaml")
@@ -98,4 +87,25 @@ func generateFleet(agents []config.FleetAgent, projectDir string) error {
 
 	fmt.Fprintf(os.Stderr, "Generated .build/ for %d agents in %s\n", len(agents), projectDir)
 	return nil
+}
+
+// fetchCore resolves a core version and returns the cache directory.
+// "latest" queries GitHub for the newest core-v* release.
+// Any other value fetches that specific version.
+func fetchCore(version string) (string, error) {
+	if version == "" || version == "latest" {
+		dir, err := core.FetchLatest()
+		if err != nil {
+			return "", fmt.Errorf("fetch latest core: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Using latest core from %s\n", dir)
+		return dir, nil
+	}
+
+	dir, err := core.Fetch(version)
+	if err != nil {
+		return "", fmt.Errorf("fetch core %s: %w", version, err)
+	}
+	fmt.Fprintf(os.Stderr, "Using core %s from %s\n", version, dir)
+	return dir, nil
 }
