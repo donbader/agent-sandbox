@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	projectName = "agent-sandbox"
+	projectName = "agent-sandbox" // fallback; prefer dynamic resolution
 )
 
 // auditCheck represents a single audit check result.
@@ -45,6 +45,12 @@ The sandbox must be running (agent-sandbox compose up) before auditing.`,
 }
 
 func runAudit(dir string) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("resolve project dir: %w", err)
+	}
+	projectName := filepath.Base(absDir)
+
 	cfg, err := config.Load(dir)
 	if err != nil {
 		// Try fleet mode
@@ -59,17 +65,17 @@ func runAudit(dir string) error {
 			if err != nil {
 				return fmt.Errorf("loading agent %s: %w", agentDir, err)
 			}
-			checks := auditAgent(agentCfg)
+			checks := auditAgent(agentCfg, projectName)
 			allChecks = append(allChecks, checks...)
 		}
 		return printResults(allChecks)
 	}
 
-	checks := auditAgent(cfg)
+	checks := auditAgent(cfg, projectName)
 	return printResults(checks)
 }
 
-func auditAgent(cfg *config.Config) []auditCheck {
+func auditAgent(cfg *config.Config, projectName string) []auditCheck {
 	agentContainer := fmt.Sprintf("%s-%s-1", projectName, cfg.Name)
 	gatewayContainer := fmt.Sprintf("%s-%s-gateway-1", projectName, cfg.Name)
 
