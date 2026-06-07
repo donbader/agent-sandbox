@@ -22,9 +22,9 @@ internal/
   generate/             ← Build artifact generation (builder structs + Go templates)
     v1/                 ← v1 generator (compose, dockerfile, gateway config)
     templates/          ← Go text/template files for Dockerfiles, compose, entrypoints
-  resolve/              ← plugin resolution (local → embedded)
+  resolve/              ← plugin resolution (local → fetched core)
 core/
-  gateway/              ← Gateway core source (embedded in CLI via go:embed)
+  gateway/              ← Gateway core source (packaged via core-release.yml)
   sdk/                  ← Gateway middleware interfaces
   presets/              ← Runtime presets (codex, claude-code, pi)
   plugins/              ← Feature plugins (github-pat, mcp-oauth)
@@ -66,17 +66,17 @@ agent-sandbox compose up --build       # docker compose passthrough
 
 **Key principle:** Plugin updates never require CLI upgrades. CLI is a generic template engine.
 
-### Runtime Presets (Pure Data — embedded in CLI)
+### Runtime Presets (Pure Data — fetched from Releases)
 
 ```
 core/presets/<name>/preset.yaml     ← base image, install commands, CMD, ports
 ```
 
-No Go code. CLI reads YAML and generates Dockerfile. Presets are core — they ship with the CLI binary.
+No Go code. CLI reads YAML and generates Dockerfile. Presets are fetched from GitHub Releases on first `generate` (cached locally).
 
 ### Feature Plugins (Pure Data)
 
-Feature plugins live in `core/plugins/<name>/` and are embedded in the CLI:
+Feature plugins live in `core/plugins/<name>/` and are fetched from GitHub Releases:
 
 ```
 core/plugins/<name>/plugin.yaml    ← metadata, gateway hosts, rewriter config

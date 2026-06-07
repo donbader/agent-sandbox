@@ -1,6 +1,6 @@
 # Runtime Presets
 
-Runtime presets define the agent's container environment: base image, packages to install, and the default startup command. They are pure data (YAML) — no Go code. Presets ship embedded in the CLI binary and are read at generate time to produce a Dockerfile.
+Runtime presets define the agent's container environment: base image, packages to install, and the default startup command. They are pure data (YAML) — no Go code. Presets are fetched from GitHub Releases as part of the core tarball and read at generate time to produce a Dockerfile.
 
 ## Usage
 
@@ -48,7 +48,7 @@ Each `install` entry becomes a separate `RUN` statement. Prefix a line with `--m
 ## Creating a New Preset
 
 1. Create `core/presets/<name>/runtime.yaml` following the format above.
-2. The CLI embeds all files under `core/presets/` at compile time — rebuild the CLI to pick up the new preset.
+2. Presets are packaged into the core tarball by `core-release.yml` on `core-v*` tag push. CLI fetches them automatically.
 3. Reference it with `runtime: <name>` in agent.yaml.
 
 For one-off agents that don't need a reusable preset, define the runtime inline in agent.yaml instead:

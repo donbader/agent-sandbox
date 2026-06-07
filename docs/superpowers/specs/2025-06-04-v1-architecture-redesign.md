@@ -319,7 +319,7 @@ installations:
 
 All plugins — built-in or external — use the same declarative YAML format with Go template expressions. No Go compilation for plugin logic. The only difference is where they live:
 
-- **Bundled plugins** — embedded in the CLI binary (convenience, ship out of the box)
+- **Bundled plugins** — fetched from GitHub Releases as part of the core tarball (convenience, ship out of the box)
 - **Local plugins** — in the user's repo (e.g., `./plugins/my-plugin/plugin.yaml`)
 - **Remote plugins** — fetched from a git repo at generate-time
 

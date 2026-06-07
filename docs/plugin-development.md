@@ -18,7 +18,7 @@ core/plugins/<name>/
     <name>.go              ← optional: Go gateway middleware (compiled during Docker build)
 ```
 
-Feature plugins are embedded in the CLI binary via `go:embed`. Rebuild the CLI after adding or modifying a plugin.
+Feature plugins are fetched from GitHub Releases as part of the core tarball. For local development, plugins in `core/plugins/` are packaged by the `core-release.yml` workflow on `core-v*` tag push.
 
 ## plugin.yaml Schema
 

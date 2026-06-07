@@ -49,7 +49,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] `examples/telegram-vibe/` for Telegram-based coding
 - [x] `install.sh` one-liner
 - [x] Convert codex plugin from Go code to `runtime.yaml` (data-driven)
-- [x] Plugin resolution (embedded core plugins)
+- [x] Plugin resolution (core plugins via GitHub Releases)
 - [x] Inline runtime definition support in agent.yaml
 
 **Config:**
@@ -107,7 +107,7 @@ agent-sandbox generate && agent-sandbox compose up --build
 - [x] TCP listener + SNI extraction
 - [x] Passthrough mode (pipe bytes to destination)
 - [x] DNS resolver (gateway:53, agent resolv.conf points to gateway)
-- [x] go:embed gateway source in CLI
+- [x] Gateway source packaged via core-release.yml, fetched by CLI
 - [x] Separate gateway container (security isolation — agent can't read secrets)
 - [x] Default route proxy (IP forwarding + iptables DNAT in agent → gateway container)
 - [x] `RequestHandler` interface in gateway (for feature handlers)
@@ -206,8 +206,8 @@ agent-sandbox generate && agent-sandbox compose up --build
 ## What Gets Dropped
 
 - `runtimes/*/render.sh` — replaced by runtime.yaml + template engine
-- `pkg/provider/resolver.go` — no remote providers, plugins are local or embedded
-- `images/gateway/` — gateway source embedded in CLI, compiled during Docker build
+- `pkg/provider/resolver.go` — plugins fetched from GitHub Releases or local override
+- `images/gateway/` — gateway source packaged by core-release.yml, fetched by CLI, compiled during Docker build
 - `agent-fleet tools ctx` — no render scripts to support
 - Template injection / user_base — replaced by custom-runtime feature
 - Default-deny egress model — replaced by allow-all + MITM where needed

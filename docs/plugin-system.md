@@ -166,11 +166,11 @@ agent-sandbox generate
 
 ## Plugin Resolution
 
-CLI resolves plugins from built-in core plugins (embedded in CLI via go:embed):
-- Runtime plugins: `internal/plugins/<name>/runtime.yaml`
-- Feature plugins: registered via `init()` in `internal/plugins/<name>/plugin.go`
+CLI resolves plugins from core (fetched from GitHub Releases, cached locally):
+- Runtime presets: `core/presets/<name>/preset.yaml`
+- Feature plugins: `core/plugins/<name>/plugin.yaml`
 
-For custom runtimes not shipped with the CLI, users can define them inline in agent.yaml.
+For custom runtimes not shipped with core, users can define them inline in agent.yaml.
 
 ## Gateway Compilation
 
