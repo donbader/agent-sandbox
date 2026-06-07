@@ -17,18 +17,18 @@ options:
 contributes:
   runtime:
     extra_builds:
-      - "RUN echo {{ .options.token }}"
+      - "RUN echo {{ .plugin.options.token }}"
   gateway:
     services:
       - url: https://github.com
         headers:
-          Authorization: "Bearer {{ .options.token }}"
+          Authorization: "Bearer {{ .plugin.options.token }}"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
 	opts := map[string]any{"token": "ghp_abc123"}
-	rendered, err := RenderContributions(p, opts)
+	rendered, err := RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, "RUN echo ghp_abc123", rendered.Runtime.ExtraBuilds[0])
@@ -50,7 +50,7 @@ contributes:
 	require.NoError(t, err)
 
 	opts := map[string]any{}
-	_, err = RenderContributions(p, opts)
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
 	assert.ErrorContains(t, err, "required option \"token\" not provided")
 }
 
@@ -64,13 +64,13 @@ options:
 contributes:
   runtime:
     extra_builds:
-      - "RUN install v{{ .options.version }}"
+      - "RUN install v{{ .plugin.options.version }}"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
 	opts := map[string]any{}
-	rendered, err := RenderContributions(p, opts)
+	rendered, err := RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, "RUN install v1.0.0", rendered.Runtime.ExtraBuilds[0])
@@ -88,15 +88,15 @@ contributes:
     extra_builds:
       - "RUN apt-get install -y openssh-server"
     pre_entrypoint:
-      - "/usr/sbin/sshd -p {{ .options.port }}"
+      - "/usr/sbin/sshd -p {{ .plugin.options.port }}"
     ports:
-      - "{{ .options.port }}:{{ .options.port }}"
+      - "{{ .plugin.options.port }}:{{ .plugin.options.port }}"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
 	opts := map[string]any{}
-	rendered, err := RenderContributions(p, opts)
+	rendered, err := RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
 	require.NoError(t, err)
 
 	require.Len(t, rendered.Runtime.PreEntrypoint, 1)
@@ -116,13 +116,13 @@ options:
 contributes:
   gateway:
     volumes:
-      - "oauth-tokens:{{ .options.token_dir }}"
+      - "oauth-tokens:{{ .plugin.options.token_dir }}"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
 	opts := map[string]any{"token_dir": "../../etc/evil"}
-	_, err = RenderContributions(p, opts)
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
 	assert.ErrorContains(t, err, "path traversal")
 }
 
@@ -136,15 +136,15 @@ options:
 contributes:
   runtime:
     pre_entrypoint:
-      - "/usr/sbin/sshd -p {{ .options.port }}"
+      - "/usr/sbin/sshd -p {{ .plugin.options.port }}"
     ports:
-      - "{{ .options.port }}:{{ .options.port }}"
+      - "{{ .plugin.options.port }}:{{ .plugin.options.port }}"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
 	opts := map[string]any{"port": 8022}
-	rendered, err := RenderContributions(p, opts)
+	rendered, err := RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, "/usr/sbin/sshd -p 8022", rendered.Runtime.PreEntrypoint[0])

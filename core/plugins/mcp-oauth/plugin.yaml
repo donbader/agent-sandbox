@@ -18,6 +18,6 @@ options:
 contributes:
   gateway:
     volumes:
-      - "oauth-tokens:{{ .options.token_dir }}"
+      - "oauth-tokens:{{ .plugin.options.token_dir }}"
     middlewares:
       - custom: "./middlewares/oauth.go"

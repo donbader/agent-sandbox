@@ -30,5 +30,5 @@ contributes:
       telegram:
         build: ./telegram-adapter
         environment:
-          AGENT_MANAGER_URL: "ws://agent:{{ .options.agent_manager_port }}/acp"
-          TELEGRAM_BOT_TOKEN: "{{ .options.bot_token }}"
+          AGENT_MANAGER_URL: "ws://agent:{{ .plugin.options.agent_manager_port }}/acp"
+          TELEGRAM_BOT_TOKEN: "{{ .plugin.options.bot_token }}"

@@ -8,4 +8,3 @@ installations:
     options:
       home_directory: "./agent-002/home"
       volume: true
-      volume_name: "agent-002-home"

@@ -27,7 +27,7 @@ options:
 contributes:
   runtime:
     extra_builds:
-      - "RUN npm install -g my-tool@{{ .options.version }}"
+      - "RUN npm install -g my-tool@{{ .plugin.options.version }}"
 `
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(pluginYAML), 0644))
 
@@ -91,7 +91,7 @@ contributes:
     services:
       - url: https://github.com
         headers:
-          Authorization: "Bearer {{ .options.token }}"
+          Authorization: "Bearer {{ .plugin.options.token }}"
 `), 0644))
 
 	// Create gateway source in core directory
@@ -144,7 +144,7 @@ contributes:
       mysvc:
         image: "myimage:latest"
         environment:
-          PORT: "{{ .options.port }}"
+          PORT: "{{ .plugin.options.port }}"
 `
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(pluginYAML), 0644))
 

@@ -97,10 +97,12 @@ contributes:
 | Field | Description |
 |-------|-------------|
 | `runtime.extra_builds` | Lines appended to the Dockerfile after the base install |
-| `runtime.volumes` | Volume mount specs for docker-compose. Supports Go template expressions using `{{ .options.<field> }}` |
+| `runtime.volumes` | Volume mount specs for docker-compose |
 | `gateway.services` | Services the gateway intercepts. Each entry has a `url` and a list of `middlewares` |
 | `gateway.services[].middlewares[].custom` | Path to a Go middleware file, relative to the plugin directory |
 | `sidecar.services` | Additional Docker containers that run alongside the agent (see below) |
+
+All `contributes` fields support Go `text/template` syntax. See **Template Context** below for available variables and functions.
 
 ### `contributes.sidecar.services`
 
@@ -120,23 +122,67 @@ contributes:
 
 Each entry under `services` follows Docker Compose service syntax (build, image, environment, ports, volumes, etc.).
 
-## Template Functions
+## Template Context
 
-All plugin template contexts (e.g. `contributes.runtime.extra_builds`) support Go text/template syntax with these additional functions:
+All `contributes` fields support Go `text/template` syntax. The template receives the following data:
+
+### Variables
+
+| Expression | Description | Example |
+|------------|-------------|---------|
+| `{{ .plugin.options.<field> }}` | User-provided plugin option (with defaults applied) | `{{ .plugin.options.port }}` |
+| `{{ .agent.name }}` | Agent name from `agent.yaml` | `{{ .agent.name }}` |
+| `{{ .agent.runtime.image }}` | Agent base image | `{{ .agent.runtime.image }}` |
+| `{{ .agent.core_version }}` | Core version | `{{ .agent.core_version }}` |
+| `{{ .agent.gateway }}` | Gateway config block | `{{ .agent.gateway }}` |
+
+`.agent` is the full agent config (`agent.yaml`) as a nested map. Any field in the config is accessible — the examples above are just the most common ones.
+
+**Example — per-agent named volume (no naming conflicts in fleet mode):**
+
+```yaml
+contributes:
+  runtime:
+    volumes:
+      - "{{ .agent.name }}-home:/home/agent"
+```
+
+**Example — conditional behavior based on runtime image:**
+
+```yaml
+contributes:
+  runtime:
+    extra_builds:
+      - "RUN echo 'agent={{ .agent.name }} image={{ .agent.runtime.image }}'"
+```
+
+### Functions
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `toJSON` | Serializes any value to a JSON string | `{{ toJSON .options.my_config }}` |
+| `toJSON` | Serializes any value to a JSON string | `{{ toJSON .plugin.options.my_config }}` |
 | `asset` | Returns the extracted path of a declared asset | `{{ asset "agent-manager" }}` |
+| `index` | Access map keys containing special characters | `{{ index .plugin.options "my-key" }}` |
 
 **`toJSON` example:**
 
 ```yaml
 extra_builds:
-  - "RUN echo '{{ toJSON .options.my_config }}' > /etc/my-config.json"
+  - "RUN echo '{{ toJSON .plugin.options.commands }}' > /etc/config.json"
 ```
 
 This is useful for passing structured option values (objects, arrays) into config files during the Docker build.
+
+**`asset` example:**
+
+```yaml
+assets:
+  - agent-manager/
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ asset \"agent-manager\" }}/ /opt/src/"
+```
 
 ## Writing a Gateway Middleware
 

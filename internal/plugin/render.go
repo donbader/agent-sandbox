@@ -10,8 +10,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RenderContributions resolves Go templates in a plugin's contributions using provided options.
-func RenderContributions(p *PluginDef, opts map[string]any) (*Contributions, error) {
+// RenderContext provides agent-level context available to plugin templates.
+// This is the stable interface between the generator and plugins — add fields
+// here rather than extending function signatures.
+type RenderContext struct {
+	// Self is the full agent config, exposed as .self in templates.
+	// Plugins can access any config field: {{ .self.name }}, {{ .self.runtime.image }}, etc.
+	Self map[string]any
+}
+
+// RenderContributions resolves Go templates in a plugin's contributions.
+// Template data available: .options (user-provided), .name (agent name).
+func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (*Contributions, error) {
 	if err := validateOptions(p.Options, opts); err != nil {
 		return nil, err
 	}
@@ -49,7 +59,10 @@ func RenderContributions(p *PluginDef, opts map[string]any) (*Contributions, err
 		return nil, fmt.Errorf("parse contributes template: %w", err)
 	}
 
-	data := map[string]any{"options": resolvedOpts}
+	data := map[string]any{
+		"plugin": map[string]any{"options": resolvedOpts},
+		"agent":  ctx.Self,
+	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("render contributes template: %w", err)
@@ -92,4 +105,18 @@ func applyDefaults(schema map[string]OptionSchema, opts map[string]any) map[stri
 		}
 	}
 	return resolved
+}
+
+// ConfigToMap converts any config struct to a map[string]any via YAML round-trip.
+// This keeps plugin templates in sync with the config struct without manual field mapping.
+func ConfigToMap(cfg any) map[string]any {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return map[string]any{}
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return map[string]any{}
+	}
+	return m
 }

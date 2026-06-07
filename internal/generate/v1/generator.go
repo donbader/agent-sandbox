@@ -190,7 +190,9 @@ func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDi
 			return nil, fmt.Errorf("resolve assets for plugin %q: %w", inst.Plugin, err)
 		}
 
-		rendered, err := plugin.RenderContributions(pluginDef, inst.Options)
+		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
+			Self: plugin.ConfigToMap(cfg),
+		})
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
 		}

@@ -10,4 +10,3 @@ installations:
     options:
       home_directory: "./agent-001/home"
       volume: true
-      volume_name: "agent-001-home"
