@@ -21,6 +21,13 @@ type Generator struct {
 	templates  *templates.Loader
 }
 
+// AgentResult holds the per-agent generation output.
+type AgentResult struct {
+	Config   *config.Config
+	Contribs *plugin.Contributions
+	BuildDir string // absolute path to the agent's build output directory
+}
+
 type resolvedPlugin struct {
 	def      *plugin.PluginDef
 	rendered *plugin.Contributions
@@ -78,12 +85,12 @@ func (g *Generator) RunWithConfig(cfg *config.Config, agentDir string) error {
 		return fmt.Errorf("create .build dir: %w", err)
 	}
 
-	merged, err := g.generateAgentArtifacts(cfg, agentDir, buildDir)
+	result, err := g.generateAgent(cfg, agentDir, buildDir)
 	if err != nil {
 		return err
 	}
 
-	compose, err := BuildCompose(cfg, merged, g.projectDir)
+	compose, err := BuildCompose(result.Config, result.Contribs, g.projectDir)
 	if err != nil {
 		return fmt.Errorf("build compose: %w", err)
 	}
@@ -122,28 +129,22 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 		return fmt.Errorf("create .build dir: %w", err)
 	}
 
-	type agentBuild struct {
-		cfg      *config.Config
-		merged   *plugin.Contributions
-		buildDir string
-	}
-	var builds []agentBuild
-
+	var results []AgentResult
 	for _, agent := range agents {
 		agentBuildDir := filepath.Join(buildDir, agent.Config.Name)
 		if err := os.MkdirAll(agentBuildDir, 0755); err != nil {
 			return fmt.Errorf("create build dir for %s: %w", agent.Config.Name, err)
 		}
-		merged, err := g.generateAgentArtifacts(agent.Config, agent.Dir, agentBuildDir)
+		result, err := g.generateAgent(agent.Config, agent.Dir, agentBuildDir)
 		if err != nil {
 			return fmt.Errorf("generate %s: %w", agent.Config.Name, err)
 		}
-		builds = append(builds, agentBuild{cfg: agent.Config, merged: merged, buildDir: agentBuildDir})
+		results = append(results, *result)
 	}
 
 	var entries []ComposeAgentEntry
-	for _, b := range builds {
-		entries = append(entries, ComposeAgentEntry{Config: b.cfg, Contribs: b.merged, BuildDir: b.buildDir})
+	for _, r := range results {
+		entries = append(entries, ComposeAgentEntry(r))
 	}
 
 	compose, err := BuildFleetCompose(entries, g.projectDir)
@@ -174,8 +175,11 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 	return nil
 }
 
-// generateAgentArtifacts resolves plugins, generates Dockerfile + entrypoint + gateway config.
-func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDir string) (*plugin.Contributions, error) {
+// generateAgent is the shared per-agent generation logic used by both Run() and RunFleet().
+// It resolves plugins, generates Dockerfile + entrypoint + gateway config.
+// All user-facing relative paths (e.g. home_directory) are resolved from agentDir
+// and transformed to be relative to projectDir (the Docker build context).
+func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string) (*AgentResult, error) {
 	resolver := plugin.NewResolver(agentDir, g.bundledFS)
 	var allContribs []*plugin.Contributions
 	resolved := make(map[string]*resolvedPlugin)
@@ -235,6 +239,11 @@ func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDi
 
 	merged := plugin.MergeContributions(allContribs...)
 
+	// Resolve user-facing relative paths to be relative to projectDir (Docker build context).
+	// Paths in plugin contributions (extra_builds COPY, volumes) are relative to agentDir,
+	// but Docker needs them relative to projectDir.
+	g.resolveAgentPaths(merged, agentDir)
+
 	relBuildDir, err := filepath.Rel(g.projectDir, buildDir)
 	if err != nil {
 		return nil, fmt.Errorf("compute relative build dir: %w", err)
@@ -273,7 +282,70 @@ func (g *Generator) generateAgentArtifacts(cfg *config.Config, agentDir, buildDi
 		}
 	}
 
-	return merged, nil
+	return &AgentResult{Config: cfg, Contribs: merged, BuildDir: buildDir}, nil
+}
+
+// resolveAgentPaths transforms relative paths in plugin contributions from agentDir-relative
+// to projectDir-relative (Docker build context). This is a no-op when agentDir == projectDir.
+func (g *Generator) resolveAgentPaths(contribs *plugin.Contributions, agentDir string) {
+	if agentDir == g.projectDir {
+		return
+	}
+
+	relAgent, err := filepath.Rel(g.projectDir, agentDir)
+	if err != nil {
+		return
+	}
+
+	// Transform extra_builds: rewrite COPY source paths that start with ./
+	for i, line := range contribs.Runtime.ExtraBuilds {
+		contribs.Runtime.ExtraBuilds[i] = rewriteCopyPath(line, relAgent)
+	}
+
+	// Transform volume bind-mount sources that start with ./
+	for i, vol := range contribs.Runtime.Volumes {
+		contribs.Runtime.Volumes[i] = rewriteVolumePath(vol, relAgent)
+	}
+}
+
+// rewriteCopyPath rewrites Dockerfile COPY instructions to prefix relative source paths
+// with the agent's relative directory.
+// "COPY ./home /home/agent/" → "COPY ./agent-001/home /home/agent/"
+func rewriteCopyPath(line, relAgent string) string {
+	// Match "COPY ./something ..." pattern
+	if !strings.HasPrefix(line, "COPY ./") {
+		return line
+	}
+	// Split "COPY <src> <dst>"
+	parts := strings.Fields(line)
+	if len(parts) < 3 {
+		return line
+	}
+	src := parts[1]
+	if strings.HasPrefix(src, "./") {
+		parts[1] = "./" + filepath.Join(relAgent, src[2:])
+	}
+	return strings.Join(parts, " ")
+}
+
+// rewriteVolumePath rewrites bind-mount volume sources that start with ./ to be
+// relative to projectDir instead of agentDir.
+// "./home:/home/agent" → "./agent-001/home:/home/agent"
+func rewriteVolumePath(vol, relAgent string) string {
+	// Named volumes (no leading ./ or /) are left unchanged
+	if !strings.HasPrefix(vol, "./") {
+		return vol
+	}
+	colonIdx := strings.Index(vol, ":")
+	if colonIdx < 0 {
+		return vol
+	}
+	src := vol[:colonIdx]
+	rest := vol[colonIdx:]
+	if strings.HasPrefix(src, "./") {
+		src = "./" + filepath.Join(relAgent, src[2:])
+	}
+	return src + rest
 }
 
 func collectAllOptions(cfg *config.Config) map[string]any {

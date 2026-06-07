@@ -6,5 +6,5 @@ runtime:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./agent-002/home"
+      home_directory: "./home"
       volume: true
