@@ -95,6 +95,20 @@ func (g *Generator) RunWithConfig(cfg *config.Config, agentDir string) error {
 		return fmt.Errorf("extract gateway source: %w", err)
 	}
 
+	// Copy the runtime config into gateway-src so the Docker build can COPY it into the image.
+	// For single-agent, the baked-in config IS the runtime config (no volume mount override).
+	gatewaySrcDir := filepath.Join(buildDir, "gateway-src")
+	if err := os.MkdirAll(gatewaySrcDir, 0755); err != nil {
+		return fmt.Errorf("create gateway-src dir: %w", err)
+	}
+	runtimeConfig, err := os.ReadFile(filepath.Join(buildDir, "config.yaml"))
+	if err != nil {
+		return fmt.Errorf("read runtime config for gateway image: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(gatewaySrcDir, "config.yaml"), runtimeConfig, 0644); err != nil {
+		return fmt.Errorf("write gateway image config: %w", err)
+	}
+
 	if err := generateSchema(buildDir); err != nil {
 		return fmt.Errorf("generate schema: %w", err)
 	}
