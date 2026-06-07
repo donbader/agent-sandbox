@@ -3,3 +3,9 @@ name: agent-002
 core_version: latest
 runtime:
   image: "@builtin/claude-code"
+installations:
+  - plugin: "@builtin/home-override"
+    options:
+      home_directory: "./agent-002/home"
+      volume: true
+      volume_name: "agent-002-home"

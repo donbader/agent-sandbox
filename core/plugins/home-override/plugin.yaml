@@ -9,6 +9,11 @@ options:
     required: false
     default: false
     description: "Persist home directory across restarts using a named Docker volume. Contents are seeded from home_directory on first run."
+  volume_name:
+    type: string
+    required: false
+    default: "agent-home"
+    description: "Name of the Docker volume for persistent home. Override in fleet mode to avoid conflicts."
 
 contributes:
   runtime:
@@ -16,4 +21,4 @@ contributes:
       - "COPY {{ .options.home_directory }} /home/agent/"
       - "RUN chown -R agent:agent /home/agent"
     volumes:
-      - "{{ if .options.volume }}agent-home:/home/agent{{ else }}{{ .options.home_directory }}:/home/agent{{ end }}"
+      - "{{ if .options.volume }}{{ .options.volume_name }}:/home/agent{{ else }}{{ .options.home_directory }}:/home/agent{{ end }}"

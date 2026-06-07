@@ -5,3 +5,9 @@ runtime:
   image: "@builtin/codex"
   volumes:
     - "agent-001-data:/home/agent/workspace"
+installations:
+  - plugin: "@builtin/home-override"
+    options:
+      home_directory: "./agent-001/home"
+      volume: true
+      volume_name: "agent-001-home"
