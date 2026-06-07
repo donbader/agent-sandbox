@@ -150,6 +150,17 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 		return fmt.Errorf("extract gateway source: %w", err)
 	}
 
+	// Write placeholder config.yaml for gateway Docker build.
+	// In fleet mode, per-agent config.yaml is volume-mounted at runtime.
+	gatewaySrcDir := filepath.Join(buildDir, "gateway-src")
+	if err := os.MkdirAll(gatewaySrcDir, 0755); err != nil {
+		return fmt.Errorf("create gateway-src dir: %w", err)
+	}
+	placeholder := []byte("# Placeholder — per-agent config mounted at runtime\nlisten: \":8443\"\ndns_listen: \":53\"\n")
+	if err := os.WriteFile(filepath.Join(gatewaySrcDir, "config.yaml"), placeholder, 0644); err != nil {
+		return fmt.Errorf("write gateway placeholder config: %w", err)
+	}
+
 	// Generate JSON Schema
 	if err := generateSchema(buildDir); err != nil {
 		return fmt.Errorf("generate schema: %w", err)

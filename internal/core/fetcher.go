@@ -83,7 +83,7 @@ func download(version, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("core version %s not found (no release asset at %s)", version, url)
@@ -105,7 +105,7 @@ func extractTarGz(r io.Reader, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -139,10 +139,10 @@ func extractTarGz(r io.Reader, destDir string) error {
 				return err
 			}
 			if _, err := io.Copy(f, tr); err != nil { //nolint:gosec
-				f.Close()
+				_ = f.Close()
 				return err
 			}
-			f.Close()
+			_ = f.Close()
 		}
 	}
 
