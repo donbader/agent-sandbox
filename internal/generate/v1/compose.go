@@ -314,11 +314,11 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 
 		compose.Services[agentName] = agentSvc
 
-		// Gateway service (per-agent, shares gateway-src build context)
+		// Gateway service (per-agent build context for agent-specific middleware)
 		gatewayEnv := collectGatewayEnvVars(cfg, agent.Contribs)
 		gatewaySvc := map[string]any{
 			"build": map[string]any{
-				"context":    "./gateway-src",
+				"context":    fmt.Sprintf("./%s/gateway-src", relBuildDir),
 				"dockerfile": "Dockerfile",
 			},
 			"cap_drop": []string{"ALL"},

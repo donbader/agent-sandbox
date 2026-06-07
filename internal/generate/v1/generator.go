@@ -135,10 +135,28 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 		if err := os.MkdirAll(agentBuildDir, 0755); err != nil {
 			return fmt.Errorf("create build dir for %s: %w", agent.Config.Name, err)
 		}
+
+		// Extract gateway source into per-agent build dir (each agent compiles its own middleware).
+		if err := g.extractGatewaySource(agentBuildDir); err != nil {
+			return fmt.Errorf("extract gateway source for %s: %w", agent.Config.Name, err)
+		}
+
 		result, err := g.generateAgent(agent.Config, agent.Dir, agentBuildDir)
 		if err != nil {
 			return fmt.Errorf("generate %s: %w", agent.Config.Name, err)
 		}
+
+		// Copy the runtime config into gateway-src for the Docker build COPY step.
+		// (Per-agent config is also volume-mounted at runtime for hot updates.)
+		gatewaySrcDir := filepath.Join(agentBuildDir, "gateway-src")
+		runtimeConfig, err := os.ReadFile(filepath.Join(agentBuildDir, "config.yaml"))
+		if err != nil {
+			return fmt.Errorf("read runtime config for %s: %w", agent.Config.Name, err)
+		}
+		if err := os.WriteFile(filepath.Join(gatewaySrcDir, "config.yaml"), runtimeConfig, 0644); err != nil {
+			return fmt.Errorf("write gateway image config for %s: %w", agent.Config.Name, err)
+		}
+
 		results = append(results, *result)
 	}
 
@@ -153,20 +171,6 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 	}
 	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
 		return fmt.Errorf("write docker-compose.yml: %w", err)
-	}
-
-	if err := g.extractGatewaySource(buildDir); err != nil {
-		return fmt.Errorf("extract gateway source: %w", err)
-	}
-
-	// Write placeholder config.yaml for gateway Docker build (per-agent config is volume-mounted at runtime).
-	gatewaySrcDir := filepath.Join(buildDir, "gateway-src")
-	if err := os.MkdirAll(gatewaySrcDir, 0755); err != nil {
-		return fmt.Errorf("create gateway-src dir: %w", err)
-	}
-	placeholder := []byte("# Placeholder — per-agent config mounted at runtime\nlisten: \":8443\"\ndns_listen: \":53\"\n")
-	if err := os.WriteFile(filepath.Join(gatewaySrcDir, "config.yaml"), placeholder, 0644); err != nil {
-		return fmt.Errorf("write gateway placeholder config: %w", err)
 	}
 
 	if err := generateSchema(buildDir); err != nil {

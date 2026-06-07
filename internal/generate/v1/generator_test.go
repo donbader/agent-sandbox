@@ -439,8 +439,10 @@ gateway:
 		assert.Contains(t, string(df), "CMD", "Dockerfile missing CMD for %s", name)
 	}
 
-	// Verify shared gateway-src/config.yaml exists (Docker build context)
-	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "config.yaml"))
+	// Verify per-agent gateway-src/config.yaml exists (Docker build context)
+	for _, name := range []string{"coder", "reviewer"} {
+		assert.FileExists(t, filepath.Join(buildDir, name, "gateway-src", "config.yaml"))
+	}
 }
 
 func mustParseConfig(t *testing.T, path string) *config.Config {
