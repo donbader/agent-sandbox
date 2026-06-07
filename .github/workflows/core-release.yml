@@ -1,0 +1,58 @@
+name: Core Release
+
+on:
+  push:
+    tags:
+      - "core-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#core-}" >> "$GITHUB_OUTPUT"
+
+      - name: Package core tarball
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          STAGING="$(mktemp -d)"
+
+          # Templates (generation templates used by CLI)
+          cp -r internal/generate/templates "$STAGING/templates"
+          # Remove Go source/test files — only .tmpl files ship
+          find "$STAGING/templates" -name '*.go' -delete
+
+          # Plugins (data-driven YAML plugin definitions)
+          cp -r core/plugins "$STAGING/plugins"
+
+          # Gateway source (compiled during Docker build)
+          cp -r core/gateway "$STAGING/gateway"
+
+          # SDK (gateway middleware interfaces)
+          cp -r core/sdk "$STAGING/sdk"
+
+          # Module files (needed for gateway Docker build)
+          cp go.mod go.sum "$STAGING/"
+
+          # Create tarball
+          ASSET="agent-sandbox-core-${VERSION}.tar.gz"
+          tar -czf "$ASSET" -C "$STAGING" .
+
+          echo "asset=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Core ${{ steps.version.outputs.version }}"
+          body: |
+            Core release `${{ steps.version.outputs.version }}` for agent-sandbox.
+
+            Contains templates, plugins, gateway source, and SDK.
+            Used by CLI when `core_version: ${{ steps.version.outputs.version }}` is set in agent.yaml.
+          files: ${{ env.asset }}
