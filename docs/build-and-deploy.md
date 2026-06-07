@@ -12,7 +12,7 @@ agent-sandbox generate
   ├── Merge shared features (if fleet mode)
   │
   └── Generate .build/:
-        ├── gateway-src/        (extracted from embed.FS: core/gateway + core/sdk)
+        ├── gateway-src/        (fetched from GitHub Releases: core/gateway + core/sdk)
         ├── home-override/      (from user's home/ dir)
         ├── Dockerfile.gateway  (gateway container: compile + minimal alpine)
         ├── Dockerfile          (agent container: runtime + entrypoint)
@@ -29,7 +29,7 @@ agent-sandbox compose up --build -d
 
 CLI resolves plugins in order:
 1. Inline definition in agent.yaml (for custom runtimes)
-2. Built-in plugins (embedded in CLI binary as YAML/templates)
+2. Built-in plugins (fetched from GitHub Releases, cached locally)
 
 ## Generated Dockerfiles (Separate Containers)
 
@@ -104,15 +104,18 @@ WORKDIR /home/agent
 CMD ["sleep", "infinity"]
 ```
 
-## What Gets Embedded in CLI (go:embed)
+## What Gets Fetched from GitHub Releases
 
-| Content | Purpose | Size |
-|---------|---------|------|
-| Gateway core source (`core/gateway/`) | TCP proxy, SNI, MITM framework | ~15MB |
-| SDK module (`core/sdk/`) | Gateway middleware interfaces | ~5KB |
-| Built-in presets (`core/presets/`) | Base image, install commands, CMD | ~10KB |
-| Built-in plugins (`core/plugins/`) | Feature plugin definitions | ~10KB |
-| Root go.mod + go.sum | Gateway build dependencies | ~5KB |
+| Content | Purpose | Size | Cache |
+|---------|---------|------|-------|
+| Gateway core source (`core/gateway/`) | TCP proxy, SNI, MITM framework | ~15MB | Indefinite (per version) |
+| SDK module (`core/sdk/`) | Gateway middleware interfaces | ~5KB | Indefinite (per version) |
+| Built-in presets (`core/presets/`) | Base image, install commands, CMD | ~10KB | Indefinite (per version) |
+| Built-in plugins (`core/plugins/`) | Feature plugin definitions | ~10KB | Indefinite (per version) |
+| Root go.mod + go.sum | Gateway build dependencies | ~5KB | Indefinite (per version) |
+| Generation templates (`templates/`) | Dockerfile, entrypoint, gateway Dockerfile | ~5KB | Indefinite (per version) |
+
+For `core_version: latest`, the CLI queries the GitHub API to find the newest `core-v*` release (cached 1h). For specific versions (e.g. `core_version: v1.0.0`), the tarball is cached indefinitely.
 
 Gateway rewriters (auth-header, telegram-url) are config-driven — instantiated at runtime from `config.yaml`, not compiled per-plugin.
 
@@ -140,7 +143,7 @@ Plugin `contributes.runtime.extra_builds` lines are evaluated as Go templates. A
 
 The gateway binary is compiled during Docker build, not CLI build:
 
-1. CLI extracts gateway core source from `embed.FS` to `.build/gateway-src/` (includes `core/gateway/` + `core/sdk/` + root `go.mod`/`go.sum`)
+1. CLI fetches gateway core source from GitHub Releases cache to `.build/gateway-src/` (includes `core/gateway/` + `core/sdk/` + root `go.mod`/`go.sum`)
 2. CLI generates `config.yaml` with rewriter rules from active feature plugins
 3. Docker multi-stage compiles gateway binary into a single binary
 4. Config-driven rewriter types (`telegram-url`, `auth-header`) are instantiated at runtime from `config.yaml`
@@ -197,7 +200,7 @@ agent-sandbox/
     main.go
 
   core/
-    gateway/                ← Gateway core source (embedded in CLI)
+    gateway/                ← Gateway core source (fetched from Releases)
       go.mod
       cmd/gateway/main.go
       internal/proxy/       ← TCP listener, SNI routing, passthrough
@@ -205,7 +208,7 @@ agent-sandbox/
       internal/dns/         ← UDP DNS forwarder
       internal/redact/      ← Secret-masking slog handler
 
-    sdk/                    ← Gateway middleware interfaces (embedded in CLI)
+    sdk/                    ← Gateway middleware interfaces (fetched from Releases)
       go.mod
       gateway/middleware.go
 

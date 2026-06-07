@@ -11,11 +11,11 @@
 | 5 | Channel manager always entrypoint | Agent is always a child process. No WrapCmd hack. |
 | 6 | Allow-all egress default | Dev agents need unrestricted installs. MITM only where needed. |
 | 7 | Gateway as separate container | Security isolation. Agent cannot access secrets. Per-agent config without shared state. |
-| 8 | Core plugins embedded in CLI | CLI ships all plugins. Gateway/channel code recompiles during Docker build — handler fixes only need container rebuild. |
+| 8 | Core plugins fetched from Releases | CLI fetches core tarball from GitHub Releases. Gateway/channel code recompiles during Docker build — handler fixes only need container rebuild. |
 | 9 | Home override via /opt staging | Volume hides /home/agent. Staging + entrypoint cp ensures configs win. |
 | 10 | Channels are channel-manager sub-plugins | Messaging is channel-manager's concern. TypeScript in plugin's `channel/` dir. |
 | 11 | All credentials through gateway | Even channel-manager gets dummy tokens. Real creds never in container env. |
-| 12 | Gateway code compiles during Docker build | go:embed gateway source in CLI. Multi-stage Dockerfile compiles it. User doesn't need Go. |
+| 12 | Gateway code compiles during Docker build | Gateway source fetched from Releases, cached locally. Multi-stage Dockerfile compiles it. User doesn't need Go. |
 | 13 | Optional fleet.yaml | Single agent first-class. Multi-agent additive. |
 | 14 | UDP restricted | DNS redirected to gateway resolver. All other UDP dropped. Prevents tunneling. |
 | 15 | Inline runtime definition | Users can define custom runtimes directly in agent.yaml without creating plugin files. |
@@ -65,7 +65,7 @@
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Gateway source embedded in CLI | ~20MB added to binary | Accept it. Single binary distribution is worth the size. Channel manager TypeScript adds ~5MB. |
+| Gateway source fetched from Releases | ~20MB fetched on first run, cached locally | Accept it. Fetches once per version. Channel manager TypeScript adds ~5MB. |
 | Plugin YAML schema changes | Existing plugins break | Semantic versioning on schema. Additive only. |
 | Multi-stage build adds time | First build ~60s | Docker layer cache. Gateway stage rarely changes. Subsequent builds ~5s. |
 | Two languages (Go + TypeScript) | Higher maintenance | Clear boundary: Go = proxy/gateway. TypeScript = messaging/channel-manager. No overlap. |
@@ -75,10 +75,10 @@
 
 | Change | User action |
 |--------|-------------|
-| New built-in plugin | `agent-sandbox upgrade` |
-| Plugin data fix (runtime.yaml) | `agent-sandbox upgrade` |
-| Gateway handler fix | `agent-sandbox upgrade`, then rebuild container |
-| Channel plugin fix | `agent-sandbox upgrade`, then rebuild container |
+| New built-in plugin | Push `core-v*` tag, then `agent-sandbox generate` fetches it |
+| Plugin data fix (runtime.yaml) | Push `core-v*` tag, then `agent-sandbox generate` fetches it |
+| Gateway handler fix | Push `core-v*` tag, then rebuild container |
+| Channel plugin fix | Push `core-v*` tag, then rebuild container |
 | CLI template engine fix | `agent-sandbox upgrade` |
 | Config schema change | Edit agent.yaml → re-generate |
 
