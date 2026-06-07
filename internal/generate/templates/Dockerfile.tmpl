@@ -1,0 +1,25 @@
+FROM {{ .BaseImage }}
+{{- range .PresetInstalls }}
+
+RUN {{ . }}
+{{- end }}
+{{- if not .IsPreset }}
+
+RUN apt-get update && apt-get install -y --no-install-recommends iptables iputils-ping ca-certificates wget gosu && rm -rf /var/lib/apt/lists/*
+{{- end }}
+
+RUN useradd -m -s /bin/bash agent
+ENV HOME=/home/agent
+WORKDIR /home/agent
+{{- range .ExtraBuilds }}
+
+{{ . }}
+{{- end }}
+
+COPY {{ .EntrypointPath }} /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+{{- if .CMD }}
+
+CMD {{ .CMD }}
+{{- end }}

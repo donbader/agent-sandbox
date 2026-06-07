@@ -1,11 +1,13 @@
 package v1
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
+	"github.com/donbader/agent-sandbox/internal/generate/templates"
 	"github.com/donbader/agent-sandbox/internal/plugin"
 )
 
@@ -37,140 +39,99 @@ var Presets = map[string]struct {
 	},
 }
 
-// entrypointScript is the transparent proxy bootstrap script written to .build/entrypoint.sh.
-// It runs inside the agent container on startup and:
-//  1. Waits for the gateway health endpoint to be ready.
-//  2. Redirects outbound TCP 443 → gateway:8443 (MITM proxy) via iptables DNAT.
-//  3. Redirects outbound UDP/TCP 53 → gateway:53 (DNS) via iptables DNAT.
-//  4. Installs the gateway CA certificate into the system trust store.
-//  5. Execs the original CMD so no PID is wasted.
-const entrypointScript = `#!/bin/sh
-set -e
-
-# Wait for gateway to be healthy before setting up routing.
-echo "[entrypoint] waiting for gateway..."
-until curl -sf http://gateway:8080/health >/dev/null 2>&1; do
-    sleep 1
-done
-echo "[entrypoint] gateway ready"
-
-# Resolve gateway IP (getent may not exist in slim images, fall back to ping).
-GATEWAY_IP=""
-if command -v getent >/dev/null 2>&1; then
-    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
-fi
-if [ -z "$GATEWAY_IP" ]; then
-    GATEWAY_IP=$(ping -c1 -W1 gateway 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p')
-fi
-if [ -z "$GATEWAY_IP" ]; then
-    echo "[entrypoint] ERROR: could not resolve gateway IP" >&2
-    exit 1
-fi
-echo "[entrypoint] gateway IP: $GATEWAY_IP"
-
-# Redirect outbound HTTPS traffic to the MITM proxy.
-# Exclude traffic destined for the gateway itself to avoid loops.
-iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d "$GATEWAY_IP" -j DNAT --to-destination "${GATEWAY_IP}:8443"
-echo "[entrypoint] iptables: TCP 443 → ${GATEWAY_IP}:8443"
-
-# Install the gateway CA certificate so TLS verification succeeds.
-if [ -f /shared/certs/ca.crt ]; then
-    cp /shared/certs/ca.crt /usr/local/share/ca-certificates/gateway-ca.crt
-    update-ca-certificates --fresh >/dev/null 2>&1
-    echo "[entrypoint] CA certificate installed"
-else
-    echo "[entrypoint] WARNING: CA cert not found at /shared/certs/ca.crt" >&2
-fi
-
-# Drop privileges to the agent user for the actual process.
-exec gosu agent "$@"
-`
-
-// EntrypointScript returns the transparent proxy bootstrap script content.
-// preEntrypoint commands are injected before exec "$@".
-func EntrypointScript(preEntrypoint []string) string {
-	if len(preEntrypoint) == 0 {
-		return entrypointScript
-	}
-	// Insert pre_entrypoint commands before the final exec "$@"
-	var extra string
-	extra += "\n# Plugin pre-entrypoint commands\n"
-	for _, cmd := range preEntrypoint {
-		extra += cmd + "\n"
-	}
-	return strings.Replace(entrypointScript, `exec gosu agent "$@"`, extra+`exec gosu agent "$@"`, 1)
+// entrypointData is the template data for entrypoint.sh.tmpl.
+type entrypointData struct {
+	PreEntrypoint string
 }
 
-// BuildDockerfile generates a Dockerfile string from config and plugin contributions.
-// The Dockerfile uses entrypoint.sh (expected alongside it in the build context) as
-// ENTRYPOINT, which sets up iptables routing before handing off to CMD.
-//
-// entrypointPath is the path to entrypoint.sh relative to the Docker build context
-// (the project root). For single-agent this is ".build/entrypoint.sh"; for fleet mode
-// it's ".build/<agent>/entrypoint.sh".
-func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions, entrypointPath string) (string, error) {
-	var lines []string
+// dockerfileData is the template data for Dockerfile.tmpl.
+type dockerfileData struct {
+	BaseImage      string
+	PresetInstalls []string
+	IsPreset       bool
+	ExtraBuilds    []string
+	EntrypointPath string
+	CMD            string
+}
 
-	// Base image
+// BuildDockerfile generates a Dockerfile string using the embedded templates.
+// This is a convenience wrapper around RenderDockerfile for callers that don't manage their own Loader.
+func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions, entrypointPath string) (string, error) {
+	return RenderDockerfile(templates.NewEmbeddedLoader(), cfg, contribs, entrypointPath)
+}
+
+// EntrypointScript returns the entrypoint script using the embedded templates.
+// This is a convenience wrapper around RenderEntrypointScript.
+func EntrypointScript(preEntrypoint []string) string {
+	s, err := RenderEntrypointScript(templates.NewEmbeddedLoader(), preEntrypoint)
+	if err != nil {
+		panic("entrypoint template error: " + err.Error())
+	}
+	return s
+}
+
+// RenderEntrypointScript executes the entrypoint template with optional pre-entrypoint commands.
+func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string) (string, error) {
+	tmpl, err := loader.Load("entrypoint.sh.tmpl")
+	if err != nil {
+		return "", fmt.Errorf("load entrypoint template: %w", err)
+	}
+
+	var preCmd string
+	if len(preEntrypoint) > 0 {
+		preCmd = strings.Join(preEntrypoint, "\n")
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, entrypointData{PreEntrypoint: preCmd}); err != nil {
+		return "", fmt.Errorf("execute entrypoint template: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// RenderDockerfile executes the Dockerfile template from config and plugin contributions.
+func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *plugin.Contributions, entrypointPath string) (string, error) {
+	tmpl, err := loader.Load("Dockerfile.tmpl")
+	if err != nil {
+		return "", fmt.Errorf("load Dockerfile template: %w", err)
+	}
+
+	// Resolve preset
 	baseImage := cfg.Runtime.Image
 	var presetInstalls []string
+	_, isPreset := Presets[cfg.Runtime.Image]
 	if preset, ok := Presets[cfg.Runtime.Image]; ok {
 		baseImage = preset.BaseImage
 		presetInstalls = preset.Installs
 	}
-	lines = append(lines, fmt.Sprintf("FROM %s", baseImage))
-	lines = append(lines, "")
 
-	// Preset installs (includes iptables for builtin presets)
-	for _, inst := range presetInstalls {
-		lines = append(lines, fmt.Sprintf("RUN %s", inst))
-	}
-	if len(presetInstalls) > 0 {
-		lines = append(lines, "")
-	}
-
-	// For custom images that don't use a preset, install iptables explicitly.
-	if _, isPreset := Presets[cfg.Runtime.Image]; !isPreset {
-		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends iptables iputils-ping ca-certificates wget gosu && rm -rf /var/lib/apt/lists/*")
-		lines = append(lines, "")
-	}
-
-	// Create unprivileged agent user for running the agent process.
-	// The entrypoint runs as root (needed for iptables), then drops to this user via gosu.
-	lines = append(lines, "RUN useradd -m -s /bin/bash agent")
-	lines = append(lines, "ENV HOME=/home/agent")
-	lines = append(lines, "WORKDIR /home/agent")
-	lines = append(lines, "")
-
-	// User extra builds
-	lines = append(lines, cfg.Runtime.ExtraBuilds...)
-	if len(cfg.Runtime.ExtraBuilds) > 0 {
-		lines = append(lines, "")
-	}
-
-	// Plugin extra builds
+	// Collect extra builds (user + plugin)
+	var extraBuilds []string
+	extraBuilds = append(extraBuilds, cfg.Runtime.ExtraBuilds...)
 	if contribs != nil {
-		lines = append(lines, contribs.Runtime.ExtraBuilds...)
-		if len(contribs.Runtime.ExtraBuilds) > 0 {
-			lines = append(lines, "")
-		}
+		extraBuilds = append(extraBuilds, contribs.Runtime.ExtraBuilds...)
 	}
 
-	// Transparent proxy entrypoint wrapper
-	lines = append(lines, fmt.Sprintf("COPY %s /usr/local/bin/entrypoint.sh", entrypointPath))
-	lines = append(lines, "RUN chmod +x /usr/local/bin/entrypoint.sh")
-	lines = append(lines, `ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]`)
-	lines = append(lines, "")
-
-	// CMD — the actual agent process (passed as "$@" to entrypoint.sh)
+	// Marshal CMD
+	var cmd string
 	if len(cfg.Runtime.Entrypoint) > 0 {
 		ep, err := json.Marshal(cfg.Runtime.Entrypoint)
 		if err != nil {
 			return "", fmt.Errorf("marshal entrypoint: %w", err)
 		}
-		lines = append(lines, fmt.Sprintf("CMD %s", string(ep)))
-		lines = append(lines, "")
+		cmd = string(ep)
 	}
 
-	return strings.Join(lines, "\n"), nil
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, dockerfileData{
+		BaseImage:      baseImage,
+		PresetInstalls: presetInstalls,
+		IsPreset:       isPreset,
+		ExtraBuilds:    extraBuilds,
+		EntrypointPath: entrypointPath,
+		CMD:            cmd,
+	}); err != nil {
+		return "", fmt.Errorf("execute Dockerfile template: %w", err)
+	}
+	return buf.String(), nil
 }
