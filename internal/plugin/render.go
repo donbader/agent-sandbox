@@ -20,7 +20,7 @@ type RenderContext struct {
 }
 
 // RenderContributions resolves Go templates in a plugin's contributions.
-// Template data available: .options (user-provided), .name (agent name).
+// Template data available: .plugin.options (user-provided), .agent (config map).
 func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (*Contributions, error) {
 	if err := validateOptions(p.Options, opts); err != nil {
 		return nil, err
@@ -29,10 +29,10 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	// Apply defaults
 	resolvedOpts := applyDefaults(p.Options, opts)
 
-	// Re-marshal the contributes block to YAML, then template-render it
-	contribYAML, err := yaml.Marshal(p.Contributes)
-	if err != nil {
-		return nil, fmt.Errorf("marshal contributes: %w", err)
+	// Use raw contributes template (preserved from plugin.yaml without YAML parsing)
+	contribTemplate := p.ContributesRaw
+	if contribTemplate == "" {
+		return &Contributions{}, nil
 	}
 
 	funcMap := template.FuncMap{
@@ -54,7 +54,7 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 		},
 	}
 
-	tmpl, err := template.New("contrib").Funcs(funcMap).Parse(string(contribYAML))
+	tmpl, err := template.New("contrib").Funcs(funcMap).Parse(contribTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("parse contributes template: %w", err)
 	}

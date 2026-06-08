@@ -2,19 +2,21 @@ package plugin
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // PluginDef represents a parsed plugin.yaml file.
 type PluginDef struct {
-	Name        string                  `yaml:"name"`
-	Requires    []string                `yaml:"requires"`
-	Assets      []string                `yaml:"assets"`
-	Options     map[string]OptionSchema `yaml:"options"`
-	Contributes Contributions           `yaml:"contributes"`
-	BaseDir     string                  `yaml:"-"` // directory where plugin.yaml lives (for resolving relative paths)
-	AssetPaths  map[string]string       `yaml:"-"` // resolved asset paths (set by generator after extraction)
+	Name           string                  `yaml:"name"`
+	Requires       []string                `yaml:"requires"`
+	Assets         []string                `yaml:"assets"`
+	Options        map[string]OptionSchema `yaml:"options"`
+	Contributes    Contributions           `yaml:"-"`          // populated after template rendering
+	ContributesRaw string                  `yaml:"-"`          // raw YAML template for contributes block
+	BaseDir        string                  `yaml:"-"`          // directory where plugin.yaml lives (for resolving relative paths)
+	AssetPaths     map[string]string       `yaml:"-"`          // resolved asset paths (set by generator after extraction)
 }
 
 type OptionSchema struct {
@@ -87,13 +89,119 @@ type Healthcheck struct {
 }
 
 // ParsePluginYAML parses raw YAML bytes into a PluginDef.
+// The contributes block is kept as raw template text (not parsed as YAML)
+// because it may contain Go template directives that generate YAML structure.
 func ParsePluginYAML(data []byte) (*PluginDef, error) {
-	var p PluginDef
-	if err := yaml.Unmarshal(data, &p); err != nil {
+	// First, try a full YAML parse. This works for most plugins where contributes
+	// only has templates inside string values (valid YAML).
+	var full struct {
+		Name        string                  `yaml:"name"`
+		Requires    []string                `yaml:"requires"`
+		Assets      []string                `yaml:"assets"`
+		Options     map[string]OptionSchema `yaml:"options"`
+		Contributes Contributions           `yaml:"contributes"`
+	}
+	if err := yaml.Unmarshal(data, &full); err == nil && full.Name != "" {
+		// Full parse succeeded — re-marshal contributes from the typed struct.
+		// This properly unescapes YAML string values (e.g. \" → ") so Go templates work.
+		var contributesRaw string
+		out, err := yaml.Marshal(&full.Contributes)
+		if err == nil {
+			contributesRaw = string(out)
+		}
+		return &PluginDef{
+			Name:           full.Name,
+			Requires:       full.Requires,
+			Assets:         full.Assets,
+			Options:        full.Options,
+			ContributesRaw: contributesRaw,
+		}, nil
+	}
+
+	// Full YAML parse failed (structural templates like {{- range }}).
+	// Extract contributes as raw text, parse metadata separately.
+	contributesRaw, metadataOnly := splitContributesBlock(data)
+
+	var meta struct {
+		Name     string                  `yaml:"name"`
+		Requires []string                `yaml:"requires"`
+		Assets   []string                `yaml:"assets"`
+		Options  map[string]OptionSchema `yaml:"options"`
+	}
+	if err := yaml.Unmarshal(metadataOnly, &meta); err != nil {
 		return nil, fmt.Errorf("parse plugin.yaml: %w", err)
 	}
-	if p.Name == "" {
+	if meta.Name == "" {
 		return nil, fmt.Errorf("plugin.yaml: name is required")
 	}
-	return &p, nil
+
+	return &PluginDef{
+		Name:           meta.Name,
+		Requires:       meta.Requires,
+		Assets:         meta.Assets,
+		Options:        meta.Options,
+		ContributesRaw: contributesRaw,
+	}, nil
+}
+
+// splitContributesBlock splits plugin.yaml into the raw contributes template
+// and the remaining metadata YAML (with contributes removed).
+func splitContributesBlock(data []byte) (contributes string, metadata []byte) {
+	lines := strings.Split(string(data), "\n")
+	var metaLines []string
+	var contribLines []string
+	inContribs := false
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		if !inContribs {
+			if trimmed == "contributes:" {
+				inContribs = true
+				continue
+			}
+			metaLines = append(metaLines, line)
+		} else {
+			// Still in contributes block: indented, blank, or template directive
+			if line == "" || line[0] == ' ' || line[0] == '\t' || strings.HasPrefix(trimmed, "{{") {
+				contribLines = append(contribLines, line)
+			} else {
+				// Hit a new top-level key — back to metadata
+				inContribs = false
+				metaLines = append(metaLines, line)
+			}
+		}
+	}
+
+	// Dedent contributes block
+	minIndent := -1
+	for _, line := range contribLines {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "{{") {
+			continue
+		}
+		indent := 0
+		for _, ch := range line {
+			if ch == ' ' {
+				indent++
+			} else {
+				break
+			}
+		}
+		if minIndent < 0 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+
+	dedented := make([]string, len(contribLines))
+	for i, line := range contribLines {
+		if minIndent > 0 && len(line) >= minIndent {
+			dedented[i] = line[minIndent:]
+		} else {
+			dedented[i] = line
+		}
+	}
+
+	return strings.Join(dedented, "\n"), []byte(strings.Join(metaLines, "\n"))
 }

@@ -20,7 +20,7 @@ contributes:
     services:
       - url: https://github.com
         headers:
-          Authorization: "Bearer {{ .options.token }}"
+          Authorization: "Bearer {{ .plugin.options.token }}"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
@@ -28,8 +28,31 @@ contributes:
 	assert.Contains(t, p.Options, "token")
 	assert.Equal(t, "string", p.Options["token"].Type)
 	assert.True(t, p.Options["token"].Required)
-	assert.Len(t, p.Contributes.Gateway.Services, 1)
-	assert.Equal(t, "https://github.com", p.Contributes.Gateway.Services[0].URL)
+	// Contributes is raw template text — not parsed until RenderContributions
+	assert.Contains(t, p.ContributesRaw, "https://github.com")
+	assert.Contains(t, p.ContributesRaw, "{{ .plugin.options.token }}")
+}
+
+func TestParsePluginYAML_StructuralTemplates(t *testing.T) {
+	// Tests that plugins using template directives at the YAML structure level parse correctly.
+	raw := `
+name: mcp-oauth
+options:
+  providers:
+    type: object
+    required: true
+contributes:
+  gateway:
+    services:
+{{- range $name, $cfg := .plugin.options.providers }}
+      - url: "{{ index $cfg "mcp_url" }}"
+{{- end }}
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "mcp-oauth", p.Name)
+	assert.Contains(t, p.ContributesRaw, "range")
+	assert.Contains(t, p.ContributesRaw, "mcp_url")
 }
 
 func TestParsePluginYAML_MissingName(t *testing.T) {
