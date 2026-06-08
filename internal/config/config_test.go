@@ -415,7 +415,8 @@ shared:
           Authorization: Bearer ${STX_TOKEN}
   installations:
     - plugin: "@builtin/github-pat"
-      token: "${GITHUB_PAT}"
+      options:
+        token: "${GITHUB_PAT}"
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(fleetYAML), 0644))
 
