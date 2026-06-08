@@ -16,7 +16,6 @@ options:
 contributes:
   runtime:
     extra_builds:
-      - "RUN --mount=type=cache,target=/root/.npm npm install -g @zed-industries/codex-acp@0.15.0"
       - "COPY {{ asset \"agent-manager\" }}/ /opt/agent-manager-src/"
       - "RUN cd /opt/agent-manager-src && npm install && npm run build && mkdir -p /opt/agent-manager && mv dist /opt/agent-manager/dist && mv node_modules /opt/agent-manager/node_modules && rm -rf /opt/agent-manager-src"
       - "RUN echo '{\"acp_command\":{{ toJSON (index .plugin.options \"acp_command\") }},\"cwd\":\"/home/agent\"}' > /opt/agent-manager/config.json"
