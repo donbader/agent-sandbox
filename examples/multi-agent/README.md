@@ -72,7 +72,8 @@ shared:
           Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
   installations:
     - plugin: "@builtin/github-pat"
-      token: "${GITHUB_PAT}"
+      options:
+        token: "${GITHUB_PAT}"
 ```
 
 The `shared` block is merged into each agent's config. Per-agent `agent.yaml` can override or extend.
