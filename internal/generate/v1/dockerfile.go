@@ -34,7 +34,7 @@ var Presets = map[string]struct {
 		BaseImage: "node:24-slim",
 		Installs: []string{
 			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
-			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code",
+			"--mount=type=cache,target=/root/.npm npm install -g @earendil-works/pi-coding-agent@0.75.5 pi-acp@0.0.27",
 		},
 	},
 }

@@ -44,16 +44,22 @@ async function main(): Promise<void> {
   }
   log.info("agent ACP initialized");
 
-  // Authenticate with a placeholder key — the gateway rewrites the real credentials on outbound calls.
+  // Authenticate with a placeholder — the gateway rewrites real credentials on outbound calls.
+  // Some agents don't implement auth/authenticate (code -32601) — skip gracefully.
   const authResp = await agent.sendAndWait({
     jsonrpc: "2.0", id: -2, method: "auth/authenticate",
-    params: { id: "api-key", secret: process.env.OPENAI_API_KEY ?? "sk-placeholder" },
+    params: { id: "api-key", secret: "gateway-managed" },
   });
   if (authResp.error) {
-    log.fatal({ error: authResp.error }, "agent auth/authenticate failed");
-    process.exit(1);
+    if (authResp.error.code === -32601) {
+      log.info("agent does not implement auth/authenticate — skipping");
+    } else {
+      log.fatal({ error: authResp.error }, "agent auth/authenticate failed");
+      process.exit(1);
+    }
+  } else {
+    log.info("agent ACP authenticated");
   }
-  log.info("agent ACP authenticated");
 
   // Upstream: expose ACP over HTTP/WebSocket for channel adapters
   const server = new AcpServer(agent, { port });
