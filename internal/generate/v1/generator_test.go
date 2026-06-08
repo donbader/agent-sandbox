@@ -52,6 +52,7 @@ installations:
 	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
 
 	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
 	require.NoError(t, g.Run())
 
 	// Verify outputs
@@ -322,6 +323,7 @@ gateway:
 	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
 
 	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
 	require.NoError(t, g.Run())
 
 	buildDir := filepath.Join(projectDir, ".build")
@@ -392,6 +394,7 @@ gateway:
 	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "fleet.yaml"), []byte(fleetYAML), 0644))
 
 	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
 
 	agents := []config.FleetAgent{
 		{Config: mustParseConfig(t, filepath.Join(projectDir, "coder", "agent.yaml")), Dir: filepath.Join(projectDir, "coder")},

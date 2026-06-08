@@ -213,18 +213,38 @@ func download(version, destDir string) error {
 	asset := AssetPrefix + version + ".tar.gz"
 	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", GitHubRepo, tag, asset)
 
-	resp, err := http.Get(url) //nolint:gosec
-	if err != nil {
-		return fmt.Errorf("download %s: %w", url, err)
+	var resp *http.Response
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+		var err error
+		resp, err = http.Get(url) //nolint:gosec
+		if err != nil {
+			lastErr = fmt.Errorf("download %s: %w", url, err)
+			continue
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			_ = resp.Body.Close()
+			return fmt.Errorf("core version %s not found (no release asset at %s)", version, url)
+		}
+		if resp.StatusCode >= 500 {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
+		}
+		lastErr = nil
+		break
+	}
+	if lastErr != nil {
+		return lastErr
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("core version %s not found (no release asset at %s)", version, url)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
-	}
 
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)

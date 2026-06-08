@@ -31,6 +31,9 @@ jobs:
           # Plugins (data-driven YAML plugin definitions)
           cp -r core/plugins "$STAGING/plugins"
 
+          # Presets (runtime.yaml files for @builtin/* images)
+          cp -r core/presets "$STAGING/presets"
+
           # Gateway source (compiled during Docker build)
           cp -r core/gateway "$STAGING/gateway"
 
