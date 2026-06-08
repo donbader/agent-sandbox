@@ -3,6 +3,9 @@ name: agent-002
 core_version: latest
 runtime:
   image: "@builtin/claude-code"
+  environment:
+    ANTHROPIC_BASE_URL: "https://agent-gateway.stx-ai.net/kiro"
+    ANTHROPIC_AUTH_TOKEN: "dummy"
 installations:
   - plugin: "@builtin/home-override"
     options:

@@ -8,12 +8,14 @@ options:
     type: boolean
     required: false
     default: false
-    description: "Persist home directory across restarts using a named Docker volume. Contents are seeded from home_directory on first run."
+    description: "Persist home directory across restarts using a named Docker volume. Config files are re-synced from home_directory on every start."
 
 contributes:
   runtime:
     extra_builds:
-      - "COPY {{ .plugin.options.home_directory }} /home/agent/"
-      - "RUN chown -R agent:agent /home/agent"
+      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed/"
+      - "RUN chown -R agent:agent /opt/home-seed"
+    pre_entrypoint:
+      - 'cp -a /opt/home-seed/. "$AGENT_HOME/"'
     volumes:
       - "{{ if .plugin.options.volume }}{{ .agent.name }}-home:/home/agent{{ else }}{{ .plugin.options.home_directory }}:/home/agent{{ end }}"

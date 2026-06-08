@@ -59,6 +59,13 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"GATEWAY_HOST": "gateway",
 		},
 	}
+	// Merge user-defined runtime.environment into agent service env.
+	if len(cfg.Runtime.Environment) > 0 {
+		envMap := agentSvc["environment"].(map[string]string)
+		for k, v := range cfg.Runtime.Environment {
+			envMap[k] = v
+		}
+	}
 	// Add healthcheck if the agent exposes ports (agent-manager listens on the first declared port).
 	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
 		port := contribs.Runtime.Ports[0]
@@ -253,13 +260,15 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 
 	// Shared network for all agents
 	compose.Networks["sandbox"] = map[string]any{"driver": "bridge"}
-	// Shared certs volume
-	compose.Volumes["certs"] = nil
 
 	for _, agent := range agents {
 		cfg := agent.Config
 		agentName := cfg.Name
 		gatewayName := cfg.Name + "-gateway"
+		certsVolume := agentName + "-certs"
+
+		// Each agent-gateway pair gets its own certs volume to avoid CA key conflicts.
+		compose.Volumes[certsVolume] = nil
 
 		// Relative build dir from .build/ (e.g., "./<agent-name>")
 		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
@@ -268,7 +277,7 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 		}
 
 		// Agent service
-		agentVolumes := []string{"certs:/shared/certs"}
+		agentVolumes := []string{certsVolume + ":/shared/certs"}
 		agentVolumes = append(agentVolumes, cfg.Runtime.Volumes...)
 		if agent.Contribs != nil {
 			agentVolumes = append(agentVolumes, agent.Contribs.Runtime.Volumes...)
@@ -295,6 +304,14 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 			"environment": map[string]string{
 				"GATEWAY_HOST": gatewayName,
 			},
+		}
+
+		// Merge user-defined runtime.environment into agent service env.
+		if len(cfg.Runtime.Environment) > 0 {
+			envMap := agentSvc["environment"].(map[string]string)
+			for k, v := range cfg.Runtime.Environment {
+				envMap[k] = v
+			}
 		}
 
 		if agent.Contribs != nil && len(agent.Contribs.Runtime.Ports) > 0 {
@@ -329,7 +346,7 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 				},
 			},
 			"volumes": []string{
-				"certs:/shared/certs",
+				certsVolume + ":/shared/certs",
 				fmt.Sprintf("./%s/config.yaml:/etc/gateway/config.yaml:ro", relBuildDir),
 			},
 			"healthcheck": map[string]any{

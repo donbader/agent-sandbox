@@ -58,10 +58,11 @@ type Config struct {
 
 // RuntimeConfig holds runtime container configuration.
 type RuntimeConfig struct {
-	Image       string   `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
-	ExtraBuilds []string `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base"`
-	Entrypoint  []string `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override"`
-	Volumes     []string `yaml:"volumes" json:"volumes,omitempty" jsonschema:"title=volumes,description=Named or bind mount volumes"`
+	Image       string            `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
+	ExtraBuilds []string          `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base"`
+	Entrypoint  []string          `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override"`
+	Volumes     []string          `yaml:"volumes" json:"volumes,omitempty" jsonschema:"title=volumes,description=Named or bind mount volumes"`
+	Environment map[string]string `yaml:"environment" json:"environment,omitempty" jsonschema:"title=environment,description=Environment variables passed to the agent container"`
 }
 
 // GatewayConfig holds gateway proxy configuration.

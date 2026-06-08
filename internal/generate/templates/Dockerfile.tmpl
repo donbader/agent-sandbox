@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends iptables iputil
 
 RUN useradd -m -s /bin/bash agent
 ENV HOME=/home/agent
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/gateway-ca.crt
 WORKDIR /home/agent
 {{- range .ExtraBuilds }}
 

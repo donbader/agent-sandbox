@@ -36,6 +36,8 @@ echo "[entrypoint] iptables: TCP 443 → ${GATEWAY_IP}:8443"
 if [ -f /shared/certs/ca.crt ]; then
     cp /shared/certs/ca.crt /usr/local/share/ca-certificates/gateway-ca.crt
     update-ca-certificates --fresh >/dev/null 2>&1
+    # Node.js does not use the system CA store — export for Node-based agents (Claude Code, etc).
+    export NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/gateway-ca.crt
     echo "[entrypoint] CA certificate installed"
 else
     echo "[entrypoint] WARNING: CA cert not found at /shared/certs/ca.crt" >&2
