@@ -61,9 +61,10 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 	}
 	// Merge user-defined runtime.environment into agent service env.
 	if len(cfg.Runtime.Environment) > 0 {
-		envMap := agentSvc["environment"].(map[string]string)
-		for k, v := range cfg.Runtime.Environment {
-			envMap[k] = v
+		if envMap, ok := agentSvc["environment"].(map[string]string); ok {
+			for k, v := range cfg.Runtime.Environment {
+				envMap[k] = v
+			}
 		}
 	}
 	// Add healthcheck if the agent exposes ports (agent-manager listens on the first declared port).
@@ -308,9 +309,10 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 
 		// Merge user-defined runtime.environment into agent service env.
 		if len(cfg.Runtime.Environment) > 0 {
-			envMap := agentSvc["environment"].(map[string]string)
-			for k, v := range cfg.Runtime.Environment {
-				envMap[k] = v
+			if envMap, ok := agentSvc["environment"].(map[string]string); ok {
+				for k, v := range cfg.Runtime.Environment {
+					envMap[k] = v
+				}
 			}
 		}
 
