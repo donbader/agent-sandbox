@@ -192,7 +192,7 @@ class TelegramAdapter {
   }
 
   private async acpNewSession(): Promise<string> {
-    const result = await this.acpSend("session/new", { cwd: "/home/agent/workspace" }) as { sessionId: string };
+    const result = await this.acpSend("session/new", {}) as { sessionId: string };
     return result.sessionId;
   }
 

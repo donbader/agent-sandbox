@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   }
 
   // Upstream: expose ACP over HTTP/WebSocket for channel adapters
-  const server = new AcpServer(agent, { port });
+  const server = new AcpServer(agent, { port, cwd: config.cwd });
   server.setInitResult(initResp.result);
   await server.start();
 

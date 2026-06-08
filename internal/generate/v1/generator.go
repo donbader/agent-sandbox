@@ -279,7 +279,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		return nil, fmt.Errorf("write Dockerfile: %w", err)
 	}
 
-	entrypoint, err := RenderEntrypointScript(g.templates, merged.Runtime.PreEntrypoint)
+	entrypoint, err := RenderEntrypointScript(g.templates, merged.Runtime.PreEntrypoint, cfg.Runtime.CWD)
 	if err != nil {
 		return nil, fmt.Errorf("build entrypoint: %w", err)
 	}
