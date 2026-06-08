@@ -494,7 +494,12 @@ func (g *Generator) resolveAssetPaths(p *plugin.PluginDef, buildDir string) erro
 			if err := extractFS(subFS, ".", dstPath); err != nil {
 				return fmt.Errorf("extract asset %q: %w", name, err)
 			}
-			p.AssetPaths[name] = ".build/plugins/" + p.Name + "/" + name
+			// AssetPaths must be relative to projectDir (the Docker build context).
+			relPath, err := filepath.Rel(g.projectDir, dstPath)
+			if err != nil {
+				relPath = dstPath
+			}
+			p.AssetPaths[name] = relPath
 		}
 	}
 	return nil

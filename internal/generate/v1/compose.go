@@ -364,9 +364,12 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 		compose.Services[gatewayName] = gatewaySvc
 
 		// Sidecar services
+		// Paths must be relative to .build/ (where docker-compose.yml lives),
+		// not .build/<agent>/ (the per-agent build dir).
 		if agent.Contribs != nil {
+			composeDir := filepath.Join(projectDir, ".build")
 			for name, svc := range agent.Contribs.Sidecar.Services {
-				sidecar := buildSidecarService(svc, agent.BuildDir)
+				sidecar := buildSidecarService(svc, composeDir)
 				if sidecar["depends_on"] == nil {
 					sidecar["depends_on"] = map[string]any{
 						agentName: map[string]any{
