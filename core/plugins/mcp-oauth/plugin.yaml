@@ -3,7 +3,7 @@ options:
   providers:
     type: object
     required: true
-    description: "Map of provider name to MCP config (each needs mcp_url, client_id, client_secret)"
+    description: "Map of provider name to MCP config (each needs at least mcp_url)"
   token_dir:
     type: string
     required: false
@@ -12,6 +12,10 @@ options:
 
 contributes:
   gateway:
+    services:
+{{- range $name, $cfg := .plugin.options.providers }}
+      - url: "{{ index $cfg "mcp_url" }}"
+{{- end }}
     volumes:
       - "oauth-tokens:{{ .plugin.options.token_dir }}"
     middlewares:
