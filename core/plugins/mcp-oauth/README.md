@@ -21,10 +21,15 @@ installations:
   - plugin: "@builtin/mcp-oauth"
     options:
       providers:
+        # Dynamic mode: just provide mcp_url — credentials auto-discovered
         notion:
           mcp_url: https://mcp.notion.com/mcp
-          authorize_endpoint: https://api.notion.com/v1/oauth/authorize
-          token_endpoint: https://api.notion.com/v1/oauth/token
+
+        # Static mode: provide all OAuth details manually
+        custom-provider:
+          mcp_url: https://custom.example.com/mcp
+          authorize_endpoint: https://custom.example.com/oauth/authorize
+          token_endpoint: https://custom.example.com/oauth/token
           client_id: "your-client-id"
           client_secret: "your-client-secret"
           scopes: "read_content"
@@ -40,7 +45,15 @@ installations:
 
 ### Provider Config
 
-Each provider entry supports:
+Each provider entry supports two modes:
+
+**Dynamic mode** (recommended for MCP servers that support RFC 7591):
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `mcp_url` | yes | MCP server endpoint — metadata + registration auto-discovered |
+
+**Static mode** (for providers without dynamic registration):
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -50,6 +63,8 @@ Each provider entry supports:
 | `client_id` | yes | OAuth client ID |
 | `client_secret` | no | OAuth client secret |
 | `scopes` | no | Space-separated scopes |
+
+Mode is auto-detected: if `client_id` is absent, dynamic mode is used.
 
 ## What It Contributes
 

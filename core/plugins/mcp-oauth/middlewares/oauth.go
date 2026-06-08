@@ -32,8 +32,11 @@ type storedToken struct {
 
 type oauthProviderInfo struct {
 	AuthorizeEndpoint string
+	TokenEndpoint     string
 	ClientID          string
+	ClientSecret      string
 	Scopes            string
+	Dynamic           bool
 }
 
 type oauthState struct {
@@ -45,16 +48,15 @@ type oauthState struct {
 	httpClient  *http.Client
 }
 
-// oauthHMACKey is derived deterministically from providers config for CSRF state signing.
 var oauthHMACKey []byte
 
 func init() {
-	// Derive HMAC key from providers config (same derivation as callback handler)
 	providersJSON := `{{ toJSON .options.providers }}`
 	h := sha256.Sum256([]byte(providersJSON))
 	oauthHMACKey = h[:]
 
 	tokenDir := "{{ .options.token_dir }}"
+	callbackURL := "{{ .options.callback_url }}"
 	domains := strings.Split("{{ .domainsList }}", ",")
 
 	providers := make(map[string]oauthProviderInfo)
@@ -67,17 +69,34 @@ func init() {
 			if v, ok := cfg["authorize_endpoint"].(string); ok {
 				p.AuthorizeEndpoint = v
 			}
+			if v, ok := cfg["token_endpoint"].(string); ok {
+				p.TokenEndpoint = v
+			}
 			if v, ok := cfg["client_id"].(string); ok {
 				p.ClientID = v
 			}
+			if v, ok := cfg["client_secret"].(string); ok {
+				p.ClientSecret = v
+			}
 			if v, ok := cfg["scopes"].(string); ok {
 				p.Scopes = v
+			}
+			// Dynamic mode: no client_id means we need discovery+registration
+			if p.ClientID == "" {
+				p.Dynamic = true
+				mcpURL, _ := cfg["mcp_url"].(string)
+				resolved := resolveProvider(mcpURL, callbackURL, tokenDir, name)
+				if resolved != nil {
+					p.AuthorizeEndpoint = resolved.AuthorizeEndpoint
+					p.TokenEndpoint = resolved.TokenEndpoint
+					p.ClientID = resolved.ClientID
+					p.ClientSecret = resolved.ClientSecret
+				}
 			}
 			providers[name] = p
 		}
 	}
 
-	// Deterministic default: first provider alphabetically
 	var defaultProvider string
 	if len(providers) > 0 {
 		names := make([]string, 0, len(providers))
@@ -99,7 +118,7 @@ func init() {
 	}
 
 	if _, err := os.Stat(tokenFile); err != nil {
-		slog.Warn("oauth token file not found at startup", "path", tokenFile, "error", err)
+		slog.Warn("oauth: token file not found at startup", "path", tokenFile)
 	}
 	for _, s := range oauthSecrets(tokenFile) {
 		gateway.RegisterSecret(s)
@@ -112,8 +131,8 @@ func init() {
 			token, err := state.getValidToken(tokenFile)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					if provider, ok := state.providers[defaultProvider]; ok && provider.AuthorizeEndpoint != "" {
-						authorizeURL := buildAuthorizeURL(provider, defaultProvider)
+					if p, ok := state.providers[defaultProvider]; ok && p.AuthorizeEndpoint != "" {
+						authorizeURL := mwBuildAuthorizeURL(p, defaultProvider, callbackURL)
 						ctx.SetAbortHeader("X-OAuth-Authorize-URL", authorizeURL)
 						ctx.SetAbortHeader("Content-Type", "application/json")
 						ctx.Abort(http.StatusUnauthorized, fmt.Sprintf(
@@ -133,14 +152,74 @@ func init() {
 	})
 }
 
-func buildAuthorizeURL(provider oauthProviderInfo, providerName string) string {
-	// Generate CSRF state: HMAC(provider) ensures only this gateway can validate
+// resolveProvider does OAuth metadata discovery + dynamic client registration.
+// Returns nil if discovery fails (provider will be skipped).
+func resolveProvider(mcpURL, callbackURL, tokenDir, name string) *oauthProviderInfo {
+	if mcpURL == "" {
+		slog.Error("oauth: dynamic provider has no mcp_url", "provider", name)
+		return nil
+	}
+
+	// Check for cached registration
+	regFile := tokenDir + "/" + name + ".reg.json"
+	if data, err := os.ReadFile(regFile); err == nil {
+		var cached struct {
+			AuthorizeEndpoint string `json:"authorize_endpoint"`
+			TokenEndpoint     string `json:"token_endpoint"`
+			ClientID          string `json:"client_id"`
+			ClientSecret      string `json:"client_secret"`
+		}
+		if json.Unmarshal(data, &cached) == nil && cached.ClientID != "" {
+			slog.Info("oauth: using cached dynamic registration", "provider", name)
+			return &oauthProviderInfo{
+				AuthorizeEndpoint: cached.AuthorizeEndpoint,
+				TokenEndpoint:     cached.TokenEndpoint,
+				ClientID:          cached.ClientID,
+				ClientSecret:      cached.ClientSecret,
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	meta, err := gateway.DiscoverOAuthMetadata(ctx, mcpURL)
+	if err != nil {
+		slog.Error("oauth: metadata discovery failed", "provider", name, "error", err)
+		return nil
+	}
+
+	reg, err := gateway.RegisterOAuthClient(ctx, meta.RegistrationEndpoint, []string{callbackURL}, "agent-sandbox:"+name)
+	if err != nil {
+		slog.Error("oauth: dynamic registration failed", "provider", name, "error", err)
+		return nil
+	}
+
+	// Persist registration for reuse across restarts
+	regData, _ := json.MarshalIndent(map[string]string{
+		"authorize_endpoint": meta.AuthorizationEndpoint,
+		"token_endpoint":     meta.TokenEndpoint,
+		"client_id":          reg.ClientID,
+		"client_secret":      reg.ClientSecret,
+	}, "", "  ")
+	if err := os.WriteFile(regFile, regData, 0600); err != nil {
+		slog.Warn("oauth: failed to cache registration", "provider", name, "error", err)
+	}
+
+	slog.Info("oauth: dynamic registration complete", "provider", name, "client_id", reg.ClientID)
+	return &oauthProviderInfo{
+		AuthorizeEndpoint: meta.AuthorizationEndpoint,
+		TokenEndpoint:     meta.TokenEndpoint,
+		ClientID:          reg.ClientID,
+		ClientSecret:      reg.ClientSecret,
+	}
+}
+
+func mwBuildAuthorizeURL(provider oauthProviderInfo, providerName, callbackURL string) string {
 	mac := hmac.New(sha256.New, oauthHMACKey)
 	mac.Write([]byte(providerName))
 	sig := hex.EncodeToString(mac.Sum(nil))[:16]
 	state := sig + ":" + providerName
-
-	callbackURL := "{{ .options.callback_url }}"
 
 	params := url.Values{
 		"client_id":     {provider.ClientID},
@@ -246,15 +325,13 @@ func (s *oauthState) refreshToken(stored *storedToken) (*storedToken, error) {
 		"refresh_token": {*stored.RefreshToken},
 		"client_id":     {stored.ClientID},
 	}
-	// client_secret is baked into the providers config at generate time
-	// (not stored in token file for security)
 	resp, err := s.httpClient.Post(
 		stored.TokenEndpoint,
 		"application/x-www-form-urlencoded",
 		strings.NewReader(params.Encode()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("refresh request to %s: %w", stored.TokenEndpoint, err)
+		return nil, fmt.Errorf("refresh request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -262,7 +339,7 @@ func (s *oauthState) refreshToken(stored *storedToken) (*storedToken, error) {
 		return nil, fmt.Errorf("reading refresh response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token refresh returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("token refresh returned %d", resp.StatusCode)
 	}
 	var tr oauthTokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
@@ -298,7 +375,7 @@ func oauthSSRFSafeTransport() *http.Transport {
 			}
 			for _, ip := range ips {
 				if ip.IP.IsLoopback() || ip.IP.IsPrivate() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsLinkLocalMulticast() {
-					return nil, fmt.Errorf("oauth: refusing to connect to private IP %s (resolved from %s)", ip.IP, host)
+					return nil, fmt.Errorf("oauth: refusing to connect to private IP %s", ip.IP)
 				}
 			}
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
