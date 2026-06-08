@@ -52,7 +52,7 @@ Exec into either agent:
 agent-sandbox compose exec -it --user agent agent-001 codex
 
 # Agent 002 (claude-code)
-agent-sandbox compose exec -it --user agent agent-002 claude-code
+agent-sandbox compose exec -it --user agent agent-002 claude
 ```
 
 ## Configuration
@@ -94,9 +94,28 @@ installations:
       volume: true
 ```
 
+### Per-agent config (agent-002/agent.yaml)
+
+```yaml
+name: agent-002
+core_version: latest
+runtime:
+  image: "@builtin/claude-code"
+  environment:
+    ANTHROPIC_BASE_URL: "https://agent-gateway.stx-ai.net/kiro"
+    ANTHROPIC_AUTH_TOKEN: "dummy"
+installations:
+  - plugin: "@builtin/home-override"
+    options:
+      home_directory: "./home"
+      volume: true
+```
+
+The `runtime.environment` block sets container-level env vars. Claude Code requires `ANTHROPIC_AUTH_TOKEN` to be present in the process environment before it reads settings, so it must be declared here rather than in `settings.json`.
+
 ### Home directories
 
-Each agent has a `home/` directory with pre-seeded config (provider settings, model catalog). The `@builtin/home-override` plugin with `volume: true` persists these across container restarts.
+Each agent has a `home/` directory with pre-seeded config (provider settings, model selection, permissions). The `@builtin/home-override` plugin with `volume: true` persists user data across container restarts while re-syncing config files from `home/` on every start — so config changes propagate on redeploy without removing volumes.
 
 ## Environment Variables
 
