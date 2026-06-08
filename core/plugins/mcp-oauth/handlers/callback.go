@@ -2,37 +2,48 @@ package custom
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
 
-// oauthProviderConfig holds OAuth provider settings baked in at generate time.
-type oauthProviderConfig struct {
+type oauthCallbackConfig struct {
 	TokenEndpoint string
 	ClientID      string
 	ClientSecret  string
-	MCP_URL       string
 }
 
-var oauthCallbackProviders = map[string]oauthProviderConfig{}
-var oauthCallbackTokenDir string
+var (
+	oauthCallbackProviders = map[string]oauthCallbackConfig{}
+	oauthCallbackTokenDir  string
+	oauthCallbackPublicURL string
+	oauthNonces            = map[string]string{}
+	oauthNoncesMu          sync.Mutex
+)
 
 func init() {
 	oauthCallbackTokenDir = "{{ .options.token_dir }}"
+	oauthCallbackPublicURL = "{{ .public_url }}"
 	providersJSON := `{{ toJSON .options.providers }}`
 	var providers map[string]map[string]any
-	if err := json.Unmarshal([]byte(providersJSON), &providers); err == nil {
+	if err := json.Unmarshal([]byte(providersJSON), &providers); err != nil {
+		slog.Error("oauth-callback: failed to parse providers config", "error", err)
+	} else {
 		for name, cfg := range providers {
-			p := oauthProviderConfig{}
+			p := oauthCallbackConfig{}
 			if v, ok := cfg["token_endpoint"].(string); ok {
 				p.TokenEndpoint = v
 			}
@@ -42,93 +53,100 @@ func init() {
 			if v, ok := cfg["client_secret"].(string); ok {
 				p.ClientSecret = v
 			}
-			if v, ok := cfg["mcp_url"].(string); ok {
-				p.MCP_URL = v
-			}
 			oauthCallbackProviders[name] = p
 		}
 	}
-
 	gateway.RegisterRoute(gateway.RouteDef{
 		Path:    "{{ .path }}",
 		Handler: handleOAuthCallback,
 	})
 }
 
+// GenerateOAuthNonce creates a CSRF nonce for the given provider.
+func GenerateOAuthNonce(provider string) string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return provider
+	}
+	state := hex.EncodeToString(b) + ":" + provider
+	oauthNoncesMu.Lock()
+	oauthNonces[state] = provider
+	oauthNoncesMu.Unlock()
+	return state
+}
+
+// OAuthCallbackURL returns the full callback URL.
+func OAuthCallbackURL() string {
+	return oauthCallbackPublicURL + "{{ .path }}"
+}
+
 func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state") // state = provider name
-
+	state := r.URL.Query().Get("state")
 	if code == "" {
 		http.Error(w, "missing code parameter", http.StatusBadRequest)
 		return
 	}
 	if state == "" {
-		http.Error(w, "missing state parameter (provider name)", http.StatusBadRequest)
+		http.Error(w, "missing state parameter", http.StatusBadRequest)
 		return
 	}
-
-	provider, ok := oauthCallbackProviders[state]
+	// Validate CSRF nonce
+	oauthNoncesMu.Lock()
+	providerName, valid := oauthNonces[state]
+	if valid {
+		delete(oauthNonces, state)
+	}
+	oauthNoncesMu.Unlock()
+	if !valid {
+		http.Error(w, "invalid or expired state", http.StatusForbidden)
+		return
+	}
+	provider, ok := oauthCallbackProviders[providerName]
 	if !ok {
-		http.Error(w, fmt.Sprintf("unknown provider: %s", state), http.StatusBadRequest)
+		http.Error(w, "unknown provider", http.StatusBadRequest)
 		return
 	}
-
 	if provider.TokenEndpoint == "" {
-		http.Error(w, fmt.Sprintf("provider %s has no token_endpoint configured", state), http.StatusInternalServerError)
+		http.Error(w, "provider not configured", http.StatusInternalServerError)
 		return
 	}
-
-	// Exchange authorization code for token
-	redirectURI := r.URL.Query().Get("redirect_uri")
-	if redirectURI == "" {
-		// Reconstruct from request
-		scheme := "https"
-		if r.TLS == nil {
-			scheme = "http"
-		}
-		redirectURI = fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.Path)
-	}
-
-	token, err := exchangeCode(provider, code, redirectURI)
+	redirectURI := OAuthCallbackURL()
+	token, err := exchangeCodeForToken(provider, code, redirectURI)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("token exchange failed: %v", err), http.StatusInternalServerError)
+		slog.Error("oauth-callback: token exchange failed", "provider", providerName, "error", err)
+		http.Error(w, "token exchange failed", http.StatusInternalServerError)
 		return
 	}
-
-	// Write token file
-	tokenFile := oauthCallbackTokenDir + "/" + state + ".json"
-	if err := writeCallbackToken(tokenFile, token, provider); err != nil {
-		http.Error(w, fmt.Sprintf("failed to save token: %v", err), http.StatusInternalServerError)
+	tokenFile := oauthCallbackTokenDir + "/" + providerName + ".json"
+	if err := writeOAuthToken(tokenFile, token, provider); err != nil {
+		slog.Error("oauth-callback: failed to save token", "provider", providerName, "error", err)
+		http.Error(w, "failed to save token", http.StatusInternalServerError)
 		return
 	}
-
-	// Register the new access token as a secret for log redaction
 	gateway.RegisterSecret(token.AccessToken)
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `<!DOCTYPE html><html><body>
 <h1>Authorization successful</h1>
 <p>Provider <strong>%s</strong> has been connected. You can close this tab.</p>
-</body></html>`, state)
+</body></html>`, html.EscapeString(providerName))
 }
 
-type callbackTokenResponse struct {
+type oauthTokenExchangeResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int64  `json:"expires_in"`
 }
 
-func exchangeCode(provider oauthProviderConfig, code, redirectURI string) (*callbackTokenResponse, error) {
+func exchangeCodeForToken(provider oauthCallbackConfig, code, redirectURI string) (*oauthTokenExchangeResponse, error) {
 	u, err := url.Parse(provider.TokenEndpoint)
 	if err != nil {
-		return nil, fmt.Errorf("invalid token_endpoint URL: %w", err)
+		return nil, fmt.Errorf("invalid token_endpoint: %w", err)
 	}
 	if u.Scheme != "https" {
 		return nil, fmt.Errorf("token_endpoint must use https, got %q", u.Scheme)
 	}
-
 	params := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
@@ -138,43 +156,34 @@ func exchangeCode(provider oauthProviderConfig, code, redirectURI string) (*call
 	if provider.ClientSecret != "" {
 		params.Set("client_secret", provider.ClientSecret)
 	}
-
 	client := &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: callbackSSRFSafeTransport(),
 	}
-
-	resp, err := client.Post(
-		provider.TokenEndpoint,
-		"application/x-www-form-urlencoded",
-		strings.NewReader(params.Encode()),
-	)
+	resp, err := client.Post(provider.TokenEndpoint, "application/x-www-form-urlencoded", strings.NewReader(params.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("token request to %s: %w", provider.TokenEndpoint, err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("reading token response: %w", err)
+		return nil, fmt.Errorf("reading response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("token endpoint returned %d", resp.StatusCode)
 	}
-
-	var tr callbackTokenResponse
+	var tr oauthTokenExchangeResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return nil, fmt.Errorf("parsing token response: %w", err)
+		return nil, fmt.Errorf("parsing response: %w", err)
 	}
 	return &tr, nil
 }
 
-func writeCallbackToken(path string, token *callbackTokenResponse, provider oauthProviderConfig) error {
+func writeOAuthToken(path string, token *oauthTokenExchangeResponse, provider oauthCallbackConfig) error {
 	expiresIn := token.ExpiresIn
 	if expiresIn == 0 {
 		expiresIn = 3600
 	}
-
 	stored := map[string]any{
 		"access_token":   token.AccessToken,
 		"expires_at":     time.Now().Unix() + expiresIn,
@@ -184,15 +193,10 @@ func writeCallbackToken(path string, token *callbackTokenResponse, provider oaut
 	if token.RefreshToken != "" {
 		stored["refresh_token"] = token.RefreshToken
 	}
-	if provider.ClientSecret != "" {
-		stored["client_secret"] = provider.ClientSecret
-	}
-
 	data, err := json.MarshalIndent(stored, "", "  ")
 	if err != nil {
 		return err
 	}
-
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
@@ -213,7 +217,7 @@ func callbackSSRFSafeTransport() *http.Transport {
 			}
 			for _, ip := range ips {
 				if ip.IP.IsLoopback() || ip.IP.IsPrivate() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsLinkLocalMulticast() {
-					return nil, fmt.Errorf("refusing to connect to private IP %s (resolved from %s)", ip.IP, host)
+					return nil, fmt.Errorf("refusing to connect to private IP %s", ip.IP)
 				}
 			}
 			dialer := &net.Dialer{Timeout: 10 * time.Second}

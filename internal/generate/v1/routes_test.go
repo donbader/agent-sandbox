@@ -145,7 +145,7 @@ func init() {
 		},
 	}
 
-	err := CopyRouteHandlers(tmpDir, outDir, routes, map[string]any{})
+	err := CopyRouteHandlers(tmpDir, outDir, routes, map[string]any{}, "https://gateway.example.com")
 	require.NoError(t, err)
 
 	// Verify the rendered handler exists

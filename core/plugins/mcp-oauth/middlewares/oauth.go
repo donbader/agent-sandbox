@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +25,6 @@ type storedToken struct {
 	ExpiresAt     int64   `json:"expires_at"`
 	TokenEndpoint string  `json:"token_endpoint"`
 	ClientID      string  `json:"client_id"`
-	ClientSecret  *string `json:"client_secret"`
 }
 
 type oauthProviderInfo struct {
@@ -49,7 +49,9 @@ func init() {
 	providersJSON := `{{ toJSON .options.providers }}`
 	providers := make(map[string]oauthProviderInfo)
 	var rawProviders map[string]map[string]any
-	if err := json.Unmarshal([]byte(providersJSON), &rawProviders); err == nil {
+	if err := json.Unmarshal([]byte(providersJSON), &rawProviders); err != nil {
+		slog.Error("oauth: failed to parse providers config", "error", err)
+	} else {
 		for name, cfg := range rawProviders {
 			p := oauthProviderInfo{}
 			if v, ok := cfg["authorize_endpoint"].(string); ok {
@@ -65,10 +67,15 @@ func init() {
 		}
 	}
 
+	// Deterministic default: first provider alphabetically
 	var defaultProvider string
-	for name := range providers {
-		defaultProvider = name
-		break
+	if len(providers) > 0 {
+		names := make([]string, 0, len(providers))
+		for name := range providers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		defaultProvider = names[0]
 	}
 
 	tokenFile := tokenDir + "/" + defaultProvider + ".json"
@@ -117,10 +124,15 @@ func init() {
 }
 
 func buildAuthorizeURL(provider oauthProviderInfo, providerName string) string {
+	// Generate CSRF nonce (validated on callback)
+	state := GenerateOAuthNonce(providerName)
+	callbackURL := OAuthCallbackURL()
+
 	params := url.Values{
 		"client_id":     {provider.ClientID},
 		"response_type": {"code"},
-		"state":         {providerName},
+		"state":         {state},
+		"redirect_uri":  {callbackURL},
 	}
 	if provider.Scopes != "" {
 		params.Set("scope", provider.Scopes)

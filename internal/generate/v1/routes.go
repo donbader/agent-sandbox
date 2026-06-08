@@ -67,7 +67,7 @@ func (g *Generator) resolveRouteHandler(pluginName, handler, baseDir, buildDir s
 // CopyRouteHandlers copies route handler .go files into the gateway build context.
 // Each handler is a Go template rendered with path and options, and self-registers
 // via init() calling gateway.RegisterRoute() — same pattern as custom middleware.
-func CopyRouteHandlers(projectDir, outDir string, routes []RouteRef, opts map[string]any) error {
+func CopyRouteHandlers(projectDir, outDir string, routes []RouteRef, opts map[string]any, publicURL string) error {
 	if len(routes) == 0 {
 		return nil
 	}
@@ -92,10 +92,11 @@ func CopyRouteHandlers(projectDir, outDir string, routes []RouteRef, opts map[st
 			return fmt.Errorf("read route handler %s: %w", route.Handler, err)
 		}
 
-		// Template data includes options and the namespaced path
+		// Template data includes options, the namespaced path, and public_url
 		data := map[string]any{
-			"options": resolved,
-			"path":    route.Path,
+			"options":    resolved,
+			"path":       route.Path,
+			"public_url": publicURL,
 		}
 
 		// Template-render the handler file

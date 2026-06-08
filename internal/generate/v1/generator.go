@@ -295,7 +295,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	}
 	if len(gwCfg.Routes) > 0 {
 		allOpts := collectAllOptions(cfg)
-		if err := CopyRouteHandlers(g.projectDir, buildDir, gwCfg.Routes, allOpts); err != nil {
+		if err := CopyRouteHandlers(g.projectDir, buildDir, gwCfg.Routes, allOpts, gwCfg.PublicURL); err != nil {
 			return nil, fmt.Errorf("copy route handlers: %w", err)
 		}
 	}
