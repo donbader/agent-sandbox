@@ -94,6 +94,7 @@ installations:
   - plugin: "@builtin/agent-manager-acp"
     options:
       acp_command: ["codex-acp"]
+      acp_install: "npm install -g @zed-industries/codex-acp@0.15.0"
 
   - plugin: ./plugins/telegram
     options:

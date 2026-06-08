@@ -7,6 +7,10 @@ options:
     type: array
     required: true
     description: "Command to spawn the agent via ACP over stdio (e.g. [codex-acp] or [claude, --dangerously-skip-permissions])"
+  acp_install:
+    type: string
+    required: false
+    description: "Shell command to install the ACP adapter binary (e.g. 'npm install -g @zed-industries/codex-acp@0.15.0'). Omit if the command is already available in the base image."
   port:
     type: string
     required: false
@@ -16,6 +20,9 @@ options:
 contributes:
   runtime:
     extra_builds:
+{{- if .plugin.options.acp_install }}
+      - "RUN --mount=type=cache,target=/root/.npm {{ .plugin.options.acp_install }}"
+{{- end }}
       - "COPY {{ asset \"agent-manager\" }}/ /opt/agent-manager-src/"
       - "RUN cd /opt/agent-manager-src && npm install && npm run build && mkdir -p /opt/agent-manager && mv dist /opt/agent-manager/dist && mv node_modules /opt/agent-manager/node_modules && rm -rf /opt/agent-manager-src"
       - "RUN echo '{\"acp_command\":{{ toJSON (index .plugin.options \"acp_command\") }},\"cwd\":\"/home/agent\"}' > /opt/agent-manager/config.json"
