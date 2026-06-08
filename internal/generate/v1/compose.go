@@ -110,6 +110,10 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"retries":  3,
 		},
 	}
+	// Expose gateway HTTP port when plugin routes are registered (e.g. OAuth callbacks)
+	if contribs != nil && len(contribs.Gateway.Routes) > 0 {
+		gatewaySvc["ports"] = []string{"8080:8080"}
+	}
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
 	}

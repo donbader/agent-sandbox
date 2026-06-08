@@ -10,8 +10,14 @@ gateway:
     - url: https://agent-gateway.stx-ai.net
       headers:
         Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+    - url: https://mcp.notion.com
 installations:
   - plugin: "@builtin/home-override"
     options:
       home_directory: "./home"
       volume: true
+  - plugin: "@builtin/mcp-oauth"
+    options:
+      providers:
+        notion:
+          mcp_url: https://mcp.notion.com/mcp

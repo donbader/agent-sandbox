@@ -120,13 +120,22 @@ func main() {
 		}()
 	}
 
-	// Health endpoint
+	// Health + route handler endpoint
 	healthAddr := ":8080"
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ok"))
+		})
+		// Serve plugin-registered routes (e.g. /plugins/mcp-oauth/callback)
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			handler := gateway.MatchRoute(r.URL.Path)
+			if handler != nil {
+				handler(w, r)
+				return
+			}
+			http.NotFound(w, r)
 		})
 		if err := http.ListenAndServe(healthAddr, mux); err != nil {
 			slog.Error("health server error", "error", err)

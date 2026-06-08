@@ -62,8 +62,14 @@ type gatewayRuntimeConfig struct {
 
 // BuildGatewayConfig merges user gateway config with plugin contributions.
 func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *GatewayConfigOutput {
+	publicURL := cfg.Gateway.PublicURL
+	// Default to localhost:8080 when no public_url configured (local dev)
+	if publicURL == "" {
+		publicURL = "http://localhost:8080"
+	}
+
 	out := &GatewayConfigOutput{
-		PublicURL: cfg.Gateway.PublicURL,
+		PublicURL: publicURL,
 	}
 
 	// User-declared services

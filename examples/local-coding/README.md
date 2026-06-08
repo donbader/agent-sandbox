@@ -89,3 +89,31 @@ With `volume: true`, the home directory persists across container restarts (shel
 | Variable | Description |
 |----------|-------------|
 | `STX_LLM_GATEWAY_API_KEY` | API key for the LLM gateway |
+
+## Notion MCP Integration
+
+This example includes the `mcp-oauth` plugin configured for Notion. On first use:
+
+1. Start the sandbox:
+   ```bash
+   agent-sandbox generate
+   agent-sandbox compose up --build -d
+   ```
+
+2. When the agent tries to access Notion, the gateway returns a 401 with an authorize URL. The URL is also available at:
+   ```
+   http://localhost:8080/plugins/mcp-oauth/callback
+   ```
+
+3. The first request to Notion's MCP will trigger OAuth discovery and dynamic client registration automatically. The gateway logs the authorize URL:
+   ```bash
+   agent-sandbox compose logs coder-gateway | grep authorize_url
+   ```
+
+4. Open the authorize URL in your browser, log in to Notion, and authorize access.
+
+5. Notion redirects to `http://localhost:8080/plugins/mcp-oauth/callback` — the gateway exchanges the code for tokens and stores them automatically.
+
+6. Subsequent requests to Notion are authenticated transparently.
+
+> **Note:** No Notion developer app or API key needed. The plugin uses OAuth Dynamic Client Registration (RFC 7591) — credentials are obtained automatically.
