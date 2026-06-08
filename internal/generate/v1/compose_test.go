@@ -239,3 +239,38 @@ func TestBuildFleetCompose_SidecarNamespacing(t *testing.T) {
 	assert.Contains(t, output, "agent-a-telegram:")
 	assert.Contains(t, output, "agent-b-telegram:")
 }
+
+func TestBuildFleetCompose_SidecarBuildPath(t *testing.T) {
+	// Sidecar build paths must be relative to .build/ (where docker-compose.yml lives),
+	// not relative to .build/<agent-name>/ (the per-agent build dir).
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "dorey-001",
+				Runtime: config.RuntimeConfig{
+					Image: "@builtin/codex",
+				},
+			},
+			Contribs: &plugin.Contributions{
+				Sidecar: plugin.SidecarContrib{
+					Services: map[string]plugin.ComposeService{
+						"telegram": {
+							Build:       "/project/dorey-001/plugins/telegram/telegram-adapter",
+							Environment: map[string]string{"BOT_TOKEN": "tok"},
+						},
+					},
+				},
+			},
+			BuildDir: "/project/.build/dorey-001",
+		},
+	}
+
+	output, err := BuildFleetCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Path from .build/docker-compose.yml to /project/dorey-001/plugins/telegram/telegram-adapter
+	// should be ../dorey-001/plugins/telegram/telegram-adapter (one level up from .build/)
+	assert.Contains(t, output, "../dorey-001/plugins/telegram/telegram-adapter")
+	// Must NOT contain ../../ (two levels up — the bug)
+	assert.NotContains(t, output, "../../dorey-001/plugins/telegram/telegram-adapter")
+}
