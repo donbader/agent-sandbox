@@ -1,5 +1,5 @@
-// Package core implements core version fetching and caching.
-package core
+// Package release implements core version fetching and caching.
+package release
 
 import (
 	"archive/tar"

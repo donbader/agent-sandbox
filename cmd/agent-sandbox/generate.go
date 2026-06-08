@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/donbader/agent-sandbox/internal/config"
-	"github.com/donbader/agent-sandbox/internal/core"
+	"github.com/donbader/agent-sandbox/internal/release"
 	"github.com/donbader/agent-sandbox/internal/dotenv"
 	v1 "github.com/donbader/agent-sandbox/internal/generate/v1"
 	"github.com/spf13/cobra"
@@ -94,7 +94,7 @@ func generateFleet(agents []config.FleetAgent, projectDir string) error {
 // Any other value fetches that specific version.
 func fetchCore(version string) (string, error) {
 	if version == "" || version == "latest" {
-		dir, err := core.FetchLatest()
+		dir, err := release.FetchLatest()
 		if err != nil {
 			return "", fmt.Errorf("fetch latest core: %w", err)
 		}
@@ -102,7 +102,7 @@ func fetchCore(version string) (string, error) {
 		return dir, nil
 	}
 
-	dir, err := core.Fetch(version)
+	dir, err := release.Fetch(version)
 	if err != nil {
 		return "", fmt.Errorf("fetch core %s: %w", version, err)
 	}

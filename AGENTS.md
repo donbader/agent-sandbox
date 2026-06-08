@@ -19,18 +19,21 @@ agent-sandbox — an opinionated agent sandbox orchestrator. Deploys AI coding a
 cmd/agent-sandbox/      ← CLI entrypoint (generic template engine)
 internal/
   config/               ← agent.yaml parsing
+  dotenv/               ← .env file loading
+  envvar/               ← environment variable resolution
   generate/             ← Build artifact generation (builder structs + Go templates)
     v1/                 ← v1 generator (compose, dockerfile, gateway config)
     templates/          ← Go text/template files for Dockerfiles, compose, entrypoints
-  resolve/              ← plugin resolution (local → fetched core)
+  plugin/               ← plugin resolution, merging, rendering, types
+  release/              ← core version fetching and caching from GitHub Releases
 core/
   gateway/              ← Gateway core source (packaged via core-release.yml)
   sdk/                  ← Gateway middleware interfaces
   presets/              ← Runtime presets (codex, claude-code, pi)
-  plugins/              ← Feature plugins (github-pat, mcp-oauth)
-ext/
-  plugins/              ← external plugins (per-plugin versioning)
-docs/                   ← Design documents
+  plugins/              ← Feature plugins (github-pat, mcp-oauth, agent-manager-acp)
+examples/               ← Working example configurations
+tests/                  ← Integration tests
+docs/                   ← Design documents, guides, reference, ADRs
 ```
 
 ## Commands
@@ -69,7 +72,7 @@ agent-sandbox compose up --build       # docker compose passthrough
 ### Runtime Presets (Pure Data — fetched from Releases)
 
 ```
-core/presets/<name>/preset.yaml     ← base image, install commands, CMD, ports
+core/presets/<name>/runtime.yaml     ← base image, install commands, CMD, ports
 ```
 
 No Go code. CLI reads YAML and generates Dockerfile. Presets are fetched from GitHub Releases on first `generate` (cached locally).

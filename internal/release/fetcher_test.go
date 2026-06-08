@@ -1,5 +1,4 @@
-// internal/core/fetcher_test.go
-package core
+package release
 
 import (
 	"encoding/json"
