@@ -7,6 +7,7 @@ const log = createLogger("acp-server");
 
 interface AcpServerOptions {
   port: number;
+  cwd: string;
 }
 
 interface PendingRequest {
@@ -24,6 +25,7 @@ interface PendingRequest {
 export class AcpServer {
   private agent: AgentProcess;
   private port: number;
+  private cwd: string;
   private httpServer: Server | null = null;
   private wss: WebSocketServer | null = null;
   private wsClients = new Set<WebSocket>();
@@ -34,6 +36,7 @@ export class AcpServer {
   constructor(agent: AgentProcess, options: AcpServerOptions) {
     this.agent = agent;
     this.port = options.port;
+    this.cwd = options.cwd;
   }
 
   /** Store the cached init result so we can replay it to connecting clients. */
@@ -115,10 +118,14 @@ export class AcpServer {
       return { jsonrpc: "2.0", id: msg.id, result: {} };
     }
     if (msg.method === "session/new") {
-      // Inject mcpServers requirement — protocol detail handled here so adapters don't need to.
+      // Inject defaults so adapters don't need to know internal details.
       if (!msg.params) msg.params = {};
-      if (!(msg.params as Record<string, unknown>).mcpServers) {
-        (msg.params as Record<string, unknown>).mcpServers = [];
+      const params = msg.params as Record<string, unknown>;
+      if (!params.cwd) {
+        params.cwd = this.cwd;
+      }
+      if (!params.mcpServers) {
+        params.mcpServers = [];
       }
       return null; // continue forwarding with mutated params
     }

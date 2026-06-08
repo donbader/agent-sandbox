@@ -105,15 +105,16 @@ func TestBuildDockerfile_PresetDefaultCMD(t *testing.T) {
 }
 
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
-	script := EntrypointScript(nil)
+	script := EntrypointScript(nil, "/home/agent/workspace")
 	assert.Contains(t, script, `exec gosu "$AGENT_USER" "$@"`)
 	assert.Contains(t, script, `${GATEWAY_HOST:=gateway}`)
+	assert.Contains(t, script, "/home/agent/workspace")
 	assert.NotContains(t, script, "pre-entrypoint")
 }
 
 func TestEntrypointScript_WithPreEntrypoint(t *testing.T) {
 	cmds := []string{"/usr/sbin/sshd -p 2222", "/usr/bin/other-daemon"}
-	script := EntrypointScript(cmds)
+	script := EntrypointScript(cmds, "/home/agent/workspace")
 
 	assert.Contains(t, script, "/usr/sbin/sshd -p 2222")
 	assert.Contains(t, script, "/usr/bin/other-daemon")

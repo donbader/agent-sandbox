@@ -59,6 +59,7 @@ type Config struct {
 // RuntimeConfig holds runtime container configuration.
 type RuntimeConfig struct {
 	Image       string            `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
+	CWD         string            `yaml:"cwd" json:"cwd,omitempty" jsonschema:"title=cwd,description=Working directory for agent sessions (default: /home/agent/workspace)"`
 	ExtraBuilds []string          `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base"`
 	Entrypoint  []string          `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override"`
 	Volumes     []string          `yaml:"volumes" json:"volumes,omitempty" jsonschema:"title=volumes,description=Named or bind mount volumes"`
@@ -102,6 +103,11 @@ func Load(dir string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse agent.yaml: %w", err)
+	}
+
+	// Apply defaults
+	if cfg.Runtime.CWD == "" {
+		cfg.Runtime.CWD = "/home/agent/workspace"
 	}
 
 	if err := cfg.Validate(); err != nil {

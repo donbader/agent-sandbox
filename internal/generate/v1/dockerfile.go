@@ -46,6 +46,7 @@ var legacyPresets = map[string]*Preset{
 // entrypointData is the template data for entrypoint.sh.tmpl.
 type entrypointData struct {
 	PreEntrypoint string
+	CWD           string
 }
 
 // dockerfileData is the template data for Dockerfile.tmpl.
@@ -66,8 +67,8 @@ func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions, entrypo
 
 // EntrypointScript returns the entrypoint script using the embedded templates.
 // This is a convenience wrapper around RenderEntrypointScript.
-func EntrypointScript(preEntrypoint []string) string {
-	s, err := RenderEntrypointScript(templates.NewEmbeddedLoader(), preEntrypoint)
+func EntrypointScript(preEntrypoint []string, cwd string) string {
+	s, err := RenderEntrypointScript(templates.NewEmbeddedLoader(), preEntrypoint, cwd)
 	if err != nil {
 		panic("entrypoint template error: " + err.Error())
 	}
@@ -75,7 +76,7 @@ func EntrypointScript(preEntrypoint []string) string {
 }
 
 // RenderEntrypointScript executes the entrypoint template with optional pre-entrypoint commands.
-func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string) (string, error) {
+func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string, cwd string) (string, error) {
 	tmpl, err := loader.Load("entrypoint.sh.tmpl")
 	if err != nil {
 		return "", fmt.Errorf("load entrypoint template: %w", err)
@@ -87,7 +88,7 @@ func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string) (s
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, entrypointData{PreEntrypoint: preCmd}); err != nil {
+	if err := tmpl.Execute(&buf, entrypointData{PreEntrypoint: preCmd, CWD: cwd}); err != nil {
 		return "", fmt.Errorf("execute entrypoint template: %w", err)
 	}
 	return buf.String(), nil

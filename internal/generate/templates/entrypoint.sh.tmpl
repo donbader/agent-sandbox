@@ -51,5 +51,9 @@ fi
 # Ensure the agent user owns its home directory (root may have created files during setup).
 chown -R "$AGENT_USER:$AGENT_USER" "$AGENT_HOME"
 
+# Create workspace directory for agent sessions.
+mkdir -p "{{ .CWD }}"
+chown "$AGENT_USER:$AGENT_USER" "{{ .CWD }}"
+
 # Drop privileges to the agent user for the actual process.
 exec gosu "$AGENT_USER" "$@"
