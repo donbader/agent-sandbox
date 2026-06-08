@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +56,6 @@ func init() {
 
 	tokenDir := "{{ .options.token_dir }}"
 	callbackURL := "{{ .options.callback_url }}"
-	domains := strings.Split("{{ .domainsList }}", ",")
 
 	providers := make(map[string]oauthProviderInfo)
 	var rawProviders map[string]map[string]any
@@ -97,17 +95,7 @@ func init() {
 		}
 	}
 
-	var defaultProvider string
-	if len(providers) > 0 {
-		names := make([]string, 0, len(providers))
-		for name := range providers {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		defaultProvider = names[0]
-	}
-
-	tokenFile := tokenDir + "/" + defaultProvider + ".json"
+	// Register one middleware per provider, scoped to that provider's domain
 	state := &oauthState{
 		tokenDir:  tokenDir,
 		providers: providers,
@@ -117,39 +105,56 @@ func init() {
 		},
 	}
 
-	if _, err := os.Stat(tokenFile); err != nil {
-		slog.Warn("oauth: token file not found at startup", "path", tokenFile)
-	}
-	for _, s := range oauthSecrets(tokenFile) {
-		gateway.RegisterSecret(s)
-	}
+	for name, p := range providers {
+		providerName := name
+		provider := p
+		providerTokenFile := tokenDir + "/" + providerName + ".json"
 
-	gateway.RegisterMiddleware(gateway.MiddlewareDef{
-		Name:    "oauth:" + domains[0],
-		Domains: domains,
-		Func: func(ctx *gateway.MiddlewareContext) error {
-			token, err := state.getValidToken(tokenFile)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if p, ok := state.providers[defaultProvider]; ok && p.AuthorizeEndpoint != "" {
-						authorizeURL := mwBuildAuthorizeURL(p, defaultProvider, callbackURL)
-						ctx.SetAbortHeader("X-OAuth-Authorize-URL", authorizeURL)
-						ctx.SetAbortHeader("Content-Type", "application/json")
-						ctx.Abort(http.StatusUnauthorized, fmt.Sprintf(
-							`{"error":"oauth_required","provider":%q,"authorize_url":%q}`,
-							defaultProvider, authorizeURL))
-						return nil
-					}
-					slog.Debug("oauth: token file not found", "file", tokenFile)
-				} else {
-					slog.Error("oauth: failed to get token", "error", err)
+		// Extract domain from mcp_url for this provider
+		var providerDomain string
+		if raw, ok := rawProviders[providerName]; ok {
+			if mcpURL, ok := raw["mcp_url"].(string); ok {
+				if u, err := url.Parse(mcpURL); err == nil {
+					providerDomain = u.Hostname()
 				}
-				return nil
 			}
-			ctx.Request.Header.Set("Authorization", "Bearer "+token)
-			return nil
-		},
-	})
+		}
+		if providerDomain == "" {
+			continue
+		}
+
+		// Register secrets for this provider's token
+		for _, s := range oauthSecrets(providerTokenFile) {
+			gateway.RegisterSecret(s)
+		}
+
+		gateway.RegisterMiddleware(gateway.MiddlewareDef{
+			Name:    "oauth:" + providerName,
+			Domains: []string{providerDomain},
+			Func: func(ctx *gateway.MiddlewareContext) error {
+				token, err := state.getValidToken(providerTokenFile)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						if provider.AuthorizeEndpoint != "" {
+							authorizeURL := mwBuildAuthorizeURL(provider, providerName, callbackURL)
+							ctx.SetAbortHeader("X-OAuth-Authorize-URL", authorizeURL)
+							ctx.SetAbortHeader("Content-Type", "application/json")
+							ctx.Abort(http.StatusUnauthorized, fmt.Sprintf(
+								`{"error":"oauth_required","provider":%q,"authorize_url":%q}`,
+								providerName, authorizeURL))
+							return nil
+						}
+						slog.Debug("oauth: token file not found", "file", providerTokenFile)
+					} else {
+						slog.Error("oauth: failed to get token", "provider", providerName, "error", err)
+					}
+					return nil
+				}
+				ctx.Request.Header.Set("Authorization", "Bearer "+token)
+				return nil
+			},
+		})
+	}
 }
 
 // resolveProvider does OAuth metadata discovery + dynamic client registration.
