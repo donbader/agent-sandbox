@@ -2,6 +2,9 @@ package custom
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,11 +45,18 @@ type oauthState struct {
 	httpClient  *http.Client
 }
 
+// oauthHMACKey is derived deterministically from providers config for CSRF state signing.
+var oauthHMACKey []byte
+
 func init() {
+	// Derive HMAC key from providers config (same derivation as callback handler)
+	providersJSON := `{{ toJSON .options.providers }}`
+	h := sha256.Sum256([]byte(providersJSON))
+	oauthHMACKey = h[:]
+
 	tokenDir := "{{ .options.token_dir }}"
 	domains := strings.Split("{{ .domainsList }}", ",")
 
-	providersJSON := `{{ toJSON .options.providers }}`
 	providers := make(map[string]oauthProviderInfo)
 	var rawProviders map[string]map[string]any
 	if err := json.Unmarshal([]byte(providersJSON), &rawProviders); err != nil {
@@ -124,9 +134,13 @@ func init() {
 }
 
 func buildAuthorizeURL(provider oauthProviderInfo, providerName string) string {
-	// Generate CSRF nonce (validated on callback)
-	state := GenerateOAuthNonce(providerName)
-	callbackURL := OAuthCallbackURL()
+	// Generate CSRF state: HMAC(provider) ensures only this gateway can validate
+	mac := hmac.New(sha256.New, oauthHMACKey)
+	mac.Write([]byte(providerName))
+	sig := hex.EncodeToString(mac.Sum(nil))[:16]
+	state := sig + ":" + providerName
+
+	callbackURL := "{{ .options.callback_url }}"
 
 	params := url.Values{
 		"client_id":     {provider.ClientID},
@@ -232,9 +246,8 @@ func (s *oauthState) refreshToken(stored *storedToken) (*storedToken, error) {
 		"refresh_token": {*stored.RefreshToken},
 		"client_id":     {stored.ClientID},
 	}
-	if stored.ClientSecret != nil && *stored.ClientSecret != "" {
-		params.Set("client_secret", *stored.ClientSecret)
-	}
+	// client_secret is baked into the providers config at generate time
+	// (not stored in token file for security)
 	resp, err := s.httpClient.Post(
 		stored.TokenEndpoint,
 		"application/x-www-form-urlencoded",
@@ -269,7 +282,6 @@ func (s *oauthState) refreshToken(stored *storedToken) (*storedToken, error) {
 		ExpiresAt:     time.Now().Unix() + expiresIn,
 		TokenEndpoint: stored.TokenEndpoint,
 		ClientID:      stored.ClientID,
-		ClientSecret:  stored.ClientSecret,
 	}, nil
 }
 

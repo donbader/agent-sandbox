@@ -2,7 +2,8 @@ package custom
 
 import (
 	"context"
-	"crypto/rand"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
@@ -29,18 +29,20 @@ type oauthCallbackConfig struct {
 var (
 	oauthCallbackProviders = map[string]oauthCallbackConfig{}
 	oauthCallbackTokenDir  string
-	oauthCallbackPublicURL string
-	oauthNonces            = map[string]string{}
-	oauthNoncesMu          sync.Mutex
+	oauthCallbackHMACKey   []byte
 )
 
 func init() {
 	oauthCallbackTokenDir = "{{ .options.token_dir }}"
-	oauthCallbackPublicURL = "{{ .public_url }}"
 	providersJSON := `{{ toJSON .options.providers }}`
+
+	// Derive HMAC key from providers config (same derivation as middleware)
+	h := sha256.Sum256([]byte(providersJSON))
+	oauthCallbackHMACKey = h[:]
+
 	var providers map[string]map[string]any
 	if err := json.Unmarshal([]byte(providersJSON), &providers); err != nil {
-		slog.Error("oauth-callback: failed to parse providers config", "error", err)
+		slog.Error("oauth-callback: failed to parse providers", "error", err)
 	} else {
 		for name, cfg := range providers {
 			p := oauthCallbackConfig{}
@@ -62,24 +64,6 @@ func init() {
 	})
 }
 
-// GenerateOAuthNonce creates a CSRF nonce for the given provider.
-func GenerateOAuthNonce(provider string) string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return provider
-	}
-	state := hex.EncodeToString(b) + ":" + provider
-	oauthNoncesMu.Lock()
-	oauthNonces[state] = provider
-	oauthNoncesMu.Unlock()
-	return state
-}
-
-// OAuthCallbackURL returns the full callback URL.
-func OAuthCallbackURL() string {
-	return oauthCallbackPublicURL + "{{ .path }}"
-}
-
 func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
@@ -91,15 +75,18 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing state parameter", http.StatusBadRequest)
 		return
 	}
-	// Validate CSRF nonce
-	oauthNoncesMu.Lock()
-	providerName, valid := oauthNonces[state]
-	if valid {
-		delete(oauthNonces, state)
+	// Validate HMAC state: format is "hmac_sig:provider_name"
+	parts := strings.SplitN(state, ":", 2)
+	if len(parts) != 2 {
+		http.Error(w, "invalid state format", http.StatusForbidden)
+		return
 	}
-	oauthNoncesMu.Unlock()
-	if !valid {
-		http.Error(w, "invalid or expired state", http.StatusForbidden)
+	sig, providerName := parts[0], parts[1]
+	mac := hmac.New(sha256.New, oauthCallbackHMACKey)
+	mac.Write([]byte(providerName))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))[:16]
+	if !hmac.Equal([]byte(sig), []byte(expectedSig)) {
+		http.Error(w, "invalid state signature", http.StatusForbidden)
 		return
 	}
 	provider, ok := oauthCallbackProviders[providerName]
@@ -111,25 +98,24 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "provider not configured", http.StatusInternalServerError)
 		return
 	}
-	redirectURI := OAuthCallbackURL()
+	redirectURI := "{{ .public_url }}{{ .path }}"
 	token, err := exchangeCodeForToken(provider, code, redirectURI)
 	if err != nil {
-		slog.Error("oauth-callback: token exchange failed", "provider", providerName, "error", err)
+		slog.Error("oauth-callback: token exchange failed", "error", err)
 		http.Error(w, "token exchange failed", http.StatusInternalServerError)
 		return
 	}
 	tokenFile := oauthCallbackTokenDir + "/" + providerName + ".json"
 	if err := writeOAuthToken(tokenFile, token, provider); err != nil {
-		slog.Error("oauth-callback: failed to save token", "provider", providerName, "error", err)
+		slog.Error("oauth-callback: failed to save token", "error", err)
 		http.Error(w, "failed to save token", http.StatusInternalServerError)
 		return
 	}
 	gateway.RegisterSecret(token.AccessToken)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `<!DOCTYPE html><html><body>
 <h1>Authorization successful</h1>
-<p>Provider <strong>%s</strong> has been connected. You can close this tab.</p>
+<p>Provider <strong>%s</strong> connected. You can close this tab.</p>
 </body></html>`, html.EscapeString(providerName))
 }
 
@@ -156,10 +142,7 @@ func exchangeCodeForToken(provider oauthCallbackConfig, code, redirectURI string
 	if provider.ClientSecret != "" {
 		params.Set("client_secret", provider.ClientSecret)
 	}
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: callbackSSRFSafeTransport(),
-	}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: cbSSRFSafe()}
 	resp, err := client.Post(provider.TokenEndpoint, "application/x-www-form-urlencoded", strings.NewReader(params.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -179,16 +162,14 @@ func exchangeCodeForToken(provider oauthCallbackConfig, code, redirectURI string
 	return &tr, nil
 }
 
-func writeOAuthToken(path string, token *oauthTokenExchangeResponse, provider oauthCallbackConfig) error {
+func writeOAuthToken(path string, token *oauthTokenExchangeResponse, _ oauthCallbackConfig) error {
 	expiresIn := token.ExpiresIn
 	if expiresIn == 0 {
 		expiresIn = 3600
 	}
 	stored := map[string]any{
-		"access_token":   token.AccessToken,
-		"expires_at":     time.Now().Unix() + expiresIn,
-		"token_endpoint": provider.TokenEndpoint,
-		"client_id":      provider.ClientID,
+		"access_token": token.AccessToken,
+		"expires_at":   time.Now().Unix() + expiresIn,
 	}
 	if token.RefreshToken != "" {
 		stored["refresh_token"] = token.RefreshToken
@@ -204,7 +185,7 @@ func writeOAuthToken(path string, token *oauthTokenExchangeResponse, provider oa
 	return os.Rename(tmp, path)
 }
 
-func callbackSSRFSafeTransport() *http.Transport {
+func cbSSRFSafe() *http.Transport {
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)

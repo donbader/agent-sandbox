@@ -284,6 +284,10 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	}
 	if len(gwCfg.Middlewares) > 0 {
 		allOpts := collectAllOptions(cfg)
+		// Inject computed callback URLs for plugins with routes
+		for _, route := range gwCfg.Routes {
+			allOpts["callback_url"] = gwCfg.PublicURL + route.Path
+		}
 		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares, allOpts); err != nil {
 			return nil, fmt.Errorf("copy middleware: %w", err)
 		}
