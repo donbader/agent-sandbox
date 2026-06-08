@@ -19,6 +19,7 @@ type Generator struct {
 	gatewayFS  fs.FS
 	coreDir    string
 	templates  *templates.Loader
+	presets    map[string]*Preset
 }
 
 // AgentResult holds the per-agent generation output.
@@ -49,11 +50,20 @@ func NewGeneratorWithCore(projectDir, coreDir string) *Generator {
 		pluginsDir := filepath.Join(coreDir, "plugins")
 		bundled = os.DirFS(pluginsDir)
 	}
+	var presets map[string]*Preset
+	if coreDir != "" {
+		var err error
+		presets, err = LoadPresets(coreDir)
+		if err != nil {
+			presets = nil // fall through — will error at generate time if preset is used
+		}
+	}
 	return &Generator{
 		projectDir: projectDir,
 		bundledFS:  bundled,
 		coreDir:    coreDir,
 		templates:  templates.FindLoader(coreDir),
+		presets:    presets,
 	}
 }
 
@@ -66,6 +76,13 @@ func (g *Generator) SetGatewayFS(gwFS fs.FS) {
 func (g *Generator) SetBundledPluginsFS(pluginsFS fs.FS) {
 	if g.bundledFS == nil {
 		g.bundledFS = pluginsFS
+	}
+}
+
+// SetPresets sets the runtime presets map (used when no core directory is available, e.g. tests).
+func (g *Generator) SetPresets(presets map[string]*Preset) {
+	if g.presets == nil {
+		g.presets = presets
 	}
 }
 
@@ -254,7 +271,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	}
 	entrypointPath := filepath.Join(relBuildDir, "entrypoint.sh")
 
-	dockerfile, err := RenderDockerfile(g.templates, cfg, merged, entrypointPath)
+	dockerfile, err := RenderDockerfile(g.templates, cfg, merged, entrypointPath, g.presets)
 	if err != nil {
 		return nil, fmt.Errorf("build dockerfile: %w", err)
 	}
