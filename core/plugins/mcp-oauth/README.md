@@ -1,45 +1,69 @@
 # mcp-oauth
 
-Provides OAuth token storage for MCP (Model Context Protocol) providers via a shared volume between the gateway and agent.
+Provides full OAuth lifecycle for MCP (Model Context Protocol) providers: automatic token injection, refresh, and browser-based authorization via gateway callback.
 
 ## How It Works
 
-Declares a named volume (`oauth-tokens`) mounted into both the gateway and agent containers at a configurable path. MCP providers that require OAuth can store and read token files from this shared location.
-
-> **Note:** This plugin currently only handles the volume declaration. You must manually declare gateway services for each MCP provider endpoint in your `agent.yaml`. Full automation (dynamic service entries from provider URLs) is planned.
+1. **Middleware** intercepts requests to configured domains. If a valid token exists, injects `Authorization: Bearer <token>`. If no token exists, returns 401 with an `authorize_url` for the user to click.
+2. **Callback handler** at `/plugins/mcp-oauth/callback` receives the OAuth authorization code, exchanges it for tokens, and writes the token file to the shared volume.
+3. **Shared volume** (`oauth-tokens`) is mounted into both gateway and agent containers so the MCP client can read tokens written by the gateway.
 
 ## Usage
 
 ```yaml
 # agent.yaml
+gateway:
+  public_url: "https://gateway.myagent.example.com"
+  services:
+    - url: https://mcp.notion.com
+
 installations:
   - plugin: "@builtin/mcp-oauth"
     options:
       providers:
         notion:
           mcp_url: https://mcp.notion.com/mcp
+          authorize_endpoint: https://api.notion.com/v1/oauth/authorize
+          token_endpoint: https://api.notion.com/v1/oauth/token
+          client_id: "your-client-id"
+          client_secret: "your-client-secret"
+          scopes: "read_content"
       token_dir: "/data/oauth-tokens"
-
-gateway:
-  services:
-    - url: https://mcp.notion.com
-      headers:
-        Authorization: Bearer ${NOTION_TOKEN}
-```
-
-```bash
-# .env
-NOTION_TOKEN=ntn_xxxx
 ```
 
 ## Options
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `providers` | object | yes | — | Map of provider name to config. Each provider needs at least `mcp_url`. |
+| `providers` | object | yes | — | Map of provider name to OAuth config |
 | `token_dir` | string | no | `/data/oauth-tokens` | Directory for OAuth token files |
+
+### Provider Config
+
+Each provider entry supports:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `mcp_url` | yes | MCP server endpoint |
+| `authorize_endpoint` | yes | OAuth authorize URL |
+| `token_endpoint` | yes | OAuth token exchange URL |
+| `client_id` | yes | OAuth client ID |
+| `client_secret` | no | OAuth client secret |
+| `scopes` | no | Space-separated scopes |
 
 ## What It Contributes
 
-- **Gateway:** Shared volume `oauth-tokens` mounted at `token_dir`
-- **Agent:** Same volume accessible for MCP client token reads
+- **Gateway middleware:** Token injection + 401 with authorize URL when unauthenticated
+- **Gateway route:** `/plugins/mcp-oauth/callback` — OAuth code exchange handler
+- **Gateway volume:** Shared `oauth-tokens` volume at `token_dir`
+
+## OAuth Flow
+
+```
+1. Agent MCP client → request to notion domain
+2. Gateway middleware: no token file → returns 401 + authorize_url
+3. User clicks authorize_url → Notion login page
+4. Notion redirects → https://gateway.example.com/plugins/mcp-oauth/callback?code=X&state=notion
+5. Gateway callback handler: exchanges code → writes /data/oauth-tokens/notion.json
+6. Next request → middleware reads token → injects Bearer header → proxied to Notion
+```

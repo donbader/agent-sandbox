@@ -27,8 +27,15 @@ type storedToken struct {
 	ClientSecret  *string `json:"client_secret"`
 }
 
+type oauthProviderInfo struct {
+	AuthorizeEndpoint string
+	ClientID          string
+	Scopes            string
+}
+
 type oauthState struct {
-	tokenFile   string
+	tokenDir    string
+	providers   map[string]oauthProviderInfo
 	mu          sync.Mutex
 	cachedToken *storedToken
 	cachedUntil time.Time
@@ -36,11 +43,38 @@ type oauthState struct {
 }
 
 func init() {
-	tokenFile := "{{ .options.token_file }}"
+	tokenDir := "{{ .options.token_dir }}"
 	domains := strings.Split("{{ .domainsList }}", ",")
 
+	providersJSON := `{{ toJSON .options.providers }}`
+	providers := make(map[string]oauthProviderInfo)
+	var rawProviders map[string]map[string]any
+	if err := json.Unmarshal([]byte(providersJSON), &rawProviders); err == nil {
+		for name, cfg := range rawProviders {
+			p := oauthProviderInfo{}
+			if v, ok := cfg["authorize_endpoint"].(string); ok {
+				p.AuthorizeEndpoint = v
+			}
+			if v, ok := cfg["client_id"].(string); ok {
+				p.ClientID = v
+			}
+			if v, ok := cfg["scopes"].(string); ok {
+				p.Scopes = v
+			}
+			providers[name] = p
+		}
+	}
+
+	var defaultProvider string
+	for name := range providers {
+		defaultProvider = name
+		break
+	}
+
+	tokenFile := tokenDir + "/" + defaultProvider + ".json"
 	state := &oauthState{
-		tokenFile: tokenFile,
+		tokenDir:  tokenDir,
+		providers: providers,
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: oauthSSRFSafeTransport(),
@@ -58,10 +92,19 @@ func init() {
 		Name:    "oauth:" + domains[0],
 		Domains: domains,
 		Func: func(ctx *gateway.MiddlewareContext) error {
-			token, err := state.getValidToken()
+			token, err := state.getValidToken(tokenFile)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					slog.Debug("oauth: token file not found", "file", state.tokenFile)
+					if provider, ok := state.providers[defaultProvider]; ok && provider.AuthorizeEndpoint != "" {
+						authorizeURL := buildAuthorizeURL(provider, defaultProvider)
+						ctx.SetAbortHeader("X-OAuth-Authorize-URL", authorizeURL)
+						ctx.SetAbortHeader("Content-Type", "application/json")
+						ctx.Abort(http.StatusUnauthorized, fmt.Sprintf(
+							`{"error":"oauth_required","provider":%q,"authorize_url":%q}`,
+							defaultProvider, authorizeURL))
+						return nil
+					}
+					slog.Debug("oauth: token file not found", "file", tokenFile)
 				} else {
 					slog.Error("oauth: failed to get token", "error", err)
 				}
@@ -71,6 +114,18 @@ func init() {
 			return nil
 		},
 	})
+}
+
+func buildAuthorizeURL(provider oauthProviderInfo, providerName string) string {
+	params := url.Values{
+		"client_id":     {provider.ClientID},
+		"response_type": {"code"},
+		"state":         {providerName},
+	}
+	if provider.Scopes != "" {
+		params.Set("scope", provider.Scopes)
+	}
+	return provider.AuthorizeEndpoint + "?" + params.Encode()
 }
 
 func oauthSecrets(tokenFile string) []string {
@@ -88,13 +143,13 @@ func oauthSecrets(tokenFile string) []string {
 	return nil
 }
 
-func (s *oauthState) getValidToken() (string, error) {
+func (s *oauthState) getValidToken(tokenFile string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cachedToken != nil && time.Now().Before(s.cachedUntil) {
 		return s.cachedToken.AccessToken, nil
 	}
-	stored, err := s.readTokenFile()
+	stored, err := s.readTokenFile(tokenFile)
 	if err != nil {
 		return "", err
 	}
@@ -105,7 +160,7 @@ func (s *oauthState) getValidToken() (string, error) {
 			return "", fmt.Errorf("token refresh failed: %w", err)
 		}
 		stored = refreshed
-		if err := s.writeTokenFile(stored); err != nil {
+		if err := s.writeTokenFile(tokenFile, stored); err != nil {
 			slog.Error("oauth: failed to write refreshed token", "error", err)
 		}
 	}
@@ -119,28 +174,28 @@ func (s *oauthState) getValidToken() (string, error) {
 	return stored.AccessToken, nil
 }
 
-func (s *oauthState) readTokenFile() (*storedToken, error) {
-	data, err := os.ReadFile(s.tokenFile)
+func (s *oauthState) readTokenFile(tokenFile string) (*storedToken, error) {
+	data, err := os.ReadFile(tokenFile)
 	if err != nil {
-		return nil, fmt.Errorf("reading token file %s: %w", s.tokenFile, err)
+		return nil, fmt.Errorf("reading token file %s: %w", tokenFile, err)
 	}
 	var token storedToken
 	if err := json.Unmarshal(data, &token); err != nil {
-		return nil, fmt.Errorf("parsing token file %s: %w", s.tokenFile, err)
+		return nil, fmt.Errorf("parsing token file %s: %w", tokenFile, err)
 	}
 	return &token, nil
 }
 
-func (s *oauthState) writeTokenFile(token *storedToken) error {
+func (s *oauthState) writeTokenFile(tokenFile string, token *storedToken) error {
 	data, err := json.MarshalIndent(token, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.tokenFile + ".tmp"
+	tmp := tokenFile + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.tokenFile)
+	return os.Rename(tmp, tokenFile)
 }
 
 type oauthTokenResponse struct {

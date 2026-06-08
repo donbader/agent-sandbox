@@ -93,24 +93,36 @@ Key-only auth. No passwords. Connect with `ssh -p 2222 agent@localhost`.
 
 ### @builtin/mcp-oauth
 
-OAuth token storage for MCP (Model Context Protocol) providers via a shared volume.
+Full OAuth lifecycle for MCP providers: token injection, automatic refresh, and browser-based authorization via gateway callback.
 
 ```yaml
+gateway:
+  public_url: "https://gateway.myagent.example.com"
+  services:
+    - url: https://mcp.notion.com
+
 installations:
   - plugin: "@builtin/mcp-oauth"
     options:
       providers:
         notion:
           mcp_url: https://mcp.notion.com/mcp
+          authorize_endpoint: https://api.notion.com/v1/oauth/authorize
+          token_endpoint: https://api.notion.com/v1/oauth/token
+          client_id: "your-client-id"
+          client_secret: "your-client-secret"
+          scopes: "read_content"
       token_dir: "/data/oauth-tokens"
 ```
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `providers` | object | yes | — | Map of provider name to MCP config (`mcp_url` required per provider) |
+| `providers` | object | yes | — | Map of provider name to OAuth config |
 | `token_dir` | string | no | `/data/oauth-tokens` | Directory for OAuth token files |
 
-You must also declare the provider endpoints as gateway services in your `agent.yaml`.
+**Flow:** When no token exists, the middleware returns 401 with an `authorize_url`. The user visits the URL, authorizes, and the OAuth provider redirects to `/plugins/mcp-oauth/callback` on the gateway. The callback handler exchanges the code for tokens and writes them to the shared volume. Subsequent requests are automatically authenticated.
+
+**Contributes:** gateway middleware (token injection + 401), gateway route (`/plugins/mcp-oauth/callback`), shared volume.
 
 ---
 

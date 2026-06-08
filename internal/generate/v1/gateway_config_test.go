@@ -72,3 +72,15 @@ func TestBuildGatewayConfig_NilContribs(t *testing.T) {
 	gwCfg := BuildGatewayConfig(cfg, nil)
 	require.Len(t, gwCfg.Services, 1)
 }
+
+func TestBuildGatewayConfig_PublicURL(t *testing.T) {
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			PublicURL: "https://gateway.example.com",
+			Services:  []config.GatewayServiceEntry{{URL: "https://api.example.com"}},
+		},
+	}
+
+	gwCfg := BuildGatewayConfig(cfg, nil)
+	assert.Equal(t, "https://gateway.example.com", gwCfg.PublicURL)
+}

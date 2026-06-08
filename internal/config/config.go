@@ -67,7 +67,8 @@ type RuntimeConfig struct {
 
 // GatewayConfig holds gateway proxy configuration.
 type GatewayConfig struct {
-	Services []GatewayServiceEntry `yaml:"services" json:"services,omitempty" jsonschema:"title=services,description=External services proxied through the gateway"`
+	PublicURL string                `yaml:"public_url" json:"public_url,omitempty" jsonschema:"title=public_url,description=Public URL of the gateway (used for OAuth callbacks and webhook receivers)"`
+	Services  []GatewayServiceEntry `yaml:"services" json:"services,omitempty" jsonschema:"title=services,description=External services proxied through the gateway"`
 }
 
 // GatewayServiceEntry represents an allowed upstream service.

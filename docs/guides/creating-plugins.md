@@ -100,9 +100,49 @@ contributes:
 | `runtime.volumes` | Volume mount specs for docker-compose |
 | `gateway.services` | Services the gateway intercepts. Each entry has a `url` and a list of `middlewares` |
 | `gateway.services[].middlewares[].custom` | Path to a Go middleware file, relative to the plugin directory |
+| `gateway.routes` | HTTP route handlers registered on the gateway (see below) |
 | `sidecar.services` | Additional Docker containers that run alongside the agent (see below) |
 
 All `contributes` fields support Go `text/template` syntax. See **Template Context** below for available variables and functions.
+
+### `contributes.gateway.routes`
+
+Registers HTTP route handlers directly on the gateway. Routes are automatically namespaced under `/plugins/{plugin-name}/` to prevent conflicts between plugins.
+
+```yaml
+contributes:
+  gateway:
+    routes:
+      - path: "/callback"
+        handler: "./handlers/callback.go"
+```
+
+| Field | Description |
+|-------|-------------|
+| `path` | Relative path (prefixed automatically with `/plugins/{plugin-name}`) |
+| `handler` | Path to a Go handler file, relative to the plugin directory |
+
+The handler file is a Go template (same as middleware) with access to `{{ .path }}` (the full namespaced path) and `{{ .options }}`. It must self-register using `gateway.RegisterRoute()` in an `init()` function:
+
+```go
+package custom
+
+import (
+    "net/http"
+    "github.com/donbader/agent-sandbox/core/sdk/gateway"
+)
+
+func init() {
+    gateway.RegisterRoute(gateway.RouteDef{
+        Path:    "{{ .path }}",
+        Handler: myHandler,
+    })
+}
+
+func myHandler(w http.ResponseWriter, r *http.Request) {
+    // Handle the request
+}
+```
 
 ### `contributes.sidecar.services`
 

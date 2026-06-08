@@ -3,6 +3,7 @@ package v1
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,7 +135,17 @@ func renderMiddleware(name, content string, data map[string]any) (string, error)
 		return content, nil
 	}
 
-	tmpl, err := template.New(name).Parse(content)
+	funcMap := template.FuncMap{
+		"toJSON": func(v any) (string, error) {
+			b, err := json.Marshal(v)
+			if err != nil {
+				return "", fmt.Errorf("toJSON: %w", err)
+			}
+			return string(b), nil
+		},
+	}
+
+	tmpl, err := template.New(name).Funcs(funcMap).Parse(content)
 	if err != nil {
 		return "", fmt.Errorf("parse template: %w", err)
 	}

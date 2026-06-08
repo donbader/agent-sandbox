@@ -3,17 +3,12 @@ options:
   providers:
     type: object
     required: true
-    description: "Map of provider name to MCP config"
+    description: "Map of provider name to MCP config (each needs mcp_url, client_id, client_secret)"
   token_dir:
     type: string
     required: false
     default: "/data/oauth-tokens"
     description: "Directory for OAuth token files"
-  token_file:
-    type: string
-    required: false
-    default: "/data/oauth-tokens/token.json"
-    description: "Path to OAuth token JSON file"
 
 contributes:
   gateway:
@@ -21,3 +16,6 @@ contributes:
       - "oauth-tokens:{{ .plugin.options.token_dir }}"
     middlewares:
       - custom: "./middlewares/oauth.go"
+    routes:
+      - path: "/callback"
+        handler: "./handlers/callback.go"

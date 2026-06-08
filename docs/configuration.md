@@ -50,6 +50,7 @@ runtime:
     - "./local:/home/agent/local"
 
 gateway:
+  public_url: string      # optional — public URL for OAuth callbacks and webhook receivers
   services:               # optional — external services proxied through the gateway
     - url: https://api.example.com
       network: string     # optional — compose network to attach

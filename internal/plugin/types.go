@@ -42,6 +42,14 @@ type RuntimeContrib struct {
 type GatewayContrib struct {
 	Services []GatewayService `yaml:"services"`
 	Volumes  []string         `yaml:"volumes"`
+	Routes   []RouteEntry     `yaml:"routes"`
+}
+
+// RouteEntry declares an HTTP route handler contributed by a plugin.
+// The path is relative to the plugin's namespace (/plugins/{plugin-name}/...).
+type RouteEntry struct {
+	Path    string `yaml:"path"`    // relative path (e.g. "/callback")
+	Handler string `yaml:"handler"` // path to handler .go file
 }
 
 type GatewayService struct {

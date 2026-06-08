@@ -271,6 +271,14 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	}
 
 	gwCfg := BuildGatewayConfig(cfg, merged)
+
+	// Collect routes from each plugin with namespace prefixing
+	routeRefs, err := g.collectPluginRoutes(resolved, buildDir)
+	if err != nil {
+		return nil, err
+	}
+	gwCfg.Routes = routeRefs
+
 	if err := WriteGatewayRuntimeConfig(buildDir, gwCfg); err != nil {
 		return nil, fmt.Errorf("write gateway runtime config: %w", err)
 	}
@@ -283,6 +291,12 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	if len(gwCfg.AuthHeaders) > 0 {
 		if err := GenerateAuthHeaderMiddleware(buildDir, gwCfg.AuthHeaders); err != nil {
 			return nil, fmt.Errorf("generate auth-header middleware: %w", err)
+		}
+	}
+	if len(gwCfg.Routes) > 0 {
+		allOpts := collectAllOptions(cfg)
+		if err := CopyRouteHandlers(g.projectDir, buildDir, gwCfg.Routes, allOpts); err != nil {
+			return nil, fmt.Errorf("copy route handlers: %w", err)
 		}
 	}
 
