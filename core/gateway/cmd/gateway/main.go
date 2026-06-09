@@ -113,10 +113,8 @@ func main() {
 	}
 
 	go func() {
-		if err := p.ListenAndServe(); err != nil {
-			slog.Error("proxy error", "error", err)
-			os.Exit(1)
-		}
+		slog.Error("proxy error", "error", p.ListenAndServe())
+		os.Exit(1)
 	}()
 	slog.Info("proxy listening", "addr", cfg.Listen)
 
@@ -124,9 +122,7 @@ func main() {
 	for _, pf := range cfg.PortForwards {
 		fwd := proxy.NewForwarder(pf.Listen, pf.Target)
 		go func() {
-			if err := fwd.ListenAndServe(); err != nil {
-				slog.Error("port forward error", "listen", pf.Listen, "target", pf.Target, "error", err)
-			}
+			slog.Error("port forward error", "listen", pf.Listen, "target", pf.Target, "error", fwd.ListenAndServe())
 		}()
 	}
 
