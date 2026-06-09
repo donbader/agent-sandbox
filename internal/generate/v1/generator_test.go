@@ -122,9 +122,9 @@ installations:
 	buildDir := filepath.Join(projectDir, ".build")
 	assert.FileExists(t, filepath.Join(buildDir, "Dockerfile"))
 	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
-	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "Dockerfile"))
-	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "go.mod"))
-	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "core", "gateway", "cmd", "gateway", "main.go"))
+	assert.FileExists(t, filepath.Join(buildDir, "gateway", "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "gateway", "config.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "gateway", "plugins.yaml"))
 }
 
 func TestGenerator_Run_WithSidecar(t *testing.T) {
@@ -358,8 +358,8 @@ gateway:
 	require.NoError(t, err)
 	assert.Contains(t, string(df), "CMD")
 
-	// Verify gateway-src/config.yaml exists (Docker COPY target)
-	assert.FileExists(t, filepath.Join(buildDir, "gateway-src", "config.yaml"))
+	// Verify gateway/config.yaml exists (Docker COPY target)
+	assert.FileExists(t, filepath.Join(buildDir, "gateway", "config.yaml"))
 
 	// Verify runtime config.yaml exists (for potential volume mount)
 	assert.FileExists(t, filepath.Join(buildDir, "config.yaml"))
@@ -442,9 +442,9 @@ gateway:
 		assert.Contains(t, string(df), "CMD", "Dockerfile missing CMD for %s", name)
 	}
 
-	// Verify per-agent gateway-src/config.yaml exists (Docker build context)
+	// Verify per-agent gateway/config.yaml exists (Docker build context)
 	for _, name := range []string{"coder", "reviewer"} {
-		assert.FileExists(t, filepath.Join(buildDir, name, "gateway-src", "config.yaml"))
+		assert.FileExists(t, filepath.Join(buildDir, name, "gateway", "config.yaml"))
 	}
 }
 

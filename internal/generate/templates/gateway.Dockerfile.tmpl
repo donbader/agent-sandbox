@@ -1,14 +1,9 @@
-FROM golang:1.26-alpine AS builder
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY core/ core/
-RUN go build -o /gateway ./core/gateway/cmd/gateway/
-
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget
-COPY --from=builder /gateway /usr/local/bin/gateway
+COPY gateway /usr/local/bin/gateway
 COPY config.yaml /etc/gateway/config.yaml
+COPY plugins.yaml /etc/gateway/plugins.yaml
+COPY plugins/ /etc/gateway/plugins/
 EXPOSE 8080
 HEALTHCHECK --interval=5s --timeout=3s --retries=3 CMD wget --spider -q http://localhost:8080/health || exit 1
 CMD ["gateway"]

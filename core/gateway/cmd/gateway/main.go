@@ -4,6 +4,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,10 +18,6 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
-
-	// Custom middleware compilation target — all middleware (.go files) are copied here at generate-time.
-	// Each file uses init() to self-register via the gateway SDK.
-	_ "github.com/donbader/agent-sandbox/core/gateway/middlewares/custom"
 )
 
 const (
@@ -60,7 +57,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Collect ALL secrets (from Go init() middleware + TS plugins)
+	// Register auth-header middleware from config
+	for i, ah := range cfg.AuthHeaders {
+		domain := ah.Domain
+		header := ah.Header
+		value := ah.Value
+		gateway.RegisterSecret(value)
+		gateway.RegisterMiddleware(gateway.MiddlewareDef{
+			Name:    fmt.Sprintf("auth-header:%s:%d", domain, i),
+			Domains: []string{domain},
+			Func: func(ctx *gateway.MiddlewareContext) error {
+				ctx.Request.Header.Set(header, value)
+				return nil
+			},
+		})
+	}
+
+	// Collect ALL secrets (from config auth_headers + TS plugins)
 	secrets := gateway.Secrets()
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{

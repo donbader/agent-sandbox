@@ -14,9 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#core-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build gateway binary
+        run: |
+          mkdir -p gateway-bin
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o gateway-bin/gateway-linux-amd64 ./core/gateway/cmd/gateway/
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o gateway-bin/gateway-linux-arm64 ./core/gateway/cmd/gateway/
 
       - name: Package core tarball
         run: |
@@ -28,20 +38,19 @@ jobs:
           # Remove Go source/test files — only .tmpl files ship
           find "$STAGING/templates" -name '*.go' -delete
 
-          # Plugins (data-driven YAML plugin definitions)
+          # Plugins (data-driven YAML plugin definitions + TS source)
           cp -r core/plugins "$STAGING/plugins"
 
           # Presets (runtime.yaml files for @builtin/* images)
           cp -r core/presets "$STAGING/presets"
 
-          # Gateway source (compiled during Docker build)
-          cp -r core/gateway "$STAGING/gateway"
+          # Gateway pre-built binaries
+          mkdir -p "$STAGING/gateway/bin"
+          cp gateway-bin/gateway-linux-amd64 "$STAGING/gateway/bin/"
+          cp gateway-bin/gateway-linux-arm64 "$STAGING/gateway/bin/"
 
-          # SDK (gateway middleware interfaces)
+          # SDK (gateway middleware interfaces — needed for plugin development)
           cp -r core/sdk "$STAGING/sdk"
-
-          # Module files (needed for gateway Docker build)
-          cp go.mod go.sum "$STAGING/"
 
           # Create tarball
           ASSET="agent-sandbox-core-${VERSION}.tar.gz"
@@ -56,6 +65,6 @@ jobs:
           body: |
             Core release `${{ steps.version.outputs.version }}` for agent-sandbox.
 
-            Contains templates, plugins, gateway source, and SDK.
+            Contains templates, plugins (with TS source), pre-built gateway binaries, and SDK.
             Used by CLI when `core_version: ${{ steps.version.outputs.version }}` is set in agent.yaml.
           files: ${{ env.asset }}

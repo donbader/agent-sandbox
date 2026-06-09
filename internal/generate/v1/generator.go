@@ -3,7 +3,6 @@ package v1
 import (
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +27,7 @@ type AgentResult struct {
 	Config   *config.Config
 	Contribs *plugin.Contributions
 	BuildDir string // absolute path to the agent's build output directory
+	Resolved map[string]*resolvedPlugin
 }
 
 type resolvedPlugin struct {
@@ -116,22 +116,8 @@ func (g *Generator) RunWithConfig(cfg *config.Config, agentDir string) error {
 		return fmt.Errorf("write docker-compose.yml: %w", err)
 	}
 
-	if err := g.extractGatewaySource(buildDir); err != nil {
-		return fmt.Errorf("extract gateway source: %w", err)
-	}
-
-	// Copy the runtime config into gateway-src so the Docker build can COPY it into the image.
-	// For single-agent, the baked-in config IS the runtime config (no volume mount override).
-	gatewaySrcDir := filepath.Join(buildDir, "gateway-src")
-	if err := os.MkdirAll(gatewaySrcDir, 0755); err != nil {
-		return fmt.Errorf("create gateway-src dir: %w", err)
-	}
-	runtimeConfig, err := os.ReadFile(filepath.Join(buildDir, "config.yaml"))
-	if err != nil {
-		return fmt.Errorf("read runtime config for gateway image: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(gatewaySrcDir, "config.yaml"), runtimeConfig, 0644); err != nil {
-		return fmt.Errorf("write gateway image config: %w", err)
+	if err := g.writeGatewayBuild(buildDir, result.Config, result.Contribs, result.Resolved); err != nil {
+		return fmt.Errorf("write gateway build: %w", err)
 	}
 
 	if err := generateSchema(buildDir); err != nil {
@@ -154,25 +140,14 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 			return fmt.Errorf("create build dir for %s: %w", agent.Config.Name, err)
 		}
 
-		// Extract gateway source into per-agent build dir (each agent compiles its own middleware).
-		if err := g.extractGatewaySource(agentBuildDir); err != nil {
-			return fmt.Errorf("extract gateway source for %s: %w", agent.Config.Name, err)
-		}
-
 		result, err := g.generateAgent(agent.Config, agent.Dir, agentBuildDir)
 		if err != nil {
 			return fmt.Errorf("generate %s: %w", agent.Config.Name, err)
 		}
 
-		// Copy the runtime config into gateway-src for the Docker build COPY step.
-		// (Per-agent config is also volume-mounted at runtime for hot updates.)
-		gatewaySrcDir := filepath.Join(agentBuildDir, "gateway-src")
-		runtimeConfig, err := os.ReadFile(filepath.Join(agentBuildDir, "config.yaml"))
-		if err != nil {
-			return fmt.Errorf("read runtime config for %s: %w", agent.Config.Name, err)
-		}
-		if err := os.WriteFile(filepath.Join(gatewaySrcDir, "config.yaml"), runtimeConfig, 0644); err != nil {
-			return fmt.Errorf("write gateway image config for %s: %w", agent.Config.Name, err)
+		// Write gateway build into per-agent directory
+		if err := g.writeGatewayBuild(agentBuildDir, result.Config, result.Contribs, result.Resolved); err != nil {
+			return fmt.Errorf("write gateway build for %s: %w", agent.Config.Name, err)
 		}
 
 		results = append(results, *result)
@@ -180,7 +155,11 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 
 	var entries []ComposeAgentEntry
 	for _, r := range results {
-		entries = append(entries, ComposeAgentEntry(r))
+		entries = append(entries, ComposeAgentEntry{
+			Config:   r.Config,
+			Contribs: r.Contribs,
+			BuildDir: r.BuildDir,
+		})
 	}
 
 	compose, err := BuildFleetCompose(entries, g.projectDir)
@@ -224,29 +203,10 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		}
 
 		if pluginDef.BaseDir != "" {
-			for i, svc := range rendered.Gateway.Services {
-				for j, mw := range svc.Middlewares {
-					if mw.Custom != "" {
-						rendered.Gateway.Services[i].Middlewares[j].Custom = filepath.Join(pluginDef.BaseDir, mw.Custom)
-					}
-				}
-			}
 			for name, svc := range rendered.Sidecar.Services {
 				if svc.Build != "" && !filepath.IsAbs(svc.Build) {
 					svc.Build = filepath.Join(pluginDef.BaseDir, svc.Build)
 					rendered.Sidecar.Services[name] = svc
-				}
-			}
-		} else if g.bundledFS != nil {
-			for i, svc := range rendered.Gateway.Services {
-				for j, mw := range svc.Middlewares {
-					if mw.Custom != "" {
-						extractedPath, err := g.extractBundledMiddleware(pluginDef.Name, mw.Custom, buildDir)
-						if err != nil {
-							return nil, fmt.Errorf("extract middleware %q from plugin %q: %w", mw.Custom, inst.Plugin, err)
-						}
-						rendered.Gateway.Services[i].Middlewares[j].Custom = extractedPath
-					}
 				}
 			}
 		}
@@ -290,39 +250,11 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 
 	gwCfg := BuildGatewayConfig(cfg, merged)
 
-	// Collect routes from each plugin with namespace prefixing
-	routeRefs, err := g.collectPluginRoutes(resolved, buildDir)
-	if err != nil {
-		return nil, err
-	}
-	gwCfg.Routes = routeRefs
-
 	if err := WriteGatewayRuntimeConfig(buildDir, gwCfg); err != nil {
 		return nil, fmt.Errorf("write gateway runtime config: %w", err)
 	}
-	if len(gwCfg.Middlewares) > 0 {
-		allOpts := collectAllOptions(cfg)
-		// Inject computed callback URLs for plugins with routes
-		for _, route := range gwCfg.Routes {
-			allOpts["callback_url"] = gwCfg.PublicURL + route.Path
-		}
-		if err := CopyCustomMiddleware(g.projectDir, buildDir, gwCfg.Middlewares, allOpts); err != nil {
-			return nil, fmt.Errorf("copy middleware: %w", err)
-		}
-	}
-	if len(gwCfg.AuthHeaders) > 0 {
-		if err := GenerateAuthHeaderMiddleware(buildDir, gwCfg.AuthHeaders); err != nil {
-			return nil, fmt.Errorf("generate auth-header middleware: %w", err)
-		}
-	}
-	if len(gwCfg.Routes) > 0 {
-		allOpts := collectAllOptions(cfg)
-		if err := CopyRouteHandlers(g.projectDir, buildDir, gwCfg.Routes, allOpts, gwCfg.PublicURL); err != nil {
-			return nil, fmt.Errorf("copy route handlers: %w", err)
-		}
-	}
 
-	return &AgentResult{Config: cfg, Contribs: merged, BuildDir: buildDir}, nil
+	return &AgentResult{Config: cfg, Contribs: merged, BuildDir: buildDir, Resolved: resolved}, nil
 }
 
 // resolveAgentPaths transforms relative paths in plugin contributions from agentDir-relative
@@ -386,77 +318,6 @@ func rewriteVolumePath(vol, relAgent string) string {
 		src = "./" + filepath.Join(relAgent, src[2:])
 	}
 	return src + rest
-}
-
-func collectAllOptions(cfg *config.Config) map[string]any {
-	opts := make(map[string]any)
-	for _, inst := range cfg.Installations {
-		maps.Copy(opts, inst.Options)
-	}
-	return opts
-}
-
-func (g *Generator) extractGatewaySource(buildDir string) error {
-	gatewayDest := filepath.Join(buildDir, "gateway-src")
-
-	if g.coreDir != "" {
-		gatewaySrc := filepath.Join(g.coreDir, "gateway")
-		if _, err := os.Stat(gatewaySrc); err != nil {
-			return nil
-		}
-		if err := os.MkdirAll(filepath.Join(gatewayDest, "core"), 0755); err != nil {
-			return err
-		}
-		if err := copyDir(gatewaySrc, filepath.Join(gatewayDest, "core", "gateway")); err != nil {
-			return err
-		}
-		sdkSrc := filepath.Join(g.coreDir, "sdk")
-		if _, err := os.Stat(sdkSrc); err == nil {
-			if err := copyDir(sdkSrc, filepath.Join(gatewayDest, "core", "sdk")); err != nil {
-				return err
-			}
-		}
-		for _, name := range []string{"go.mod", "go.sum"} {
-			var data []byte
-			var found bool
-			if d, err := os.ReadFile(filepath.Join(g.coreDir, name)); err == nil {
-				data, found = d, true
-			}
-			if !found {
-				if d, err := os.ReadFile(filepath.Join(g.projectDir, name)); err == nil {
-					data, found = d, true
-				}
-			}
-			if found {
-				if err := os.WriteFile(filepath.Join(gatewayDest, name), data, 0644); err != nil {
-					return fmt.Errorf("write %s: %w", name, err)
-				}
-			}
-		}
-		return g.writeGatewayBuildFiles(gatewayDest)
-	}
-
-	if g.gatewayFS == nil {
-		return nil
-	}
-	if err := extractFS(g.gatewayFS, ".", gatewayDest); err != nil {
-		return err
-	}
-	return g.writeGatewayBuildFiles(gatewayDest)
-}
-
-func (g *Generator) writeGatewayBuildFiles(gatewayDir string) error {
-	if err := os.MkdirAll(gatewayDir, 0755); err != nil {
-		return err
-	}
-	dockerfile, err := g.templates.LoadRaw("gateway.Dockerfile.tmpl")
-	if err != nil {
-		return fmt.Errorf("load gateway Dockerfile template: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(gatewayDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
-		return fmt.Errorf("write gateway Dockerfile: %w", err)
-	}
-	return nil
 }
 
 func extractFS(srcFS fs.FS, root, dest string) error {

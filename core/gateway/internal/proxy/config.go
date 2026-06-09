@@ -15,6 +15,14 @@ type Config struct {
 	MITMDomains  []string      `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
 	HTTPServices []HTTPService `yaml:"http_services"` // plain HTTP services to proxy
 	PortForwards []PortForward `yaml:"port_forwards"` // TCP port forwards to agent container
+	AuthHeaders  []AuthHeader  `yaml:"auth_headers"`  // header injection rules from config
+}
+
+// AuthHeader defines a header to inject on requests to a specific domain.
+type AuthHeader struct {
+	Domain string `yaml:"domain"` // target domain (e.g., "api.github.com")
+	Header string `yaml:"header"` // header name (e.g., "Authorization")
+	Value  string `yaml:"value"`  // header value (e.g., "Bearer token123")
 }
 
 // HTTPService describes a plain HTTP service the gateway should proxy.
