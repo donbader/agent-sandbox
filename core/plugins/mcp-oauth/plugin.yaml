@@ -23,3 +23,5 @@ contributes:
     routes:
       - path: "/callback"
         handler: "./handlers/callback.go"
+      - path: "/login"
+        handler: "./handlers/login.go"
