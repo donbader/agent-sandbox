@@ -28,7 +28,8 @@ func TestHostAPI_Crypto_HMAC(t *testing.T) {
 
 	val, err := vm.RunString(`gw.crypto.hmac("secret", "message")`)
 	require.NoError(t, err)
-	result := val.Export().(string)
+	result, ok := val.Export().(string)
+	require.True(t, ok)
 	assert.Len(t, result, 64) // hex-encoded SHA256 HMAC = 64 chars
 }
 
