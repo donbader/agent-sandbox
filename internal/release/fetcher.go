@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -202,19 +201,14 @@ func saveLatestResolution(version string) error {
 }
 
 func cacheBase() string {
-	if dir := os.Getenv("AGENT_SANDBOX_CACHE"); dir != "" {
-		return filepath.Join(dir, "core")
+	if override := os.Getenv("AGENT_SANDBOX_CACHE"); override != "" {
+		return filepath.Join(override, "core")
 	}
-	home, _ := os.UserHomeDir()
-	switch runtime.GOOS {
-	case "darwin":
-		return filepath.Join(home, "Library", "Caches", "agent-sandbox", "core")
-	default:
-		if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
-			return filepath.Join(xdg, "agent-sandbox", "core")
-		}
-		return filepath.Join(home, ".cache", "agent-sandbox", "core")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.TempDir()
 	}
+	return filepath.Join(home, ".agent-sandbox", "core")
 }
 
 // cleanOldVersions removes all cached version directories except the current one.
