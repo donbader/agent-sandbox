@@ -125,7 +125,7 @@ func (g *Generator) copyPluginSources(gatewayDir string, resolved map[string]*re
 			continue // plugin has no src/ directory (e.g. home-override)
 		}
 
-		destDir := filepath.Join(gatewayDir, "plugins", rp.def.Name)
+		destDir := filepath.Join(gatewayDir, "plugins", rp.def.Name, "src")
 		if err := copyDir(srcDir, destDir); err != nil {
 			return fmt.Errorf("copy plugin %q sources: %w", rp.def.Name, err)
 		}
