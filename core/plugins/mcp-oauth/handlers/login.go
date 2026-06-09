@@ -90,7 +90,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error":     "provider name required",
 			"available": names,
 			"usage":     "GET {{ .path }}/<provider_name>",
@@ -106,7 +106,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error":     fmt.Sprintf("unknown provider: %s", providerName),
 			"available": names,
 		})
@@ -118,7 +118,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		slog.Error("oauth-login: registration failed", "provider", providerName, "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": fmt.Sprintf("client registration failed: %v", err),
 		})
 		return
@@ -129,7 +129,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil || parsedAuth.Scheme != "https" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": fmt.Sprintf("authorize endpoint must use https, got %q", provider.AuthorizeEndpoint),
 		})
 		return
@@ -177,7 +177,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 	authorizeURL := provider.AuthorizeEndpoint + "?" + params.Encode()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"authorize_url": authorizeURL,
 		"provider":      providerName,
 		"instructions":  "Open the authorize_url in your browser to complete login.",

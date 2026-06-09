@@ -118,7 +118,7 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		}
 		gateway.RegisterSecret(token.AccessToken)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!DOCTYPE html><html><body>
+		_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body>
 <h1>Authorization successful</h1>
 <p>Provider <strong>%s</strong> connected. You can close this tab.</p>
 </body></html>`, html.EscapeString(flow.Provider))
@@ -163,7 +163,7 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	gateway.RegisterSecret(token.AccessToken)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html><html><body>
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body>
 <h1>Authorization successful</h1>
 <p>Provider <strong>%s</strong> connected. You can close this tab.</p>
 </body></html>`, html.EscapeString(providerName))
