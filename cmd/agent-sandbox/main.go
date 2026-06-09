@@ -35,6 +35,7 @@ func main() {
 	root.AddCommand(auditCmd(&dir))
 	root.AddCommand(initCmd())
 	root.AddCommand(upgradeCmd())
+	root.AddCommand(gatewayURLCmd(&dir))
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -102,6 +103,60 @@ func composeCmd(dir *string) *cobra.Command {
 		},
 	}
 
+	return cmd
+}
+
+func gatewayURLCmd(dir *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "gateway-url",
+		Short: "Print the gateway's public URL (resolves dynamic port)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			composePath := filepath.Join(*dir, ".build", "docker-compose.yml")
+			if _, err := os.Stat(composePath); os.IsNotExist(err) {
+				return fmt.Errorf("%s not found — run 'agent-sandbox generate' first", composePath)
+			}
+
+			absDir, err := filepath.Abs(*dir)
+			if err != nil {
+				return fmt.Errorf("resolve project dir: %w", err)
+			}
+			projectName := filepath.Base(absDir)
+
+			// Load config to get the agent name (gateway service = <name>-gateway)
+			cfg, err := config.Load(filepath.Join(*dir, "agent.yaml"))
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			gatewayService := cfg.Name + "-gateway"
+
+			runtime := runtimeBinary(*dir)
+			c := exec.Command(runtime, "compose",
+				"-f", composePath,
+				"--project-name", projectName,
+				"port", gatewayService, "8080",
+			)
+			out, err := c.Output()
+			if err != nil {
+				return fmt.Errorf("gateway not running or port not exposed — is 'agent-sandbox compose up' running?")
+			}
+
+			hostPort := strings.TrimSpace(string(out))
+			if hostPort == "" {
+				return fmt.Errorf("could not resolve gateway port")
+			}
+
+			// docker compose port returns "0.0.0.0:PORT" or ":::PORT"
+			// Normalize to localhost
+			hostPort = strings.Replace(hostPort, "0.0.0.0:", "localhost:", 1)
+			if strings.HasPrefix(hostPort, ":::") {
+				hostPort = "localhost:" + strings.TrimPrefix(hostPort, ":::")
+			}
+
+			fmt.Printf("http://%s\n", hostPort)
+			return nil
+		},
+	}
 	return cmd
 }
 
