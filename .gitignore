@@ -25,3 +25,5 @@ channel-manager/node_modules/
 node_modules/
 .worktrees/
 .worktrees/
+agent-sandbox-core
+core/gateway/bin/
