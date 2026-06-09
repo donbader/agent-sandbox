@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SHIM_VERSION="1.0.0"
+SHIM_VERSION="1.1.0"
 GITHUB_REPO="donbader/agent-sandbox"
 SANDBOX_HOME="${AGENT_SANDBOX_HOME:-$HOME/.agent-sandbox}"
 CACHE_DIR="$SANDBOX_HOME/core"
