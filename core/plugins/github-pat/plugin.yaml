@@ -14,8 +14,7 @@ contributes:
   gateway:
     services:
       - url: "https://api.github.com"
-        middlewares:
-          - custom: "./middlewares/github-auth.go"
       - url: "https://github.com"
-        middlewares:
-          - custom: "./middlewares/github-auth.go"
+    middlewares:
+      - script: "./src/github-auth.ts"
+        domains: ["api.github.com", "github.com"]
