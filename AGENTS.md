@@ -16,7 +16,11 @@ agent-sandbox — an opinionated agent sandbox orchestrator. Deploys AI coding a
 ## Structure
 
 ```
-cmd/agent-sandbox/      ← CLI entrypoint (generic template engine)
+scripts/
+  shim.sh                 ← POSIX shell shim (installed as `agent-sandbox`)
+  install.sh              ← Installer (places shim at ~/.agent-sandbox/bin/)
+cmd/agent-sandbox-core/   ← Core CLI binary (all real logic: generate, compose, audit, init, gateway-url)
+cmd/agent-sandbox/        ← Legacy CLI entrypoint (being retired after v1.27.0)
 internal/
   config/               ← agent.yaml parsing
   dotenv/               ← .env file loading
@@ -41,7 +45,7 @@ docs/                   ← Design documents, guides, reference, ADRs
 ```bash
 # Activate dev environment (provides go, golangci-lint, etc.)
 # Use `flox activate -- <command>` to run commands in the dev environment
-flox activate -- go build ./cmd/agent-sandbox/
+flox activate -- go build ./cmd/agent-sandbox-core/
 
 # Build
 flox activate -- go build ./...
@@ -52,9 +56,12 @@ flox activate -- go test ./...
 # Lint
 flox activate -- golangci-lint run ./...
 
-# End-to-end
+# End-to-end (using shim)
 agent-sandbox generate -C <dir>        # reads agent.yaml → writes .build/
 agent-sandbox compose up --build       # docker compose passthrough
+
+# Local development (bypass shim, use local core binary)
+go run ./cmd/agent-sandbox-core/ --core=./core generate -C <dir>
 ```
 
 ## Conventions

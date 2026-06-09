@@ -1,6 +1,37 @@
 # CLI Reference
 
-## Commands
+## Architecture
+
+The `agent-sandbox` CLI is split into two layers:
+
+1. **Shim** (`~/.agent-sandbox/bin/agent-sandbox`) — a POSIX shell script that resolves the correct core version and execs into it
+2. **Core** (`agent-sandbox-core`) — the Go binary that does the real work
+
+From the user's perspective, you just run `agent-sandbox <command>`. The shim is transparent.
+
+## Version Resolution
+
+When you run any command, the shim:
+
+1. Reads `core_version` from `agent.yaml` in the current (or `-C`) directory
+2. If `latest`, queries GitHub API for the newest `core-v*` release (cached 1h)
+3. Downloads the core binary if not already cached at `~/.agent-sandbox/core/<version>/`
+4. Execs into `agent-sandbox-core` with all original arguments
+
+For commands that don't need a project (`version`, `upgrade`), the shim handles them directly.
+
+## Shim Commands
+
+These are handled by the shell script itself — no core binary needed:
+
+| Command | Description |
+|---------|-------------|
+| `agent-sandbox upgrade` | Update the shim to the latest version |
+| `agent-sandbox version` | Print shim version and resolved core version |
+
+## Core Commands
+
+These are handled by `agent-sandbox-core`:
 
 | Command | Description |
 |---------|-------------|
@@ -8,7 +39,7 @@
 | `agent-sandbox generate` | Read config, generate `.build/` artifacts |
 | `agent-sandbox compose ...` | Docker compose passthrough |
 | `agent-sandbox audit` | Verify running sandbox meets security contract |
-| `agent-sandbox upgrade` | Self-update to latest GitHub release |
+| `agent-sandbox gateway-url` | Print the gateway's public URL |
 
 ## Global Flags
 
@@ -21,7 +52,7 @@
 | Variable | Description |
 |----------|-------------|
 | `AGENT_SANDBOX_RUNTIME` | Override container runtime binary (`docker` or `podman`). Takes priority over `runtime_engine` in config. |
-| `AGENT_SANDBOX_CACHE` | Override core cache directory (default: `~/.cache/agent-sandbox/` or `~/Library/Caches/agent-sandbox/`) |
+| `AGENT_SANDBOX_CACHE` | Override core cache directory (default: `~/.agent-sandbox/core/`) |
 
 ## generate
 
@@ -81,10 +112,20 @@ Asks for agent name and runtime. Auto-detects `gh auth token` if available.
 
 ## upgrade
 
-Self-updates to the latest GitHub release:
+Updates the shim script to the latest version:
 
 ```bash
 agent-sandbox upgrade
+```
+
+This does not change the core version used by your projects — that's controlled by `core_version` in each project's `agent.yaml`.
+
+## gateway-url
+
+Prints the gateway's public URL (useful for webhook configuration):
+
+```bash
+agent-sandbox gateway-url
 ```
 
 ## Typical Workflow

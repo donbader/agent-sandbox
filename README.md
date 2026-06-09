@@ -17,7 +17,10 @@ Deploy AI coding agents in Docker containers with transparent egress proxy, cred
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/donbader/agent-sandbox/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/donbader/agent-sandbox/main/scripts/install.sh | sh
+
+# Add to PATH (add to your shell profile)
+export PATH="$HOME/.agent-sandbox/bin:$PATH"
 
 # Scaffold a project
 mkdir my-agent && cd my-agent
@@ -63,7 +66,9 @@ agent-sandbox init              # interactive project scaffold
 agent-sandbox generate          # agent.yaml → .build/ (Dockerfile, docker-compose.yml, gateway)
 agent-sandbox compose ...       # docker compose passthrough (auto-injects -f and --env-file)
 agent-sandbox audit             # verify running sandbox meets security contract
-agent-sandbox upgrade           # self-update to latest release
+agent-sandbox gateway-url       # print gateway's public URL
+agent-sandbox upgrade           # update the shim to latest version
+agent-sandbox version           # print shim + core versions
 ```
 
 Use `-C` to target a different project directory without switching to it:
@@ -79,7 +84,12 @@ agent-sandbox -C examples/multi-agent compose up --build
 ┌────────────────────────────────────────────────────────────────┐
 │ Host                                                           │
 │                                                                │
-│  agent-sandbox CLI                                             │
+│  agent-sandbox (shim)                                          │
+│  - Resolves core_version from agent.yaml                       │
+│  - Downloads/caches core binary                                │
+│  - Execs into agent-sandbox-core                               │
+│                                                                │
+│  agent-sandbox-core                                            │
 │  - Reads agent.yaml / fleet.yaml                               │
 │  - Resolves plugins (@builtin/ and local)                      │
 │  - Generates .build/ (Dockerfile, compose, gateway)            │
@@ -123,6 +133,7 @@ agent-sandbox -C examples/multi-agent compose up --build
 | Doc                                                        | Description                            |
 | ---------------------------------------------------------- | -------------------------------------- |
 | [CLI](docs/reference/cli.md)                               | Commands, flags, environment variables |
+| [Migration](docs/reference/migration.md)                   | Upgrading from legacy CLI              |
 | [Audit](docs/reference/audit.md)                           | Security contract verification checks  |
 | [ACP Protocol](docs/reference/channel-manager-protocol.md) | Agent Client Protocol specification    |
 | [Docker API Proxy](docs/reference/docker-api-proxy.md)     | Docker API validation design           |
@@ -130,14 +141,15 @@ agent-sandbox -C examples/multi-agent compose up --build
 
 **Internals (Contributors):**
 
-| Doc                                                | Description                                            |
-| -------------------------------------------------- | ------------------------------------------------------ |
-| [Build Pipeline](docs/internals/build-pipeline.md) | Generate flow, Dockerfile templates, core fetching     |
-| [Gateway](docs/internals/gateway.md)               | Proxy architecture, MITM pipeline, DNS, middleware SDK |
-| [Plugin System](docs/internals/plugin-system.md)   | Resolution, rendering, compilation, fleet merging      |
-| [Logging](docs/internals/logging.md)               | Structured logging standards (Go + TypeScript)         |
-| [Decisions](docs/internals/decisions.md)           | Key decisions, comparison with agent-fleet             |
-| [Roadmap](docs/internals/roadmap.md)               | Phased implementation plan                             |
+| Doc                                                        | Description                                            |
+| ---------------------------------------------------------- | ------------------------------------------------------ |
+| [CLI/Core Split](docs/internals/cli-core-split.md)         | Shim + core architecture, version resolution, layout   |
+| [Build Pipeline](docs/internals/build-pipeline.md)         | Generate flow, Dockerfile templates, core fetching     |
+| [Gateway](docs/internals/gateway.md)                       | Proxy architecture, MITM pipeline, DNS, middleware SDK |
+| [Plugin System](docs/internals/plugin-system.md)           | Resolution, rendering, compilation, fleet merging      |
+| [Logging](docs/internals/logging.md)                       | Structured logging standards (Go + TypeScript)         |
+| [Decisions](docs/internals/decisions.md)                   | Key decisions, comparison with agent-fleet             |
+| [Roadmap](docs/internals/roadmap.md)                       | Phased implementation plan                             |
 
 See [examples/](examples/) for working setups.
 

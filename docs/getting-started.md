@@ -1,15 +1,21 @@
 # Getting Started
 
-## Install
+## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/donbader/agent-sandbox/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/donbader/agent-sandbox/main/scripts/install.sh | sh
+```
+
+Add `~/.agent-sandbox/bin` to your PATH:
+
+```bash
+export PATH="$HOME/.agent-sandbox/bin:$PATH"
 ```
 
 Verify:
 
 ```bash
-agent-sandbox --version
+agent-sandbox version
 ```
 
 ## Create a Project
@@ -127,3 +133,4 @@ installations:
 - [Plugins](plugins.md) — all available plugins
 - [Fleet Mode](guides/fleet-mode.md) — run multiple agents
 - [Security](security.md) — how isolation works
+- [Migration Guide](reference/migration.md) — upgrading from older CLI versions

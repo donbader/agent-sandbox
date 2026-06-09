@@ -196,7 +196,14 @@ Each agent has its own gateway instance (same binary, different config). Agent t
 agent-sandbox/
   go.work
 
-  cmd/agent-sandbox/        ← CLI binary (generic template engine)
+  scripts/
+    shim.sh                 ← POSIX shell shim (installed as `agent-sandbox`)
+    install.sh              ← Installer (places shim at ~/.agent-sandbox/bin/)
+
+  cmd/agent-sandbox-core/   ← Core CLI binary (all real logic)
+    main.go
+
+  cmd/agent-sandbox/        ← Legacy CLI entrypoint (being retired after v1.27.0)
     main.go
 
   core/
@@ -220,3 +227,31 @@ agent-sandbox/
       github-pat/plugin.yaml
       mcp-oauth/plugin.yaml
 ```
+
+## Release Model
+
+### Core Release (primary)
+
+Tagged `core-v*`. Produces 4 platform-specific tarballs:
+
+| Platform | Tarball |
+|----------|---------|
+| macOS ARM64 | `agent-sandbox-core-v{VER}-darwin-arm64.tar.gz` |
+| macOS AMD64 | `agent-sandbox-core-v{VER}-darwin-amd64.tar.gz` |
+| Linux AMD64 | `agent-sandbox-core-v{VER}-linux-amd64.tar.gz` |
+| Linux ARM64 | `agent-sandbox-core-v{VER}-linux-arm64.tar.gz` |
+
+Each tarball contains:
+- `agent-sandbox-core` — the host binary
+- `gateway/` — gateway source for Docker build
+- `presets/` — runtime preset definitions
+- `plugins/` — built-in plugin definitions
+- `templates/` — generation templates
+
+### Shim Release (rare)
+
+Tagged on shim version change. The release artifact is the raw `shim.sh` script. Only changes when the shim protocol itself changes (new env vars, new resolution logic).
+
+### CLI Release (legacy)
+
+GoReleaser-based. Being retired after v1.27.0. Existing users should migrate to the shim via `agent-sandbox upgrade`.

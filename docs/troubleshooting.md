@@ -87,6 +87,56 @@ Without a channel plugin (e.g., telegram), the default CMD is `sleep infinity`. 
 1. Your runtime's `cmd` field in runtime.yaml
 2. Whether you have a channel configured but the channel manager is crashing (check logs)
 
+## Shim Issues
+
+### "command not found" after install
+
+Your PATH doesn't include `~/.agent-sandbox/bin`.
+
+**Fix:**
+```bash
+export PATH="$HOME/.agent-sandbox/bin:$PATH"
+```
+
+Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to persist it. Or re-run the install script which will suggest the correct line.
+
+### "Failed to download core"
+
+The shim can't reach GitHub to download the core binary.
+
+**Checks:**
+- Verify network connectivity: `curl -I https://github.com`
+- Check [GitHub Status](https://www.githubstatus.com/)
+- If behind a corporate proxy, ensure `HTTPS_PROXY` is set
+
+### "No core release found"
+
+GitHub API returned no matching release for the requested version.
+
+**Checks:**
+- GitHub API rate limit may be exhausted — wait or set `GITHUB_TOKEN` in your environment
+- Try again in a few minutes
+- Verify the version exists: `gh release list -R donbader/agent-sandbox | grep core-v`
+
+### "Invalid core_version"
+
+The `core_version` field in `agent.yaml` isn't a valid value.
+
+**Fix:** Set `core_version` to either `latest` or a valid semver tag (e.g. `v0.13.0`):
+
+```yaml
+core_version: v0.13.0
+```
+
+### Cache corruption
+
+If a core download was interrupted or files are corrupted:
+
+```bash
+rm -rf ~/.agent-sandbox/core/<version>
+agent-sandbox generate   # re-downloads automatically
+```
+
 ## Getting Help
 
 If your issue isn't listed here:

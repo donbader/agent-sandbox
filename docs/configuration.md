@@ -29,6 +29,18 @@ Running `agent-sandbox generate` produces `.build/schema.json`. Add this comment
 
 You need to run `agent-sandbox generate` at least once before the schema file exists.
 
+## core_version
+
+Required. Specifies which core release to use for generation and runtime.
+
+```yaml
+core_version: v0.13.0   # pin to specific version (recommended for teams)
+core_version: latest     # always use newest (re-resolves on each run)
+```
+
+The shim downloads and caches the specified core version automatically on first use.
+Pin to a specific version for reproducible builds across team members.
+
 ## Full Schema
 
 ```yaml
