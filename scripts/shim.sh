@@ -52,6 +52,17 @@ ensure_cached() {
 
 platform_detect
 
+# Parse -C / --dir flag to find project directory (without modifying $@)
+PROJECT_DIR="."
+_prev=""
+for _arg in "$@"; do
+  if [ "$_prev" = "-C" ] || [ "$_prev" = "--dir" ]; then
+    PROJECT_DIR="$_arg"
+    break
+  fi
+  _prev="$_arg"
+done
+
 case "${1:-}" in
   upgrade)
     curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPO/main/scripts/install.sh" | sh
@@ -59,8 +70,8 @@ case "${1:-}" in
     ;;
   version)
     echo "shim: $SHIM_VERSION"
-    if [ -f agent.yaml ]; then
-      _cv=$(grep '^core_version:' agent.yaml | awk '{print $2}' | tr -d '"'"'")
+    if [ -f "$PROJECT_DIR/agent.yaml" ]; then
+      _cv=$(grep '^core_version:' "$PROJECT_DIR/agent.yaml" | awk '{print $2}' | tr -d '"'"'")
       [ -n "$_cv" ] && echo "core: $_cv"
     fi
     exit 0
@@ -68,8 +79,8 @@ case "${1:-}" in
 esac
 
 # Resolve core version
-if [ -f agent.yaml ]; then
-  VER=$(grep '^core_version:' agent.yaml | awk '{print $2}' | tr -d '"'"'")
+if [ -f "$PROJECT_DIR/agent.yaml" ]; then
+  VER=$(grep '^core_version:' "$PROJECT_DIR/agent.yaml" | awk '{print $2}' | tr -d '"'"'")
   if [ -z "$VER" ]; then
     VER=$(resolve_latest)
     [ -n "$VER" ] || die "Could not resolve latest core version (GitHub API rate limit?)"
@@ -84,8 +95,7 @@ else
     VER=$(resolve_latest)
     [ -n "$VER" ] || die "Could not resolve latest core version (GitHub API rate limit?)"
   else
-    echo "Error: No agent.yaml found. Run 'agent-sandbox init' first." >&2
-    exit 1
+    die "No agent.yaml found in $PROJECT_DIR. Run 'agent-sandbox init' first."
   fi
 fi
 
