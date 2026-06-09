@@ -35,7 +35,19 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 	_ = cryptoObj.Set("sha256", func(call goja.FunctionCall) goja.Value {
 		data := call.Argument(0).String()
 		h := sha256.Sum256([]byte(data))
-		return rt.ToValue(hex.EncodeToString(h[:]))
+		// Optional second argument: encoding ("hex" default, "base64url", "base64")
+		encoding := "hex"
+		if len(call.Arguments) > 1 {
+			encoding = call.Argument(1).String()
+		}
+		switch encoding {
+		case "base64url":
+			return rt.ToValue(base64.RawURLEncoding.EncodeToString(h[:]))
+		case "base64":
+			return rt.ToValue(base64.StdEncoding.EncodeToString(h[:]))
+		default:
+			return rt.ToValue(hex.EncodeToString(h[:]))
+		}
 	})
 	_ = cryptoObj.Set("hmac", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()

@@ -9,6 +9,10 @@ options:
     required: false
     default: "/data/oauth-tokens"
     description: "Directory for OAuth token files"
+  callback_url:
+    type: string
+    required: false
+    description: "Public callback URL (derived from request if not set)"
 
 contributes:
   gateway:
@@ -19,9 +23,9 @@ contributes:
     volumes:
       - "oauth-tokens:{{ .plugin.options.token_dir }}"
     middlewares:
-      - custom: "./middlewares/oauth.go"
+      - script: "./src/oauth.ts"
     routes:
       - path: "/callback"
-        handler: "./handlers/callback.go"
+        handler: "./src/callback.ts"
       - path: "/login"
-        handler: "./handlers/login.go"
+        handler: "./src/login.ts"
