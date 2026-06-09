@@ -92,11 +92,29 @@ jobs:
       - name: Build CLI
         run: go build -o agent-sandbox ./cmd/agent-sandbox/
 
+      - name: Build core binary
+        run: go build -o agent-sandbox-core ./cmd/agent-sandbox-core/
+
+      - name: Lint shell scripts
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck scripts/shim.sh scripts/install.sh
+          else
+            echo "shellcheck not available, skipping"
+          fi
+
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
           name: agent-sandbox-linux
           path: agent-sandbox
+          retention-days: 1
+
+      - name: Upload core binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-sandbox-core-linux
+          path: agent-sandbox-core
           retention-days: 1
 
   examples:
@@ -125,11 +143,19 @@ jobs:
         with:
           name: agent-sandbox-linux
 
-      - name: Make CLI executable
-        run: chmod +x ./agent-sandbox
+      - name: Download core binary
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-sandbox-core-linux
+
+      - name: Make binaries executable
+        run: chmod +x ./agent-sandbox ./agent-sandbox-core
 
       - name: Generate build artifacts
         run: ./agent-sandbox generate --core=./core -C examples/${{ matrix.example }}
+
+      - name: Generate build artifacts (core binary)
+        run: ./agent-sandbox-core generate --core=./core -C examples/${{ matrix.example }}
 
       - name: Start containers (smoke test)
         env:
