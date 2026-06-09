@@ -113,8 +113,22 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine callback URL: use configured value if set, otherwise derive from request
+	callbackURL := loginCallbackURL
+	if callbackURL == "" {
+		scheme := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		host := r.Host
+		if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+			host = fwd
+		}
+		callbackURL = scheme + "://" + host + "/plugins/mcp-oauth/callback"
+	}
+
 	// Ensure we have client credentials (DCR if needed)
-	if err := ensureClientRegistration(providerName, provider); err != nil {
+	if err := ensureClientRegistration(providerName, provider, callbackURL); err != nil {
 		slog.Error("oauth-login: registration failed", "provider", providerName, "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -154,17 +168,17 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 	StorePendingFlow(state, &PendingOAuthFlow{
 		Provider:     providerName,
 		CodeVerifier: codeVerifier,
-		RedirectURI:  loginCallbackURL,
+		RedirectURI:  callbackURL,
 		CreatedAt:    time.Now(),
 	})
 
 	// Build authorize URL
 	params := url.Values{
 		"client_id":             {provider.ClientID},
-		"response_type":        {"code"},
-		"state":                {state},
-		"redirect_uri":         {loginCallbackURL},
-		"code_challenge":       {codeChallenge},
+		"response_type":         {"code"},
+		"state":                 {state},
+		"redirect_uri":          {callbackURL},
+		"code_challenge":        {codeChallenge},
 		"code_challenge_method": {"S256"},
 	}
 	if provider.MCPURL != "" {
@@ -185,7 +199,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // ensureClientRegistration checks for cached credentials or performs DCR.
-func ensureClientRegistration(name string, provider *loginProviderConfig) error {
+func ensureClientRegistration(name string, provider *loginProviderConfig, callbackURL string) error {
 	if provider.ClientID != "" {
 		return nil
 	}
@@ -229,7 +243,7 @@ func ensureClientRegistration(name string, provider *loginProviderConfig) error 
 		return fmt.Errorf("metadata discovery: %w", err)
 	}
 
-	reg, err := gateway.RegisterOAuthClient(ctx, meta.RegistrationEndpoint, []string{loginCallbackURL}, "agent-sandbox:"+name)
+	reg, err := gateway.RegisterOAuthClient(ctx, meta.RegistrationEndpoint, []string{callbackURL}, "agent-sandbox:"+name)
 	if err != nil {
 		return fmt.Errorf("dynamic registration: %w", err)
 	}
