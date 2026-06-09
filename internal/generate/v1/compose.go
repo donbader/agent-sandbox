@@ -110,9 +110,11 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"retries":  3,
 		},
 	}
-	// Expose gateway HTTP port when plugin routes are registered (e.g. OAuth callbacks)
+	// Expose gateway HTTP port when plugin routes are registered (e.g. OAuth callbacks).
+	// Use "8080" (no host port) so Docker assigns a random available host port,
+	// avoiding conflicts when multiple agent-sandbox instances run on the same host.
 	if contribs != nil && len(contribs.Gateway.Routes) > 0 {
-		gatewaySvc["ports"] = []string{"8080:8080"}
+		gatewaySvc["ports"] = []string{"8080"}
 	}
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
