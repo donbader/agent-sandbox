@@ -37,6 +37,10 @@ func generateCmd(dir *string) *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Using local core: %s\n", abs)
 			}
 
+			if coreDir == "." && coreFlag == "" {
+				fmt.Fprintf(os.Stderr, "Warning: could not detect core root from binary location. Use --core to specify.\n")
+			}
+
 			// Load .env file so secrets are available for auth-header baking.
 			dotenv.Load(filepath.Join(projectDir, ".env"))
 

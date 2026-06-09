@@ -236,7 +236,7 @@ func initSingleAgent(reader *bufio.Reader) error {
 	var b strings.Builder
 	b.WriteString("# yaml-language-server: $schema=.build/schema.json\n")
 	_, _ = fmt.Fprintf(&b, "name: %s\n", name)
-	_, _ = fmt.Fprintf(&b, "core_version: %s\n", version)
+	_, _ = fmt.Fprintf(&b, "core_version: %s\n", coreVersionForInit())
 	b.WriteString("runtime:\n")
 	_, _ = fmt.Fprintf(&b, "  image: \"@builtin/%s\"\n", rt)
 	b.WriteString("  entrypoint: [\"sleep\", \"infinity\"]\n")
@@ -286,7 +286,7 @@ func initFleet(reader *bufio.Reader, count int) error {
 		var agent strings.Builder
 		agent.WriteString("# yaml-language-server: $schema=../.build/schema.json\n")
 		_, _ = fmt.Fprintf(&agent, "name: %s\n", agentName)
-		_, _ = fmt.Fprintf(&agent, "core_version: %s\n", version)
+		_, _ = fmt.Fprintf(&agent, "core_version: %s\n", coreVersionForInit())
 		agent.WriteString("runtime:\n")
 		_, _ = fmt.Fprintf(&agent, "  image: \"@builtin/%s\"\n", rt)
 		agent.WriteString("installations: []\n")
@@ -335,6 +335,13 @@ func prompt(reader *bufio.Reader, message string) string {
 	fmt.Print(message)
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(line)
+}
+
+func coreVersionForInit() string {
+	if version == "dev" {
+		return "latest"
+	}
+	return version
 }
 
 func mustCwd() string {
