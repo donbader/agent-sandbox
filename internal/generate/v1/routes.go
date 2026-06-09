@@ -112,6 +112,65 @@ func CopyRouteHandlers(projectDir, outDir string, routes []RouteRef, opts map[st
 		}
 	}
 
+	// Copy sibling .go files from handler directories that weren't explicitly listed.
+	// These are shared helpers (e.g., pkce.go) that handlers depend on.
+	copiedFiles := make(map[string]bool)
+	for _, route := range routes {
+		var srcPath string
+		if filepath.IsAbs(route.Handler) {
+			srcPath = route.Handler
+		} else {
+			srcPath = filepath.Join(projectDir, route.Handler)
+		}
+		copiedFiles[filepath.Base(srcPath)] = true
+	}
+
+	// Collect unique source directories from all route handlers
+	seenDirs := make(map[string]bool)
+	for _, route := range routes {
+		var srcPath string
+		if filepath.IsAbs(route.Handler) {
+			srcPath = route.Handler
+		} else {
+			srcPath = filepath.Join(projectDir, route.Handler)
+		}
+		seenDirs[filepath.Dir(srcPath)] = true
+	}
+
+	for dir := range seenDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+				continue
+			}
+			if copiedFiles[entry.Name()] {
+				continue
+			}
+			siblingPath := filepath.Join(dir, entry.Name())
+			content, err := os.ReadFile(siblingPath)
+			if err != nil {
+				continue
+			}
+			// Render in case sibling uses templates (fast path skips if no {{ }})
+			rendered, err := renderRouteHandler(siblingPath, string(content), map[string]any{
+				"options":    resolved,
+				"path":       "",
+				"public_url": publicURL,
+			})
+			if err != nil {
+				return fmt.Errorf("render sibling %s: %w", entry.Name(), err)
+			}
+			destFile := filepath.Join(destDir, entry.Name())
+			if err := os.WriteFile(destFile, []byte(rendered), 0644); err != nil {
+				return fmt.Errorf("write sibling %s: %w", entry.Name(), err)
+			}
+			copiedFiles[entry.Name()] = true
+		}
+	}
+
 	return nil
 }
 

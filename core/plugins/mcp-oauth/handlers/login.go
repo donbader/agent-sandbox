@@ -115,7 +115,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Determine callback URL: use configured value if set, otherwise derive from request
 	callbackURL := loginCallbackURL
-	if callbackURL == "" {
+	if callbackURL == "" || callbackURL == "<no value>" {
 		scheme := "http"
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 			scheme = "https"
@@ -124,6 +124,9 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
 			host = fwd
 		}
+		// Normalize localhost to 127.0.0.1 — some OAuth providers (e.g., Notion)
+		// reject "localhost" in redirect_uri but accept "127.0.0.1" for loopback.
+		host = strings.Replace(host, "localhost", "127.0.0.1", 1)
 		callbackURL = scheme + "://" + host + "/plugins/mcp-oauth/callback"
 	}
 
