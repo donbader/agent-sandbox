@@ -1,6 +1,7 @@
 package jsruntime
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -44,6 +46,9 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 	})
 	_ = cryptoObj.Set("randomBytes", func(call goja.FunctionCall) goja.Value {
 		n := int(call.Argument(0).ToInteger())
+		if n <= 0 || n > 1024*1024 { // Cap at 1MB
+			panic(rt.NewGoError(fmt.Errorf("randomBytes: size must be 1-%d, got %d", 1024*1024, n)))
+		}
 		b := make([]byte, n)
 		_, _ = rand.Read(b)
 		return rt.ToValue(b)
@@ -136,7 +141,10 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 
-		client := &http.Client{Timeout: 30 * time.Second}
+		client := &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: ssrfSafeTransport(cfg.AllowPrivateIPs),
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			panic(rt.NewGoError(err))
@@ -198,6 +206,32 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 	_ = gwObj.Set("secrets", secretsObj)
 	_ = gwObj.Set("log", logObj)
 	_ = vm.Set("gw", gwObj)
+}
+
+// ssrfSafeTransport returns an http.Transport that blocks requests to private IPs.
+func ssrfSafeTransport(allowPrivate bool) *http.Transport {
+	if allowPrivate {
+		return &http.Transport{}
+	}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid address %q: %w", addr, err)
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("DNS lookup failed for %q: %w", host, err)
+			}
+			for _, ip := range ips {
+				if ip.IP.IsLoopback() || ip.IP.IsPrivate() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsLinkLocalMulticast() {
+					return nil, fmt.Errorf("refusing to connect to private/loopback IP %s for host %s", ip.IP, host)
+				}
+			}
+			dialer := &net.Dialer{Timeout: 10 * time.Second}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
 }
 
 // safeJoin joins base and rel, rejecting path traversal.

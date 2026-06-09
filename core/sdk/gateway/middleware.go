@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // MiddlewareContext provides request access and environment resolution for custom middleware.
@@ -83,22 +84,31 @@ func domainMatches(domains []string, host string) bool {
 
 // secrets collects values that should be redacted from logs.
 var secrets []string
+var secretsMu sync.Mutex
 
 // RegisterSecret declares a value that should be redacted from gateway logs.
 // Call this in init() alongside RegisterMiddleware for any baked-in secrets.
 func RegisterSecret(value string) {
 	if value != "" {
+		secretsMu.Lock()
 		secrets = append(secrets, value)
+		secretsMu.Unlock()
 	}
 }
 
 // Secrets returns all secrets registered by middleware for log redaction.
 func Secrets() []string {
-	return secrets
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
+	result := make([]string, len(secrets))
+	copy(result, secrets)
+	return result
 }
 
 // ResetForTesting clears all registered middleware and secrets. Test use only.
 func ResetForTesting() {
+	secretsMu.Lock()
+	defer secretsMu.Unlock()
 	registry = nil
 	secrets = nil
 	routeRegistry = nil
