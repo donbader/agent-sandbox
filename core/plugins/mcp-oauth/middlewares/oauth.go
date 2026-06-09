@@ -35,6 +35,7 @@ type oauthProviderInfo struct {
 	ClientID          string
 	ClientSecret      string
 	Scopes            string
+	MCPURL            string
 	Dynamic           bool
 }
 
@@ -64,6 +65,9 @@ func init() {
 	} else {
 		for name, cfg := range rawProviders {
 			p := oauthProviderInfo{}
+			if v, ok := cfg["mcp_url"].(string); ok {
+				p.MCPURL = v
+			}
 			if v, ok := cfg["authorize_endpoint"].(string); ok {
 				p.AuthorizeEndpoint = v
 			}
@@ -140,8 +144,8 @@ func init() {
 							ctx.SetAbortHeader("X-OAuth-Authorize-URL", authorizeURL)
 							ctx.SetAbortHeader("Content-Type", "application/json")
 							ctx.Abort(http.StatusUnauthorized, fmt.Sprintf(
-								`{"error":"oauth_required","provider":%q,"authorize_url":%q}`,
-								providerName, authorizeURL))
+								`{"error":"oauth_required","provider":%q,"authorize_url":%q,"hint":"For PKCE login, use: curl http://<gateway>/plugins/mcp-oauth/login/%s"}`,
+								providerName, authorizeURL, providerName))
 							return nil
 						}
 						slog.Debug("oauth: token file not found", "file", providerTokenFile)
@@ -234,6 +238,9 @@ func mwBuildAuthorizeURL(provider oauthProviderInfo, providerName, callbackURL s
 	}
 	if provider.Scopes != "" {
 		params.Set("scope", provider.Scopes)
+	}
+	if provider.MCPURL != "" {
+		params.Set("resource", provider.MCPURL)
 	}
 	return provider.AuthorizeEndpoint + "?" + params.Encode()
 }
