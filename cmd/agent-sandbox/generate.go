@@ -13,13 +13,28 @@ import (
 )
 
 func generateV1Cmd(dir *string) *cobra.Command {
-	return &cobra.Command{
+	var coreFlag string
+
+	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate build artifacts from agent.yaml or fleet.yaml",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectDir, err := filepath.Abs(*dir)
 			if err != nil {
 				return fmt.Errorf("resolve dir: %w", err)
+			}
+
+			// If --core is set, resolve to absolute path and use directly.
+			if coreFlag != "" {
+				abs, err := filepath.Abs(coreFlag)
+				if err != nil {
+					return fmt.Errorf("resolve --core path: %w", err)
+				}
+				if _, err := os.Stat(abs); err != nil {
+					return fmt.Errorf("--core path does not exist: %s", abs)
+				}
+				coreOverride = abs
+				fmt.Fprintf(os.Stderr, "Using local core: %s\n", abs)
 			}
 
 			// Load .env file so secrets are available for auth-header baking.
@@ -40,7 +55,13 @@ func generateV1Cmd(dir *string) *cobra.Command {
 			return generateFleet(agents, projectDir)
 		},
 	}
+
+	cmd.Flags().StringVar(&coreFlag, "core", "", "Path to local core directory (skips GitHub release fetch)")
+	return cmd
 }
+
+// coreOverride is set when --core flag is provided, bypassing release fetch.
+var coreOverride string
 
 func generateSingleAgent(cfg *config.Config, projectDir string) error {
 	coreDir, err := fetchCore(cfg.CoreVersion)
@@ -90,9 +111,14 @@ func generateFleet(agents []config.FleetAgent, projectDir string) error {
 }
 
 // fetchCore resolves a core version and returns the cache directory.
+// If --core was provided, returns that path directly.
 // "latest" queries GitHub for the newest core-v* release.
 // Any other value fetches that specific version.
 func fetchCore(version string) (string, error) {
+	if coreOverride != "" {
+		return coreOverride, nil
+	}
+
 	if version == "" || version == "latest" {
 		dir, err := release.FetchLatest()
 		if err != nil {
