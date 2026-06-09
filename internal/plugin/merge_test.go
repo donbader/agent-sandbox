@@ -68,3 +68,56 @@ func TestMergeContributions_PreEntrypointAndPorts(t *testing.T) {
 	assert.Equal(t, []string{"/usr/sbin/sshd -p 2222", "/usr/bin/some-daemon"}, merged.Runtime.PreEntrypoint)
 	assert.Equal(t, []string{"2222:2222", "8080:8080"}, merged.Runtime.Ports)
 }
+
+func TestMergeContributions_CapAddDedup(t *testing.T) {
+	a := &Contributions{
+		Runtime: RuntimeContrib{
+			CapAdd: []string{"SYS_CHROOT", "NET_ADMIN"},
+		},
+	}
+	b := &Contributions{
+		Runtime: RuntimeContrib{
+			CapAdd: []string{"NET_ADMIN", "SYS_PTRACE"},
+		},
+	}
+
+	merged := MergeContributions(a, b)
+
+	// NET_ADMIN appears in both but should be deduplicated
+	assert.Equal(t, []string{"SYS_CHROOT", "NET_ADMIN", "SYS_PTRACE"}, merged.Runtime.CapAdd)
+}
+
+func TestMergeContributions_SkipUserns(t *testing.T) {
+	a := &Contributions{
+		Runtime: RuntimeContrib{
+			SkipUserns: false,
+		},
+	}
+	b := &Contributions{
+		Runtime: RuntimeContrib{
+			SkipUserns: true,
+		},
+	}
+
+	merged := MergeContributions(a, b)
+
+	// Logical OR — if any plugin sets it true, result is true
+	assert.True(t, merged.Runtime.SkipUserns)
+}
+
+func TestMergeContributions_SkipUserns_AllFalse(t *testing.T) {
+	a := &Contributions{
+		Runtime: RuntimeContrib{
+			SkipUserns: false,
+		},
+	}
+	b := &Contributions{
+		Runtime: RuntimeContrib{
+			SkipUserns: false,
+		},
+	}
+
+	merged := MergeContributions(a, b)
+
+	assert.False(t, merged.Runtime.SkipUserns)
+}

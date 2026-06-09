@@ -3,6 +3,7 @@ package v1
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -390,9 +391,7 @@ func rewriteVolumePath(vol, relAgent string) string {
 func collectAllOptions(cfg *config.Config) map[string]any {
 	opts := make(map[string]any)
 	for _, inst := range cfg.Installations {
-		for k, v := range inst.Options {
-			opts[k] = v
-		}
+		maps.Copy(opts, inst.Options)
 	}
 	return opts
 }

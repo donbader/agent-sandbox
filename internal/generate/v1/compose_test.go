@@ -99,6 +99,8 @@ func TestBuildCompose_CapDrop(t *testing.T) {
 	assert.Contains(t, output, "- NET_ADMIN")
 	assert.Contains(t, output, "- SETUID")
 	assert.Contains(t, output, "- SETGID")
+	// SYS_CHROOT is NOT in base caps — it comes from plugin contributions
+	assert.NotContains(t, output, "- SYS_CHROOT")
 	// Gateway needs NET_BIND_SERVICE for port 53
 	assert.Contains(t, output, "- NET_BIND_SERVICE")
 }
@@ -139,16 +141,72 @@ func TestBuildCompose_PodmanSSHNoUserns(t *testing.T) {
 		Runtime: config.RuntimeConfig{
 			Image: "@builtin/codex",
 		},
-		Installations: []config.Installation{
-			{Plugin: "@builtin/ssh"},
+	}
+
+	contribs := &plugin.Contributions{
+		Runtime: plugin.RuntimeContrib{
+			SkipUserns: true,
+		},
+		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+	}
+
+	output, err := BuildCompose(cfg, contribs, "/project")
+	require.NoError(t, err)
+
+	// Plugin declares skip_userns — userns_mode must be skipped.
+	assert.NotContains(t, output, "userns_mode")
+}
+
+func TestBuildCompose_PluginCapAdd(t *testing.T) {
+	cfg := &config.Config{
+		Name: "cap-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
 		},
 	}
 
-	output, err := BuildCompose(cfg, nil, "/project")
+	contribs := &plugin.Contributions{
+		Runtime: plugin.RuntimeContrib{
+			CapAdd: []string{"SYS_CHROOT", "SYS_PTRACE"},
+		},
+		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+	}
+
+	output, err := BuildCompose(cfg, contribs, "/project")
 	require.NoError(t, err)
 
-	// SSH plugin requires real root for privilege separation — userns_mode must be skipped.
-	assert.NotContains(t, output, "userns_mode")
+	// Base caps present
+	assert.Contains(t, output, "- NET_ADMIN")
+	assert.Contains(t, output, "- SETUID")
+	// Plugin-contributed caps present
+	assert.Contains(t, output, "- SYS_CHROOT")
+	assert.Contains(t, output, "- SYS_PTRACE")
+}
+
+func TestBuildCompose_PluginCapAddDedup(t *testing.T) {
+	cfg := &config.Config{
+		Name: "dedup-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	// Plugin contributes a cap that already exists in base set — should not duplicate.
+	contribs := &plugin.Contributions{
+		Runtime: plugin.RuntimeContrib{
+			CapAdd: []string{"NET_ADMIN", "SYS_CHROOT"},
+		},
+		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+	}
+
+	output, err := BuildCompose(cfg, contribs, "/project")
+	require.NoError(t, err)
+
+	// SYS_CHROOT should appear once (from plugin)
+	assert.Contains(t, output, "- SYS_CHROOT")
+	// Count NET_ADMIN occurrences in the agent cap_add section — it appears in gateway too,
+	// but we just verify no error and it's present.
+	assert.Contains(t, output, "- NET_ADMIN")
 }
 
 func TestBuildFleetCompose(t *testing.T) {

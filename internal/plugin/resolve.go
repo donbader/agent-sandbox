@@ -37,8 +37,8 @@ func (r *Resolver) Resolve(name string, source string) (*PluginDef, error) {
 	}
 
 	// Explicit @builtin/ prefix — bundled only
-	if strings.HasPrefix(name, builtinPrefix) {
-		pluginName := strings.TrimPrefix(name, builtinPrefix)
+	if after, ok := strings.CutPrefix(name, builtinPrefix); ok {
+		pluginName := after
 		return r.resolveFromBundled(pluginName)
 	}
 

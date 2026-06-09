@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -38,13 +39,28 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 	if contribs != nil {
 		agentVolumes = append(agentVolumes, contribs.Runtime.Volumes...)
 	}
+	// Build cap_add from base set plus plugin contributions.
+	baseCaps := []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER"}
+	if contribs != nil && len(contribs.Runtime.CapAdd) > 0 {
+		seen := make(map[string]bool, len(baseCaps))
+		for _, c := range baseCaps {
+			seen[c] = true
+		}
+		for _, c := range contribs.Runtime.CapAdd {
+			if !seen[c] {
+				baseCaps = append(baseCaps, c)
+				seen[c] = true
+			}
+		}
+	}
+
 	agentSvc := map[string]any{
 		"build": map[string]any{
 			"context":    "..",
 			"dockerfile": ".build/Dockerfile",
 		},
 		"cap_drop": []string{"ALL"},
-		"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER", "SYS_CHROOT"},
+		"cap_add":  baseCaps,
 		"depends_on": map[string]any{
 			gatewayName: map[string]any{
 				"condition": "service_healthy",
@@ -63,9 +79,7 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 	// Merge user-defined runtime.environment into agent service env.
 	if len(cfg.Runtime.Environment) > 0 {
 		if envMap, ok := agentSvc["environment"].(map[string]string); ok {
-			for k, v := range cfg.Runtime.Environment {
-				envMap[k] = v
-			}
+			maps.Copy(envMap, cfg.Runtime.Environment)
 		}
 	}
 	// Add healthcheck if the agent exposes ports (agent-manager listens on the first declared port).
@@ -82,8 +96,9 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 		}
 	}
 	// Podman rootless requires userns_mode: keep-id for file ownership mapping.
-	// Skip when SSH plugin is installed — sshd needs real root for privilege separation.
-	if cfg.RuntimeEngine == "podman" && !hasPlugin(cfg.Installations, "@builtin/ssh") {
+	// Skip when a plugin declares skip_userns (e.g. sshd needs real root for privilege separation).
+	skipUserns := contribs != nil && contribs.Runtime.SkipUserns
+	if cfg.RuntimeEngine == "podman" && !skipUserns {
 		agentSvc["userns_mode"] = "keep-id"
 	}
 	// Expose ports from plugin contributions (e.g. SSH)
@@ -293,13 +308,28 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 			agentVolumes = append(agentVolumes, agent.Contribs.Runtime.Volumes...)
 		}
 
+		// Build cap_add from base set plus plugin contributions.
+		fleetBaseCaps := []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER"}
+		if agent.Contribs != nil && len(agent.Contribs.Runtime.CapAdd) > 0 {
+			seen := make(map[string]bool, len(fleetBaseCaps))
+			for _, c := range fleetBaseCaps {
+				seen[c] = true
+			}
+			for _, c := range agent.Contribs.Runtime.CapAdd {
+				if !seen[c] {
+					fleetBaseCaps = append(fleetBaseCaps, c)
+					seen[c] = true
+				}
+			}
+		}
+
 		agentSvc := map[string]any{
 			"build": map[string]any{
 				"context":    "..",
 				"dockerfile": filepath.Join(".build", relBuildDir, "Dockerfile"),
 			},
 			"cap_drop": []string{"ALL"},
-			"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER", "SYS_CHROOT"},
+			"cap_add":  fleetBaseCaps,
 			"depends_on": map[string]any{
 				gatewayName: map[string]any{
 					"condition": "service_healthy",
@@ -319,9 +349,7 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 		// Merge user-defined runtime.environment into agent service env.
 		if len(cfg.Runtime.Environment) > 0 {
 			if envMap, ok := agentSvc["environment"].(map[string]string); ok {
-				for k, v := range cfg.Runtime.Environment {
-					envMap[k] = v
-				}
+				maps.Copy(envMap, cfg.Runtime.Environment)
 			}
 		}
 
@@ -340,8 +368,9 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 		}
 
 		// Podman rootless requires userns_mode: keep-id for file ownership mapping.
-		// Skip when SSH plugin is installed — sshd needs real root for privilege separation.
-		if cfg.RuntimeEngine == "podman" && !hasPlugin(cfg.Installations, "@builtin/ssh") {
+		// Skip when a plugin declares skip_userns (e.g. sshd needs real root for privilege separation).
+		skipUserns := agent.Contribs != nil && agent.Contribs.Runtime.SkipUserns
+		if cfg.RuntimeEngine == "podman" && !skipUserns {
 			agentSvc["userns_mode"] = "keep-id"
 		}
 
@@ -430,4 +459,3 @@ func hasPlugin(installations []config.Installation, name string) bool {
 	}
 	return false
 }
-

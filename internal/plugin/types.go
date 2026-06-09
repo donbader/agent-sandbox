@@ -13,10 +13,10 @@ type PluginDef struct {
 	Requires       []string                `yaml:"requires"`
 	Assets         []string                `yaml:"assets"`
 	Options        map[string]OptionSchema `yaml:"options"`
-	Contributes    Contributions           `yaml:"-"`          // populated after template rendering
-	ContributesRaw string                  `yaml:"-"`          // raw YAML template for contributes block
-	BaseDir        string                  `yaml:"-"`          // directory where plugin.yaml lives (for resolving relative paths)
-	AssetPaths     map[string]string       `yaml:"-"`          // resolved asset paths (set by generator after extraction)
+	Contributes    Contributions           `yaml:"-"` // populated after template rendering
+	ContributesRaw string                  `yaml:"-"` // raw YAML template for contributes block
+	BaseDir        string                  `yaml:"-"` // directory where plugin.yaml lives (for resolving relative paths)
+	AssetPaths     map[string]string       `yaml:"-"` // resolved asset paths (set by generator after extraction)
 }
 
 type OptionSchema struct {
@@ -39,6 +39,8 @@ type RuntimeContrib struct {
 	PreEntrypoint []string `yaml:"pre_entrypoint"`
 	Ports         []string `yaml:"ports"`
 	Volumes       []string `yaml:"volumes"`
+	CapAdd        []string `yaml:"cap_add"`
+	SkipUserns    bool     `yaml:"skip_userns"`
 }
 
 type GatewayContrib struct {
@@ -152,7 +154,7 @@ func splitContributesBlock(data []byte) (contributes string, metadata []byte) {
 	var contribLines []string
 	inContribs := false
 
-	for i := 0; i < len(lines); i++ {
+	for i := range lines {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 

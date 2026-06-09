@@ -12,6 +12,9 @@ options:
 
 contributes:
   runtime:
+    cap_add:
+      - SYS_CHROOT
+    skip_userns: true
     extra_builds:
       - "RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/*"
       - "RUN mkdir -p /run/sshd /home/agent/.ssh"

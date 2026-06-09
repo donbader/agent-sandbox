@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"text/template"
 
@@ -96,9 +97,7 @@ func validateOptions(schema map[string]OptionSchema, opts map[string]any) error 
 
 func applyDefaults(schema map[string]OptionSchema, opts map[string]any) map[string]any {
 	resolved := make(map[string]any, len(opts))
-	for k, v := range opts {
-		resolved[k] = v
-	}
+	maps.Copy(resolved, opts)
 	for name, s := range schema {
 		if _, ok := resolved[name]; !ok && s.Default != nil {
 			resolved[name] = s.Default
