@@ -20,7 +20,11 @@ echo ""
 export $(grep -v '^#' "$SCRIPT_DIR/test.env" | xargs)
 
 echo "--- Generating build artifacts ---"
-"$CLI" generate -C "$SCRIPT_DIR"
+CORE_FLAG=""
+if [ -n "${CORE_PATH:-}" ]; then
+  CORE_FLAG="--core=$CORE_PATH"
+fi
+"$CLI" generate $CORE_FLAG -C "$SCRIPT_DIR"
 
 echo ""
 echo "--- Building and starting containers ---"
