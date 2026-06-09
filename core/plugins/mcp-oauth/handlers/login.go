@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
@@ -27,6 +28,7 @@ var (
 	loginProviders   map[string]*loginProviderConfig
 	loginTokenDir    string
 	loginCallbackURL string
+	loginRegMu       sync.Mutex
 )
 
 func init() {
@@ -87,6 +89,7 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 			names = append(names, name)
 		}
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]any{
 			"error":     "provider name required",
 			"available": names,
@@ -117,6 +120,17 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]any{
 			"error": fmt.Sprintf("client registration failed: %v", err),
+		})
+		return
+	}
+
+	// Validate authorize endpoint uses HTTPS
+	parsedAuth, err := url.Parse(provider.AuthorizeEndpoint)
+	if err != nil || parsedAuth.Scheme != "https" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": fmt.Sprintf("authorize endpoint must use https, got %q", provider.AuthorizeEndpoint),
 		})
 		return
 	}
@@ -172,6 +186,14 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 // ensureClientRegistration checks for cached credentials or performs DCR.
 func ensureClientRegistration(name string, provider *loginProviderConfig) error {
+	if provider.ClientID != "" {
+		return nil
+	}
+
+	loginRegMu.Lock()
+	defer loginRegMu.Unlock()
+
+	// Re-check after acquiring lock
 	if provider.ClientID != "" {
 		return nil
 	}
