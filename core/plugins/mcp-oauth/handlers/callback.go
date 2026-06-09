@@ -75,7 +75,57 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing state parameter", http.StatusBadRequest)
 		return
 	}
-	// Validate HMAC state: format is "hmac_sig:provider_name"
+
+	// Try PKCE flow first (from login endpoint)
+	if flow := ConsumePendingFlow(state); flow != nil {
+		provider, ok := oauthCallbackProviders[flow.Provider]
+		if !ok {
+			// Provider might not have static config — try reading from reg cache
+			provider = oauthCallbackConfig{}
+		}
+		// If token endpoint is empty, read from registration cache
+		if provider.TokenEndpoint == "" {
+			regFile := oauthCallbackTokenDir + "/" + flow.Provider + ".reg.json"
+			if data, err := os.ReadFile(regFile); err == nil {
+				var cached struct {
+					TokenEndpoint string `json:"token_endpoint"`
+					ClientID      string `json:"client_id"`
+					ClientSecret  string `json:"client_secret"`
+				}
+				if json.Unmarshal(data, &cached) == nil {
+					provider.TokenEndpoint = cached.TokenEndpoint
+					provider.ClientID = cached.ClientID
+					provider.ClientSecret = cached.ClientSecret
+				}
+			}
+		}
+		if provider.TokenEndpoint == "" {
+			http.Error(w, "provider token endpoint not configured", http.StatusInternalServerError)
+			return
+		}
+
+		token, err := exchangeCodeForTokenPKCE(provider, code, flow.RedirectURI, flow.CodeVerifier)
+		if err != nil {
+			slog.Error("oauth-callback: PKCE token exchange failed", "provider", flow.Provider, "error", err)
+			http.Error(w, "token exchange failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tokenFile := oauthCallbackTokenDir + "/" + flow.Provider + ".json"
+		if err := writeOAuthToken(tokenFile, token, provider); err != nil {
+			slog.Error("oauth-callback: failed to save token", "error", err)
+			http.Error(w, "failed to save token", http.StatusInternalServerError)
+			return
+		}
+		gateway.RegisterSecret(token.AccessToken)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<!DOCTYPE html><html><body>
+<h1>Authorization successful</h1>
+<p>Provider <strong>%s</strong> connected. You can close this tab.</p>
+</body></html>`, html.EscapeString(flow.Provider))
+		return
+	}
+
+	// Fall back to HMAC-based state (middleware-initiated flow)
 	parts := strings.SplitN(state, ":", 2)
 	if len(parts) != 2 {
 		http.Error(w, "invalid state format", http.StatusForbidden)
@@ -113,7 +163,7 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	gateway.RegisterSecret(token.AccessToken)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body>
+	fmt.Fprintf(w, `<!DOCTYPE html><html><body>
 <h1>Authorization successful</h1>
 <p>Provider <strong>%s</strong> connected. You can close this tab.</p>
 </body></html>`, html.EscapeString(providerName))
@@ -162,14 +212,54 @@ func exchangeCodeForToken(provider oauthCallbackConfig, code, redirectURI string
 	return &tr, nil
 }
 
-func writeOAuthToken(path string, token *oauthTokenExchangeResponse, _ oauthCallbackConfig) error {
+func exchangeCodeForTokenPKCE(provider oauthCallbackConfig, code, redirectURI, codeVerifier string) (*oauthTokenExchangeResponse, error) {
+	u, err := url.Parse(provider.TokenEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid token_endpoint: %w", err)
+	}
+	if u.Scheme != "https" {
+		return nil, fmt.Errorf("token_endpoint must use https, got %q", u.Scheme)
+	}
+	params := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {provider.ClientID},
+		"redirect_uri":  {redirectURI},
+		"code_verifier": {codeVerifier},
+	}
+	if provider.ClientSecret != "" {
+		params.Set("client_secret", provider.ClientSecret)
+	}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: cbSSRFSafe()}
+	resp, err := client.Post(provider.TokenEndpoint, "application/x-www-form-urlencoded", strings.NewReader(params.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
+	}
+	var tr oauthTokenExchangeResponse
+	if err := json.Unmarshal(body, &tr); err != nil {
+		return nil, fmt.Errorf("parsing response: %w", err)
+	}
+	return &tr, nil
+}
+
+func writeOAuthToken(path string, token *oauthTokenExchangeResponse, provider oauthCallbackConfig) error {
 	expiresIn := token.ExpiresIn
 	if expiresIn == 0 {
 		expiresIn = 3600
 	}
 	stored := map[string]any{
-		"access_token": token.AccessToken,
-		"expires_at":   time.Now().Unix() + expiresIn,
+		"access_token":   token.AccessToken,
+		"expires_at":     time.Now().Unix() + expiresIn,
+		"token_endpoint": provider.TokenEndpoint,
+		"client_id":      provider.ClientID,
 	}
 	if token.RefreshToken != "" {
 		stored["refresh_token"] = token.RefreshToken
