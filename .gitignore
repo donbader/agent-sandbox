@@ -24,3 +24,4 @@ Thumbs.db
 channel-manager/node_modules/
 node_modules/
 .worktrees/
+.worktrees/
