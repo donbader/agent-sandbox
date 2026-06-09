@@ -126,7 +126,7 @@ jobs:
           cp -r core/sdk "$STAGING/sdk"
 
           # Create tarball
-          ASSET="core-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          ASSET="agent-sandbox-core-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
           tar -czf "$ASSET" -C "$STAGING" .
 
           echo "asset=$ASSET" >> "$GITHUB_ENV"
