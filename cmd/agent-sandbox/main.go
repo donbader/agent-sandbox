@@ -2,14 +2,10 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -337,49 +333,37 @@ const upgradeRepo = "donbader/agent-sandbox"
 func upgradeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upgrade",
-		Short: "Self-update to the latest release",
+		Short: "Migrate to the shim-based CLI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Fetch latest release tag from GitHub
-			latest, err := fetchLatestVersion()
-			if err != nil {
-				return fmt.Errorf("checking for updates: %w", err)
+			// Determine sandbox home directory
+			sandboxHome := os.Getenv("AGENT_SANDBOX_HOME")
+			if sandboxHome == "" {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("determining home directory: %w", err)
+				}
+				sandboxHome = filepath.Join(home, ".agent-sandbox")
 			}
 
-			current := version
-			if current == latest || "v"+current == latest {
-				fmt.Printf("Already up to date (%s)\n", current)
+			// Check if already migrated
+			shimPath := filepath.Join(sandboxHome, "bin", "agent-sandbox")
+			if _, err := os.Stat(shimPath); err == nil {
+				fmt.Println("Already migrated.")
 				return nil
 			}
 
-			fmt.Printf("Current: %s → Latest: %s\n", current, latest)
-
-			// Determine platform
-			goos := runtime.GOOS
-			goarch := runtime.GOARCH
-
-			// Download new binary
-			filename := fmt.Sprintf("agent-sandbox_%s_%s_%s.tar.gz", strings.TrimPrefix(latest, "v"), goos, goarch)
-			url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", upgradeRepo, latest, filename)
-
-			fmt.Printf("Downloading %s...\n", filename)
-			tmpDir, err := os.MkdirTemp("", "agent-sandbox-upgrade-*")
-			if err != nil {
-				return fmt.Errorf("creating temp dir: %w", err)
-			}
-			defer func() { _ = os.RemoveAll(tmpDir) }()
-
-			tarPath := filepath.Join(tmpDir, filename)
-			if err := downloadFile(url, tarPath); err != nil {
-				return fmt.Errorf("downloading release: %w", err)
+			// Download and run the install script
+			installURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/scripts/install.sh", upgradeRepo)
+			fmt.Println("Installing shim-based CLI...")
+			installCmd := exec.Command("sh", "-c", fmt.Sprintf("curl -fsSL '%s' | sh", installURL))
+			installCmd.Stdin = os.Stdin
+			installCmd.Stdout = os.Stdout
+			installCmd.Stderr = os.Stderr
+			if err := installCmd.Run(); err != nil {
+				return fmt.Errorf("install script failed: %w", err)
 			}
 
-			// Extract
-			extractCmd := exec.Command("tar", "xzf", tarPath, "-C", tmpDir)
-			if err := extractCmd.Run(); err != nil {
-				return fmt.Errorf("extracting archive: %w", err)
-			}
-
-			// Find current binary path
+			// Resolve current binary path
 			execPath, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("finding current binary: %w", err)
@@ -389,75 +373,13 @@ func upgradeCmd() *cobra.Command {
 				return fmt.Errorf("resolving binary path: %w", err)
 			}
 
-			// Replace binary
-			newBinary := filepath.Join(tmpDir, "agent-sandbox")
-			if err := os.Rename(newBinary, execPath); err != nil {
-				// Try with sudo if permission denied
-				if os.IsPermission(err) {
-					fmt.Println("Requires elevated permissions...")
-					sudoCmd := exec.Command("sudo", "mv", newBinary, execPath)
-					sudoCmd.Stdin = os.Stdin
-					sudoCmd.Stdout = os.Stdout
-					sudoCmd.Stderr = os.Stderr
-					if err := sudoCmd.Run(); err != nil {
-						return fmt.Errorf("installing binary: %w", err)
-					}
-				} else {
-					return fmt.Errorf("replacing binary: %w", err)
-				}
-			}
+			// Print migration instructions
+			fmt.Println("\nMigration complete.")
+			fmt.Println("Add ~/.agent-sandbox/bin to your PATH (before your current binary location).")
+			fmt.Println("Then remove the old agent-sandbox binary:")
+			fmt.Printf("  rm %s\n", execPath)
 
-			fmt.Printf("Upgraded to %s\n", latest)
 			return nil
 		},
 	}
-}
-
-func fetchLatestVersion() (string, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=20", upgradeRepo)
-	resp, err := http.Get(url) //nolint:gosec // URL is constructed from a constant
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API returned %d", resp.StatusCode)
-	}
-
-	var releases []struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		return "", err
-	}
-
-	// Find the latest CLI release (v* prefix, not core-v*)
-	for _, r := range releases {
-		if strings.HasPrefix(r.TagName, "v") && !strings.HasPrefix(r.TagName, "core-v") {
-			return r.TagName, nil
-		}
-	}
-	return "", fmt.Errorf("no CLI release found")
-}
-
-func downloadFile(url, dest string) error {
-	resp, err := http.Get(url) //nolint:gosec // URL constructed from known release format
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	_, err = io.Copy(f, resp.Body)
-	return err
 }
