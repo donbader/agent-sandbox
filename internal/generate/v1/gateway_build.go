@@ -155,7 +155,13 @@ func (g *Generator) findPluginSrcDir(def *plugin.PluginDef) string {
 	if g.bundledFS != nil {
 		srcPath := def.Name + "/src"
 		if _, err := fs.Stat(g.bundledFS, srcPath); err == nil {
-			// Extract to temp and return the path
+			// If we have coreDir, use the actual filesystem path
+			if g.coreDir != "" {
+				realPath := filepath.Join(g.coreDir, "plugins", def.Name, "src")
+				if info, err := os.Stat(realPath); err == nil && info.IsDir() {
+					return realPath
+				}
+			}
 			return ""
 		}
 	}
