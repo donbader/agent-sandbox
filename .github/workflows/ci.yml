@@ -89,9 +89,6 @@ jobs:
       - name: Test
         run: go test -race ./...
 
-      - name: Build CLI
-        run: go build -o agent-sandbox ./cmd/agent-sandbox/
-
       - name: Build core binary
         run: go build -o agent-sandbox-core ./cmd/agent-sandbox-core/
 
@@ -102,13 +99,6 @@ jobs:
           else
             echo "shellcheck not available, skipping"
           fi
-
-      - name: Upload CLI binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-sandbox-linux
-          path: agent-sandbox
-          retention-days: 1
 
       - name: Upload core binary
         uses: actions/upload-artifact@v4
@@ -138,23 +128,15 @@ jobs:
         run: |
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o core/gateway/bin/gateway-linux-amd64 ./core/gateway/cmd/gateway/
 
-      - name: Download CLI binary
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-sandbox-linux
-
       - name: Download core binary
         uses: actions/download-artifact@v4
         with:
           name: agent-sandbox-core-linux
 
       - name: Make binaries executable
-        run: chmod +x ./agent-sandbox ./agent-sandbox-core
+        run: chmod +x ./agent-sandbox-core
 
       - name: Generate build artifacts
-        run: ./agent-sandbox generate --core=./core -C examples/${{ matrix.example }}
-
-      - name: Generate build artifacts (core binary)
         run: ./agent-sandbox-core generate --core=./core -C examples/${{ matrix.example }}
 
       - name: Start containers (smoke test)
@@ -162,7 +144,7 @@ jobs:
           STX_LLM_GATEWAY_API_KEY: test-stub
           TELEGRAM_BOT_TOKEN: test-stub
         run: |
-          ./agent-sandbox -C examples/${{ matrix.example }} compose up -d --build || true
+          ./agent-sandbox-core -C examples/${{ matrix.example }} compose up -d --build || true
           # Wait for gateway(s) to be healthy — proves mounts, config, and binary work.
           # Agent and sidecars with stub credentials may crash; that's expected in CI.
           for i in $(seq 1 30); do
@@ -173,19 +155,19 @@ jobs:
             sleep 2
           done
           echo "ERROR: No healthy gateway after 60s"
-          ./agent-sandbox -C examples/${{ matrix.example }} compose ps
-          ./agent-sandbox -C examples/${{ matrix.example }} compose logs
+          ./agent-sandbox-core -C examples/${{ matrix.example }} compose ps
+          ./agent-sandbox-core -C examples/${{ matrix.example }} compose logs
           exit 1
 
       - name: Wait for agent entrypoint
         run: sleep 5
 
       - name: Audit security contract
-        run: ./agent-sandbox -C examples/${{ matrix.example }} audit || true
+        run: ./agent-sandbox-core -C examples/${{ matrix.example }} audit || true
 
       - name: Teardown
         if: always()
-        run: ./agent-sandbox -C examples/${{ matrix.example }} compose down -v
+        run: ./agent-sandbox-core -C examples/${{ matrix.example }} compose down -v
 
   sandbox:
     name: Sandbox (integration)
@@ -207,16 +189,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Download CLI binary
+      - name: Download core binary
         uses: actions/download-artifact@v4
         with:
-          name: agent-sandbox-linux
+          name: agent-sandbox-core-linux
 
       - name: Make CLI executable
-        run: chmod +x ./agent-sandbox
+        run: chmod +x ./agent-sandbox-core
 
       - name: Run sandbox integration tests
         env:
-          CLI_PATH: ${{ github.workspace }}/agent-sandbox
+          CLI_PATH: ${{ github.workspace }}/agent-sandbox-core
           CORE_PATH: ${{ github.workspace }}/core
         run: tests/integration/sandbox/run.sh
