@@ -3,6 +3,7 @@ package v1
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/envvar"
@@ -43,7 +44,7 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"dockerfile": ".build/Dockerfile",
 		},
 		"cap_drop": []string{"ALL"},
-		"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER"},
+		"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER", "SYS_CHROOT"},
 		"depends_on": map[string]any{
 			gatewayName: map[string]any{
 				"condition": "service_healthy",
@@ -70,6 +71,9 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 	// Add healthcheck if the agent exposes ports (agent-manager listens on the first declared port).
 	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
 		port := contribs.Runtime.Ports[0]
+		if parts := strings.SplitN(port, ":", 2); len(parts) == 2 {
+			port = parts[1]
+		}
 		agentSvc["healthcheck"] = map[string]any{
 			"test":     []string{"CMD", "curl", "-sf", fmt.Sprintf("http://localhost:%s/health", port)},
 			"interval": "3s",
@@ -77,8 +81,9 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"retries":  5,
 		}
 	}
-	// Podman rootless requires userns_mode: keep-id for file ownership mapping
-	if cfg.RuntimeEngine == "podman" {
+	// Podman rootless requires userns_mode: keep-id for file ownership mapping.
+	// Skip when SSH plugin is installed — sshd needs real root for privilege separation.
+	if cfg.RuntimeEngine == "podman" && !hasPlugin(cfg.Installations, "@builtin/ssh") {
 		agentSvc["userns_mode"] = "keep-id"
 	}
 	// Expose ports from plugin contributions (e.g. SSH)
@@ -294,7 +299,7 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 				"dockerfile": filepath.Join(".build", relBuildDir, "Dockerfile"),
 			},
 			"cap_drop": []string{"ALL"},
-			"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER"},
+			"cap_add":  []string{"NET_ADMIN", "SETUID", "SETGID", "DAC_OVERRIDE", "CHOWN", "FOWNER", "SYS_CHROOT"},
 			"depends_on": map[string]any{
 				gatewayName: map[string]any{
 					"condition": "service_healthy",
@@ -322,6 +327,9 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 
 		if agent.Contribs != nil && len(agent.Contribs.Runtime.Ports) > 0 {
 			port := agent.Contribs.Runtime.Ports[0]
+			if parts := strings.SplitN(port, ":", 2); len(parts) == 2 {
+				port = parts[1]
+			}
 			agentSvc["healthcheck"] = map[string]any{
 				"test":     []string{"CMD", "curl", "-sf", fmt.Sprintf("http://localhost:%s/health", port)},
 				"interval": "3s",
@@ -331,7 +339,9 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 			agentSvc["ports"] = agent.Contribs.Runtime.Ports
 		}
 
-		if cfg.RuntimeEngine == "podman" {
+		// Podman rootless requires userns_mode: keep-id for file ownership mapping.
+		// Skip when SSH plugin is installed — sshd needs real root for privilege separation.
+		if cfg.RuntimeEngine == "podman" && !hasPlugin(cfg.Installations, "@builtin/ssh") {
 			agentSvc["userns_mode"] = "keep-id"
 		}
 
@@ -409,5 +419,15 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 		return "", fmt.Errorf("marshal fleet compose: %w", err)
 	}
 	return string(data), nil
+}
+
+// hasPlugin reports whether the given plugin name is present in the installations list.
+func hasPlugin(installations []config.Installation, name string) bool {
+	for _, inst := range installations {
+		if inst.Plugin == name {
+			return true
+		}
+	}
+	return false
 }
 

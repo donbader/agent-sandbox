@@ -132,6 +132,25 @@ func TestBuildCompose_DockerNoUserns(t *testing.T) {
 	assert.NotContains(t, output, "userns_mode")
 }
 
+func TestBuildCompose_PodmanSSHNoUserns(t *testing.T) {
+	cfg := &config.Config{
+		Name:          "podman-ssh-agent",
+		RuntimeEngine: "podman",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+		Installations: []config.Installation{
+			{Plugin: "@builtin/ssh"},
+		},
+	}
+
+	output, err := BuildCompose(cfg, nil, "/project")
+	require.NoError(t, err)
+
+	// SSH plugin requires real root for privilege separation — userns_mode must be skipped.
+	assert.NotContains(t, output, "userns_mode")
+}
+
 func TestBuildFleetCompose(t *testing.T) {
 	agents := []ComposeAgentEntry{
 		{

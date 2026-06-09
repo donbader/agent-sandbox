@@ -16,7 +16,7 @@ echo "[entrypoint] gateway ready"
 # Resolve gateway IP (getent may not exist in slim images, fall back to ping).
 GATEWAY_IP=""
 if command -v getent >/dev/null 2>&1; then
-    GATEWAY_IP=$(getent hosts $GATEWAY_HOST | awk '{print $1}')
+    GATEWAY_IP=$(getent hosts $GATEWAY_HOST | awk '{print $1}' | head -1)
 fi
 if [ -z "$GATEWAY_IP" ]; then
     GATEWAY_IP=$(ping -c1 -W1 $GATEWAY_HOST 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p')

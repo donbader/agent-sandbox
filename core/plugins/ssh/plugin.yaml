@@ -15,7 +15,7 @@ contributes:
     extra_builds:
       - "RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/*"
       - "RUN mkdir -p /run/sshd /home/agent/.ssh"
-      - "RUN ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N '' -q"
+      - "RUN rm -f /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub && ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N '' -q"
       - "RUN sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config"
       - "RUN sed -i 's/^#*Port.*/Port {{ .plugin.options.port }}/' /etc/ssh/sshd_config"
       - "COPY {{ .plugin.options.authorized_keys }} /home/agent/.ssh/authorized_keys"
