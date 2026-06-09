@@ -89,8 +89,24 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 
 		// Log the request BEFORE rewriting to avoid leaking injected secrets.
 		originalPath := req.URL.Path
-		rewritten := applyMiddleware(req)
+		ctx, rewritten := applyMiddlewareWithContext(req)
 		slog.Debug("request", "host", serverName, "method", req.Method, "path", originalPath, "rewritten", rewritten)
+
+		// If middleware aborted, return the abort response instead of forwarding
+		if ctx != nil && ctx.AbortStatus != 0 {
+			abortResp := &http.Response{
+				StatusCode: ctx.AbortStatus,
+				ProtoMajor: 1,
+				ProtoMinor: 1,
+				Header:     ctx.AbortHeaders,
+				Body:       io.NopCloser(strings.NewReader(ctx.AbortBody)),
+			}
+			if abortResp.Header == nil {
+				abortResp.Header = make(http.Header)
+			}
+			_ = abortResp.Write(tlsConn)
+			continue
+		}
 
 		// Forward to real server
 		resp, err := h.forwardRequest(req, serverName)
@@ -122,12 +138,12 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 	}
 }
 
-// applyMiddleware runs all matching middleware against the request.
-// Returns true if any middleware was applied.
-func applyMiddleware(req *http.Request) bool {
+// applyMiddlewareWithContext runs middleware and returns the context and whether any matched.
+// If ctx.AbortStatus is non-zero, the request should be aborted (return a response without forwarding).
+func applyMiddlewareWithContext(req *http.Request) (*gateway.MiddlewareContext, bool) {
 	matching := gateway.MatchingMiddleware(req)
 	if len(matching) == 0 {
-		return false
+		return nil, false
 	}
 
 	ctx := &gateway.MiddlewareContext{
@@ -135,15 +151,16 @@ func applyMiddleware(req *http.Request) bool {
 		Env:     os.Getenv,
 	}
 
-	applied := false
 	for _, mw := range matching {
 		if err := mw.Func(ctx); err != nil {
 			slog.Error("middleware error", "name", mw.Name, "error", err)
 			continue
 		}
-		applied = true
+		if ctx.AbortStatus != 0 {
+			return ctx, true
+		}
 	}
-	return applied
+	return ctx, true
 }
 
 // getTransport returns a cached *http.Transport for the given serverName, creating
