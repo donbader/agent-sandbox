@@ -123,7 +123,7 @@ func gatewayURLCmd(dir *string) *cobra.Command {
 			projectName := filepath.Base(absDir)
 
 			// Load config to get the agent name (gateway service = <name>-gateway)
-			cfg, err := config.Load(filepath.Join(*dir, "agent.yaml"))
+			cfg, err := config.Load(*dir)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
