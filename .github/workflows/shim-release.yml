@@ -1,0 +1,29 @@
+name: Shim Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/shim.sh']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract shim version
+        id: version
+        run: |
+          VER=$(grep '^SHIM_VERSION=' scripts/shim.sh | cut -d'"' -f2)
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Create shim release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "shim-v${{ steps.version.outputs.version }}"
+          name: "Shim v${{ steps.version.outputs.version }}"
+          body: "Updated agent-sandbox shim script."
+          files: scripts/shim.sh
