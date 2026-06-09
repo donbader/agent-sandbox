@@ -13,6 +13,7 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/ca"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/dns"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/mitm"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/pluginloader"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
@@ -49,8 +50,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Collect secrets from all middleware for log redaction.
-	// Middleware registers itself via init() — secrets are available after import.
+	// Load TypeScript plugins (registers middleware + routes via SDK)
+	pluginsConfigPath := "/etc/gateway/plugins.yaml"
+	if p := os.Getenv("GATEWAY_PLUGINS_CONFIG"); p != "" {
+		pluginsConfigPath = p
+	}
+	if err := pluginloader.LoadPluginsFromFile(pluginsConfigPath); err != nil {
+		slog.Error("load plugins", "error", err)
+		os.Exit(1)
+	}
+
+	// Collect ALL secrets (from Go init() middleware + TS plugins)
 	secrets := gateway.Secrets()
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
