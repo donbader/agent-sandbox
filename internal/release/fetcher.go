@@ -131,8 +131,38 @@ func resolveLatestVersion() (string, error) {
 		return "", fmt.Errorf("no core releases found in %s", GitHubRepo)
 	}
 
-	sort.Sort(sort.Reverse(sort.StringSlice(versions)))
+	sort.Slice(versions, func(i, j int) bool {
+		return compareSemver(versions[i], versions[j]) > 0
+	})
 	return versions[0], nil
+}
+
+// compareSemver compares two semver strings (vX.Y.Z format).
+// Returns positive if a > b, negative if a < b, 0 if equal.
+func compareSemver(a, b string) int {
+	aParts := parseSemver(a)
+	bParts := parseSemver(b)
+	for i := 0; i < 3; i++ {
+		if aParts[i] != bParts[i] {
+			return aParts[i] - bParts[i]
+		}
+	}
+	return 0
+}
+
+func parseSemver(v string) [3]int {
+	v = strings.TrimPrefix(v, "v")
+	var parts [3]int
+	for i, s := range strings.SplitN(v, ".", 3) {
+		n := 0
+		for _, c := range s {
+			if c >= '0' && c <= '9' {
+				n = n*10 + int(c-'0')
+			}
+		}
+		parts[i] = n
+	}
+	return parts
 }
 
 type latestResolution struct {

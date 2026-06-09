@@ -71,3 +71,12 @@ func TestLatestResolutionCache_Expired(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "expired")
 }
+
+func TestCompareSemver(t *testing.T) {
+	// v0.10.0 > v0.9.0 (numeric comparison, not lexicographic)
+	assert.Greater(t, compareSemver("v0.10.0", "v0.9.0"), 0)
+	assert.Less(t, compareSemver("v0.9.0", "v0.10.0"), 0)
+	assert.Equal(t, 0, compareSemver("v1.2.3", "v1.2.3"))
+	assert.Greater(t, compareSemver("v2.0.0", "v1.99.99"), 0)
+	assert.Greater(t, compareSemver("v1.0.1", "v1.0.0"), 0)
+}
