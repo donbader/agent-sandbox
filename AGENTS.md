@@ -60,8 +60,8 @@ flox activate -- golangci-lint run ./...
 agent-sandbox generate -C <dir>        # reads agent.yaml → writes .build/
 agent-sandbox compose up --build       # docker compose passthrough
 
-# Local development (bypass shim, use local core binary)
-go run ./cmd/agent-sandbox-core/ --core=./core generate -C <dir>
+# Local development (auto-detected when in source repo)
+agent-sandbox -C examples/local-coding generate   # builds from source automatically
 ```
 
 ## Conventions

@@ -143,3 +143,18 @@ agent-sandbox compose up --build -d
 # Tear down
 agent-sandbox compose down -v
 ```
+
+## Local Development
+
+When run from the agent-sandbox source repo, the shim auto-detects and builds from source:
+
+```bash
+# No flags needed — auto-detected by presence of cmd/agent-sandbox-core/main.go
+agent-sandbox -C examples/local-coding generate
+# [dev] Building from source...
+# Generated .build/ in .../examples/local-coding
+```
+
+The binary is built to `./core/agent-sandbox-core` so it resolves sibling assets (plugins, presets, templates, gateway) from the `core/` directory automatically.
+
+Requires `go` or `flox` on PATH.
