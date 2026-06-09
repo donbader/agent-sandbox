@@ -16,17 +16,17 @@ The login endpoint handles the full OAuth lifecycle including PKCE and Dynamic C
 
 ```bash
 # 1. Start your agent-sandbox environment
-agent-sandbox -C examples/local-coding compose up --build
+agent-sandbox -C <project-dir> compose up --build
 
 # 2. Discover the gateway URL (port is dynamically assigned)
-agent-sandbox -C examples/local-coding gateway-url
+agent-sandbox -C <project-dir> gateway-url
 # http://localhost:49321
 
 # 3. Initiate login for a provider
-curl $(agent-sandbox -C examples/local-coding gateway-url)/plugins/mcp-oauth/login/notion
+curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/login/<provider>
 
 # Response:
-# {"authorize_url":"https://mcp.notion.com/authorize?...","provider":"notion","instructions":"Open the authorize_url in your browser to complete login."}
+# {"authorize_url":"https://...","provider":"<provider>","instructions":"Open the authorize_url in your browser to complete login."}
 
 # 4. Open the authorize_url in your browser and complete authorization
 #    The browser will redirect back to the gateway and show "Authorization successful"
@@ -50,7 +50,7 @@ curl $(agent-sandbox -C examples/local-coding gateway-url)/plugins/mcp-oauth/log
 ### Listing Providers
 
 ```bash
-curl $(agent-sandbox -C examples/local-coding gateway-url)/plugins/mcp-oauth/login/
+curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/login/
 # {"available":["notion"],"error":"provider name required","usage":"GET /plugins/mcp-oauth/login/<provider_name>"}
 ```
 

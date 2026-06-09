@@ -96,24 +96,20 @@ This example includes the `mcp-oauth` plugin configured for Notion. On first use
 
 1. Start the sandbox:
    ```bash
-   agent-sandbox generate
-   agent-sandbox compose up --build -d
+   agent-sandbox -C examples/local-coding generate
+   agent-sandbox -C examples/local-coding compose up --build -d
    ```
 
-2. When the agent tries to access Notion, the gateway returns a 401 with an authorize URL. The URL is also available at:
-   ```
-   http://localhost:8080/plugins/mcp-oauth/callback
-   ```
-
-3. The first request to Notion's MCP will trigger OAuth discovery and dynamic client registration automatically. The gateway logs the authorize URL:
+2. Initiate login for Notion:
    ```bash
-   agent-sandbox compose logs coder-gateway | grep authorize_url
+   curl $(agent-sandbox -C examples/local-coding gateway-url)/plugins/mcp-oauth/login/notion
    ```
+   This returns a JSON response with an `authorize_url`.
 
-4. Open the authorize URL in your browser, log in to Notion, and authorize access.
+3. Open the `authorize_url` in your browser, log in to Notion, and authorize access.
 
-5. Notion redirects to `http://localhost:8080/plugins/mcp-oauth/callback` — the gateway exchanges the code for tokens and stores them automatically.
+4. The browser redirects back to the gateway — you'll see "Authorization successful".
 
-6. Subsequent requests to Notion are authenticated transparently.
+5. Subsequent requests to Notion are authenticated transparently. No restart needed.
 
 > **Note:** No Notion developer app or API key needed. The plugin uses OAuth Dynamic Client Registration (RFC 7591) — credentials are obtained automatically.
