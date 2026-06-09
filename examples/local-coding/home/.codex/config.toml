@@ -16,3 +16,7 @@ name = "Agent Gateway (Codex)"
 base_url = "https://agent-gateway.stx-ai.net/codex/v1"
 http_headers = { Authorization = "Bearer dummy" }
 wire_api = "responses"
+
+[mcp_servers.notion]
+type = "sse"
+url = "https://mcp.notion.com/mcp"
