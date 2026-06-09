@@ -95,10 +95,9 @@ export default function(ctx: any, options: any) {
   const callbackURL = options.callback_url || "";
   const providersJSON = JSON.stringify(providers);
 
-  const query = ctx.request.query || "";
-  const params = new URLSearchParams(query);
-  const code = params.get("code");
-  const state = params.get("state");
+  const query = ctx.request.query || {};
+  const code = query["code"] || null;
+  const state = query["state"] || null;
 
   if (!code) {
     ctx.response.status(400);
