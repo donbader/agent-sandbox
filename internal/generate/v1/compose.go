@@ -207,7 +207,7 @@ func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir
 			"dockerfile": ".build/Dockerfile",
 		},
 		gatewayBuild: map[string]any{
-			"context":    "./gateway-src",
+			"context":    "./gateway",
 			"dockerfile": "Dockerfile",
 		},
 		gatewayVolumes: []string{"certs:/shared/certs"},
@@ -274,7 +274,7 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 				"dockerfile": filepath.Join(".build", relBuildDir, "Dockerfile"),
 			},
 			gatewayBuild: map[string]any{
-				"context":    fmt.Sprintf("./%s/gateway-src", relBuildDir),
+				"context":    fmt.Sprintf("./%s/gateway", relBuildDir),
 				"dockerfile": "Dockerfile",
 			},
 			gatewayVolumes: []string{

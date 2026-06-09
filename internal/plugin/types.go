@@ -44,16 +44,23 @@ type RuntimeContrib struct {
 }
 
 type GatewayContrib struct {
-	Services []GatewayService `yaml:"services"`
-	Volumes  []string         `yaml:"volumes"`
-	Routes   []RouteEntry     `yaml:"routes"`
+	Services    []GatewayService    `yaml:"services"`
+	Volumes     []string            `yaml:"volumes"`
+	Routes      []RouteEntry        `yaml:"routes"`
+	Middlewares []GatewayMiddleware `yaml:"middlewares"` // top-level TS middleware declarations
 }
 
 // RouteEntry declares an HTTP route handler contributed by a plugin.
 // The path is relative to the plugin's namespace (/plugins/{plugin-name}/...).
 type RouteEntry struct {
 	Path    string `yaml:"path"`    // relative path (e.g. "/callback")
-	Handler string `yaml:"handler"` // path to handler .go file
+	Handler string `yaml:"handler"` // path to handler .ts/.go file
+}
+
+// GatewayMiddleware declares a TS middleware at the gateway level.
+type GatewayMiddleware struct {
+	Script  string   `yaml:"script"`  // relative path to .ts file (e.g. "./src/github-auth.ts")
+	Domains []string `yaml:"domains"` // domain scope (empty = all MITM domains)
 }
 
 type GatewayService struct {

@@ -28,7 +28,8 @@ func TestEmbeddedLoader_LoadRawGateway(t *testing.T) {
 	loader := NewEmbeddedLoader()
 	content, err := loader.LoadRaw("gateway.Dockerfile.tmpl")
 	require.NoError(t, err)
-	assert.Contains(t, content, "FROM golang:")
+	assert.Contains(t, content, "FROM alpine:")
+	assert.Contains(t, content, "COPY gateway /usr/local/bin/gateway")
 	assert.Contains(t, content, `CMD ["gateway"]`)
 }
 

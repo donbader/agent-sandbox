@@ -31,6 +31,7 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 		merged.Gateway.Services = append(merged.Gateway.Services, c.Gateway.Services...)
 		merged.Gateway.Volumes = append(merged.Gateway.Volumes, c.Gateway.Volumes...)
 		merged.Gateway.Routes = append(merged.Gateway.Routes, c.Gateway.Routes...)
+		merged.Gateway.Middlewares = append(merged.Gateway.Middlewares, c.Gateway.Middlewares...)
 		maps.Copy(merged.Sidecar.Services, c.Sidecar.Services)
 	}
 
