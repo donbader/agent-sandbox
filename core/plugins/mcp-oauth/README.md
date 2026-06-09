@@ -18,30 +18,39 @@ The login endpoint handles the full OAuth lifecycle including PKCE and Dynamic C
 # 1. Start your agent-sandbox environment
 agent-sandbox -C examples/local-coding compose up --build
 
-# 2. Initiate login for a provider
-curl http://localhost:8080/plugins/mcp-oauth/login/notion
+# 2. Discover the gateway URL (port is dynamically assigned)
+agent-sandbox -C examples/local-coding gateway-url
+# http://localhost:49321
+
+# 3. Initiate login for a provider
+curl $(agent-sandbox -C examples/local-coding gateway-url)/plugins/mcp-oauth/login/notion
 
 # Response:
 # {"authorize_url":"https://mcp.notion.com/authorize?...","provider":"notion","instructions":"Open the authorize_url in your browser to complete login."}
 
-# 3. Open the authorize_url in your browser and complete authorization
+# 4. Open the authorize_url in your browser and complete authorization
 #    The browser will redirect back to the gateway and show "Authorization successful"
 
-# 4. Done — the agent can now use the MCP provider transparently
+# 5. Done — the agent can now use the MCP provider transparently
 ```
+
+> **Note:** The gateway port is dynamically assigned to avoid conflicts when running
+> multiple agent-sandbox instances on the same host. Use `agent-sandbox gateway-url`
+> to discover the current port. If you need a fixed port, set `gateway.public_url`
+> in your `agent.yaml`.
 
 ### How It Works
 
 1. `GET /plugins/mcp-oauth/login/{provider}` — Gateway performs Dynamic Client Registration (if needed), generates PKCE challenge, and returns an authorize URL
 2. User opens the URL in their browser and authorizes
-3. Provider redirects to `http://localhost:8080/plugins/mcp-oauth/callback` with an authorization code
+3. Provider redirects to the gateway's `/plugins/mcp-oauth/callback` with an authorization code
 4. Gateway exchanges the code (with PKCE code_verifier) for tokens and stores them
 5. All subsequent agent requests to the provider domain get `Authorization: Bearer <token>` injected automatically
 
 ### Listing Providers
 
 ```bash
-curl http://localhost:8080/plugins/mcp-oauth/login/
+curl $(agent-sandbox -C examples/local-coding gateway-url)/plugins/mcp-oauth/login/
 # {"available":["notion"],"error":"provider name required","usage":"GET /plugins/mcp-oauth/login/<provider_name>"}
 ```
 
