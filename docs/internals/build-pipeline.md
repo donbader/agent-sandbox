@@ -250,7 +250,7 @@ Each tarball contains:
 
 ### Shim Release (rare)
 
-Tagged on shim version change. The release artifact is the raw `shim.sh` script. Only changes when the shim protocol itself changes (new env vars, new resolution logic).
+Tagged on shim version change. The release artifact is the raw `shim.sh` script. Only changes when the shim protocol itself changes (new env vars, new resolution logic, new config file support like fleet.yaml).
 
 ### CLI Release (legacy)
 

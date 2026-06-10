@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SHIM_VERSION="1.5.0"
+SHIM_VERSION="1.6.0"
 GITHUB_REPO="donbader/agent-sandbox"
 SANDBOX_HOME="${AGENT_SANDBOX_HOME:-$HOME/.agent-sandbox}"
 CACHE_DIR="$SANDBOX_HOME/core"
@@ -78,6 +78,13 @@ case "$CMD" in
     if [ -f "$PROJECT_DIR/agent.yaml" ]; then
       _cv=$(grep '^core_version:' "$PROJECT_DIR/agent.yaml" | awk '{print $2}' | tr -d '"'"'")
       [ -n "$_cv" ] && printf 'core: %s\n' "$_cv"
+    elif [ -f "$PROJECT_DIR/fleet.yaml" ]; then
+      _first=$(grep -A1 '^agents:' "$PROJECT_DIR/fleet.yaml" | tail -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+      if [ -n "$_first" ] && [ -f "$PROJECT_DIR/$_first/agent.yaml" ]; then
+        _cv=$(grep '^core_version:' "$PROJECT_DIR/$_first/agent.yaml" | awk '{print $2}' | tr -d '"'"'")
+        [ -n "$_cv" ] && printf 'core: %s (from %s)\n' "$_cv" "$_first"
+      fi
+      printf 'mode: fleet\n'
     fi
     exit 0 ;;
 esac
@@ -105,8 +112,22 @@ fi
 
 # --- Resolve core version ---
 
+# resolve_version_from_yaml <path> extracts core_version from a YAML file.
+resolve_version_from_yaml() {
+  grep '^core_version:' "$1" | awk '{print $2}' | tr -d '"'"'"
+}
+
+# resolve_fleet_version extracts core_version from the first agent in fleet.yaml.
+resolve_fleet_version() {
+  _first_agent=$(grep -A1 '^agents:' "$PROJECT_DIR/fleet.yaml" | tail -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+  [ -n "$_first_agent" ] || return 1
+  _agent_yaml="$PROJECT_DIR/$_first_agent/agent.yaml"
+  [ -f "$_agent_yaml" ] || die "Fleet agent '$_first_agent' missing agent.yaml at $_agent_yaml"
+  resolve_version_from_yaml "$_agent_yaml"
+}
+
 if [ -f "$PROJECT_DIR/agent.yaml" ]; then
-  VER=$(grep '^core_version:' "$PROJECT_DIR/agent.yaml" | awk '{print $2}' | tr -d '"'"'")
+  VER=$(resolve_version_from_yaml "$PROJECT_DIR/agent.yaml")
   if [ -z "$VER" ]; then
     VER=$(resolve_latest)
     [ -n "$VER" ] || die "Could not resolve latest core version"
@@ -116,11 +137,21 @@ if [ -f "$PROJECT_DIR/agent.yaml" ]; then
     VER=$(resolve_latest)
     [ -n "$VER" ] || die "Could not resolve latest core version"
   fi
+elif [ -f "$PROJECT_DIR/fleet.yaml" ]; then
+  VER=$(resolve_fleet_version)
+  if [ -z "$VER" ]; then
+    VER=$(resolve_latest)
+    [ -n "$VER" ] || die "Could not resolve latest core version"
+    printf 'Warning: core_version not set in fleet agents. Using latest (%s).\n' "$VER" >&2
+  elif [ "$VER" = "latest" ]; then
+    VER=$(resolve_latest)
+    [ -n "$VER" ] || die "Could not resolve latest core version"
+  fi
 elif [ "$CMD" = "init" ]; then
   VER=$(resolve_latest)
   [ -n "$VER" ] || die "Could not resolve latest core version"
 else
-  die "No agent.yaml found in $PROJECT_DIR. Run 'agent-sandbox init' first."
+  die "No agent.yaml or fleet.yaml found in $PROJECT_DIR. Run 'agent-sandbox init' first."
 fi
 
 case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) die "Invalid core_version: '$VER'" ;; esac

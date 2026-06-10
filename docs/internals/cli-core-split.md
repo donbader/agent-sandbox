@@ -17,6 +17,7 @@ The split solves all three: the shim is stable, the core is versioned per-projec
 1. Handles `version` and `upgrade` directly (no core needed)
 2. For all other commands, resolves the target core version:
    - Reads `core_version` from `agent.yaml` in the working directory (or `-C` target)
+   - If no `agent.yaml`, falls back to `fleet.yaml` and reads `core_version` from the first listed agent's subdirectory
    - If `latest`, queries GitHub API for newest `v*` tag (cached 1h)
    - If a specific version (e.g. `v0.13.0`), uses it directly
 3. Checks if that version is cached at `~/.agent-sandbox/core/<version>/`
