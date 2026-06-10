@@ -181,6 +181,7 @@ func applyMiddlewareWithContext(req *http.Request) (*gateway.MiddlewareContext, 
 	}
 
 	for _, mw := range matching {
+		ctx.Domain = gateway.MatchedDomain(mw, req)
 		if err := mw.Func(ctx); err != nil {
 			slog.Error("middleware error", "name", mw.Name, "error", err)
 			continue

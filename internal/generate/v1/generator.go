@@ -33,6 +33,7 @@ type AgentResult struct {
 type resolvedPlugin struct {
 	def      *plugin.PluginDef
 	rendered *plugin.Contributions
+	options  map[string]any // user-provided options (with defaults applied)
 }
 
 // NewGenerator creates a v1 generator for the given project directory.
@@ -211,7 +212,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 			}
 		}
 
-		resolved[inst.Plugin] = &resolvedPlugin{def: pluginDef, rendered: rendered}
+		resolved[inst.Plugin] = &resolvedPlugin{def: pluginDef, rendered: rendered, options: inst.Options}
 		allContribs = append(allContribs, rendered)
 	}
 

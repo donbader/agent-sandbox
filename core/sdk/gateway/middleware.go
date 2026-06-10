@@ -11,6 +11,7 @@ import (
 type MiddlewareContext struct {
 	Request *http.Request
 	Env     func(string) string
+	Domain  string // The domain this middleware was registered for
 
 	// Abort fields: if AbortStatus is set (non-zero), the gateway returns this
 	// response instead of proxying the request to the upstream.
@@ -45,9 +46,47 @@ type MiddlewareDef struct {
 
 var registry []MiddlewareDef
 
-// RegisterMiddleware registers a domain-scoped middleware.
-func RegisterMiddleware(def MiddlewareDef) {
-	registry = append(registry, def)
+// RegisterMiddleware registers a middleware by name.
+// Domain scoping is set separately via BindDomains.
+func RegisterMiddleware(name string, fn MiddlewareFunc) {
+	registry = append(registry, MiddlewareDef{
+		Name: name,
+		Func: fn,
+	})
+}
+
+// BindDomains scopes a previously registered middleware to specific domains.
+// Called by the framework (template-generated init code or config-driven setup).
+// If called before RegisterMiddleware, it's a no-op.
+func BindDomains(name string, domains []string) {
+	for i := range registry {
+		if registry[i].Name == name {
+			registry[i].Domains = domains
+			return
+		}
+	}
+	// Not found yet — store for late binding
+	pendingBindings = append(pendingBindings, pendingBinding{name: name, domains: domains})
+}
+
+type pendingBinding struct {
+	name    string
+	domains []string
+}
+
+var pendingBindings []pendingBinding
+
+// applyPendingBindings resolves any BindDomains calls that arrived before RegisterMiddleware.
+func applyPendingBindings() {
+	for _, pb := range pendingBindings {
+		for i := range registry {
+			if registry[i].Name == pb.name {
+				registry[i].Domains = pb.domains
+				break
+			}
+		}
+	}
+	pendingBindings = nil
 }
 
 // All returns all registered middleware definitions.
@@ -70,6 +109,20 @@ func MatchingMiddleware(req *http.Request) []MiddlewareDef {
 		}
 	}
 	return matched
+}
+
+// MatchedDomain returns the domain that matched for a given request and middleware.
+func MatchedDomain(mw MiddlewareDef, req *http.Request) string {
+	host := req.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	for _, d := range mw.Domains {
+		if host == d {
+			return d
+		}
+	}
+	return host
 }
 
 // domainMatches returns true if host matches any domain in the list.

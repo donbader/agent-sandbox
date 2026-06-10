@@ -88,6 +88,7 @@ func (h *HTTPHandler) Handle(clientConn net.Conn, initialData []byte) {
 				Env:     os.Getenv,
 			}
 			for _, mw := range matching {
+				ctx.Domain = gateway.MatchedDomain(mw, req)
 				if err := mw.Func(ctx); err != nil {
 					slog.Error("http: middleware error", "name", mw.Name, "error", err)
 					continue

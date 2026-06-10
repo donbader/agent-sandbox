@@ -1,12 +1,14 @@
 package v1
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/envvar"
@@ -94,15 +96,11 @@ func (g *Generator) copyGatewayBinary(gatewayDir string, buildDir string, resolv
 		mainPkg := "./core/gateway/cmd/gateway/"
 		if _, err := os.Stat(filepath.Join(srcDir, "core", "gateway", "cmd", "gateway", "main.go")); err == nil {
 			if goPath, err := exec.LookPath("go"); err == nil {
-				// Check if custom middlewares need injection
-				gatewaySrcCustom := filepath.Join(buildDir, "gateway-src", "core", "gateway", "middlewares", "custom")
-				hasCustom := false
-				if entries, err := os.ReadDir(gatewaySrcCustom); err == nil && len(entries) > 0 {
-					hasCustom = true
-				}
+				// Collect custom Go middlewares from resolved plugins
+				customMws := g.collectCustomMiddlewares(resolved)
 
 				buildSrcDir := srcDir
-				if hasCustom {
+				if len(customMws) > 0 {
 					// Copy source to temp dir to avoid polluting the source tree
 					tmpDir, err := os.MkdirTemp("", "gateway-build-*")
 					if err != nil {
@@ -133,21 +131,14 @@ func (g *Generator) copyGatewayBinary(gatewayDir string, buildDir string, resolv
 						}
 					}
 
-					// Inject custom middlewares into the temp copy
+					// Generate wrapped middleware files
 					customDir := filepath.Join(tmpDir, "core", "gateway", "middlewares", "custom")
 					if err := os.MkdirAll(customDir, 0755); err != nil {
 						return fmt.Errorf("create custom middleware dir: %w", err)
 					}
-					entries, _ := os.ReadDir(gatewaySrcCustom)
-					for _, entry := range entries {
-						if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-							continue
-						}
-						data, err := os.ReadFile(filepath.Join(gatewaySrcCustom, entry.Name()))
-						if err != nil {
-							continue
-						}
-						os.WriteFile(filepath.Join(customDir, entry.Name()), data, 0644)
+					for _, mw := range customMws {
+						wrapped := generateMiddlewareWrapper(mw)
+						os.WriteFile(filepath.Join(customDir, mw.fileName), []byte(wrapped), 0644)
 					}
 
 					// Add blank import
@@ -393,5 +384,165 @@ func (g *Generator) writeGatewayBuildFiles(gatewayDir string) error {
 	return nil
 }
 
+// customMiddlewareInfo holds everything needed to generate a wrapped middleware file.
+type customMiddlewareInfo struct {
+	name     string   // middleware name (derived from file name)
+	fileName string   // output .go file name
+	body     string   // rendered handler body
+	domains  []string // domains from the service URL
+}
 
+// collectCustomMiddlewares finds all custom Go middlewares in resolved plugins,
+// reads and renders their body templates, and returns the info needed to generate wrappers.
+func (g *Generator) collectCustomMiddlewares(resolved map[string]*resolvedPlugin) []customMiddlewareInfo {
+	var result []customMiddlewareInfo
 
+	for _, rp := range resolved {
+		if rp.rendered == nil {
+			continue
+		}
+		for _, svc := range rp.rendered.Gateway.Services {
+			domain := extractDomain(svc.URL)
+			for _, mw := range svc.Middlewares {
+				if mw.Custom == "" {
+					continue
+				}
+
+				// Read the middleware body file
+				var bodyPath string
+				if rp.def.BaseDir != "" {
+					bodyPath = filepath.Join(rp.def.BaseDir, mw.Custom)
+				} else if g.coreDir != "" {
+					bodyPath = filepath.Join(g.coreDir, "plugins", rp.def.Name, mw.Custom)
+				}
+				if bodyPath == "" {
+					continue
+				}
+
+				bodyBytes, err := os.ReadFile(bodyPath)
+				if err != nil {
+					continue
+				}
+
+				// Strip build tags and leading comments (the body is just handler logic)
+				body := stripMiddlewarePreamble(string(bodyBytes))
+
+				// Render the body as a Go template
+				renderedBody := renderMiddlewareBody(body, rp, svc)
+
+				// Derive name from file name
+				baseName := filepath.Base(mw.Custom)
+				name := strings.TrimSuffix(baseName, ".go")
+
+				domains := []string{}
+				if domain != "" {
+					domains = append(domains, domain)
+				}
+
+				result = append(result, customMiddlewareInfo{
+					name:     name,
+					fileName: baseName,
+					body:     renderedBody,
+					domains:  domains,
+				})
+			}
+		}
+	}
+	return result
+}
+
+// renderMiddlewareBody renders the middleware body template with plugin options and service context.
+func renderMiddlewareBody(body string, rp *resolvedPlugin, svc plugin.GatewayService) string {
+	tmpl, err := template.New("mw").Parse(body)
+	if err != nil {
+		return body // return raw if template fails
+	}
+
+	// Build options: start with schema defaults, overlay user-provided values
+	opts := make(map[string]any)
+	if rp.def != nil && rp.def.Options != nil {
+		for name, schema := range rp.def.Options {
+			if schema.Default != nil {
+				opts[name] = schema.Default
+			}
+		}
+	}
+	for k, v := range rp.options {
+		opts[k] = v
+	}
+
+	// Resolve env var references in option values (e.g. ${TELEGRAM_BOT_TOKEN} → actual value)
+	for k, v := range opts {
+		if s, ok := v.(string); ok {
+			opts[k] = envvar.Expand(s)
+		}
+	}
+
+	domain := extractDomain(svc.URL)
+	domains := []string{}
+	if domain != "" {
+		domains = append(domains, domain)
+	}
+
+	data := map[string]any{
+		"options": opts,
+		"domains": domains,
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return body
+	}
+	return buf.String()
+}
+
+// generateMiddlewareWrapper generates a complete Go file that wraps a middleware body
+// in proper init() + RegisterMiddleware + BindDomains calls.
+func generateMiddlewareWrapper(mw customMiddlewareInfo) string {
+	domainsStr := ""
+	for i, d := range mw.domains {
+		if i > 0 {
+			domainsStr += ", "
+		}
+		domainsStr += `"` + d + `"`
+	}
+
+	return fmt.Sprintf(`// Code generated by agent-sandbox generate. DO NOT EDIT.
+package custom
+
+import (
+	"strings"
+
+	"github.com/donbader/agent-sandbox/core/sdk/gateway"
+)
+
+// Ensure strings is used (middleware body may reference it).
+var _ = strings.Contains
+
+func init() {
+	gateway.RegisterMiddleware(%q, func(ctx *gateway.MiddlewareContext) error {
+		%s
+	})
+	gateway.BindDomains(%q, []string{%s})
+}
+`, mw.name, mw.body, mw.name, domainsStr)
+}
+
+// stripMiddlewarePreamble removes build tags and leading comments from a middleware body file.
+// The body file may start with //go:build ignore and comment lines describing template variables.
+func stripMiddlewarePreamble(src string) string {
+	lines := strings.Split(src, "\n")
+	start := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			start = i + 1
+			continue
+		}
+		break
+	}
+	if start >= len(lines) {
+		return ""
+	}
+	return strings.Join(lines[start:], "\n")
+}

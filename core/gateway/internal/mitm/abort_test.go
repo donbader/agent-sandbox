@@ -12,15 +12,12 @@ import (
 func TestApplyMiddlewareWithContext_Abort(t *testing.T) {
 	gateway.ResetForTesting()
 
-	gateway.RegisterMiddleware(gateway.MiddlewareDef{
-		Name:    "test-abort",
-		Domains: []string{"example.com"},
-		Func: func(ctx *gateway.MiddlewareContext) error {
-			ctx.Abort(http.StatusUnauthorized, `{"error":"unauthorized"}`)
-			ctx.SetAbortHeader("Content-Type", "application/json")
-			return nil
-		},
+	gateway.RegisterMiddleware("test-abort", func(ctx *gateway.MiddlewareContext) error {
+		ctx.Abort(http.StatusUnauthorized, `{"error":"unauthorized"}`)
+		ctx.SetAbortHeader("Content-Type", "application/json")
+		return nil
 	})
+	gateway.BindDomains("test-abort", []string{"example.com"})
 
 	req, _ := http.NewRequest("GET", "https://example.com/api", nil)
 	req.Host = "example.com"
@@ -36,14 +33,11 @@ func TestApplyMiddlewareWithContext_Abort(t *testing.T) {
 func TestApplyMiddlewareWithContext_NoAbort(t *testing.T) {
 	gateway.ResetForTesting()
 
-	gateway.RegisterMiddleware(gateway.MiddlewareDef{
-		Name:    "test-passthrough",
-		Domains: []string{"example.com"},
-		Func: func(ctx *gateway.MiddlewareContext) error {
-			ctx.Request.Header.Set("Authorization", "Bearer token")
-			return nil
-		},
+	gateway.RegisterMiddleware("test-passthrough", func(ctx *gateway.MiddlewareContext) error {
+		ctx.Request.Header.Set("Authorization", "Bearer token")
+		return nil
 	})
+	gateway.BindDomains("test-passthrough", []string{"example.com"})
 
 	req, _ := http.NewRequest("GET", "https://example.com/api", nil)
 	req.Host = "example.com"

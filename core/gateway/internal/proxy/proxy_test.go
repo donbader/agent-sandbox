@@ -164,14 +164,11 @@ func TestHTTPHandler_MiddlewareApplied(t *testing.T) {
 	gateway.ResetForTesting()
 	defer gateway.ResetForTesting()
 
-	gateway.RegisterMiddleware(gateway.MiddlewareDef{
-		Name:    "test-injector",
-		Domains: []string{"injected.local"},
-		Func: func(ctx *gateway.MiddlewareContext) error {
-			ctx.Request.Header.Set("X-Injected", "secret-token")
-			return nil
-		},
+	gateway.RegisterMiddleware("test-injector", func(ctx *gateway.MiddlewareContext) error {
+		ctx.Request.Header.Set("X-Injected", "secret-token")
+		return nil
 	})
+	gateway.BindDomains("test-injector", []string{"injected.local"})
 
 	var receivedHeader string
 	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {

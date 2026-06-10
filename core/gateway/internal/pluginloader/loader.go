@@ -64,13 +64,10 @@ func loadPlugin(plugin PluginConfig) error {
 		opts := plugin.Options
 		pluginDataDir := dataDir
 
-		gateway.RegisterMiddleware(gateway.MiddlewareDef{
-			Name:    mwName,
-			Domains: domains,
-			Func: func(ctx *gateway.MiddlewareContext) error {
-				return execMiddleware(bundled, ctx, opts, pluginDataDir)
-			},
+		gateway.RegisterMiddleware(mwName, func(ctx *gateway.MiddlewareContext) error {
+			return execMiddleware(bundled, ctx, opts, pluginDataDir)
 		})
+		gateway.BindDomains(mwName, domains)
 	}
 
 	// Load route handlers

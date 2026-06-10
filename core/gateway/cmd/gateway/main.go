@@ -62,15 +62,13 @@ func main() {
 		domain := ah.Domain
 		header := ah.Header
 		value := ah.Value
+		name := fmt.Sprintf("auth-header:%s:%d", domain, i)
 		gateway.RegisterSecret(value)
-		gateway.RegisterMiddleware(gateway.MiddlewareDef{
-			Name:    fmt.Sprintf("auth-header:%s:%d", domain, i),
-			Domains: []string{domain},
-			Func: func(ctx *gateway.MiddlewareContext) error {
-				ctx.Request.Header.Set(header, value)
-				return nil
-			},
+		gateway.RegisterMiddleware(name, func(ctx *gateway.MiddlewareContext) error {
+			ctx.Request.Header.Set(header, value)
+			return nil
 		})
+		gateway.BindDomains(name, []string{domain})
 	}
 
 	// Collect ALL secrets (from config auth_headers + TS plugins)
