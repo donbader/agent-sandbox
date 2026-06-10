@@ -223,13 +223,13 @@ Option types: `string`, `object`, `boolean`, `integer`. The `required` and `defa
 
 ## Development Workflow
 
-Use `--core=./core` to point the CLI at your local core directory during development:
+Use `--dev` to build from source and auto-compile the gateway binary for your Docker platform:
 
 ```bash
-agent-sandbox generate --core=./core
+agent-sandbox --dev -C examples/local-coding generate
 ```
 
-This bypasses the GitHub Releases fetch and uses plugins directly from `core/plugins/`. Edit TypeScript, re-run `generate`, and `compose up --build` to test changes.
+This bypasses the GitHub Releases fetch and uses plugins directly from `core/plugins/`. The gateway binary is cross-compiled automatically for the Docker daemon's architecture. Edit TypeScript, re-run `generate`, and `compose up --build` to test changes.
 
 ## Examples
 
