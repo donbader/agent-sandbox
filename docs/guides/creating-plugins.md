@@ -83,9 +83,26 @@ requires:
 
 Declares directories bundled with the plugin. These directories are packaged alongside the plugin and extracted during generation. In templates, use `{{ asset "name" }}` to reference the extracted path.
 
+Simple form (string):
+
 ```yaml
 assets:
   - agent-manager/
+```
+
+Extended form with exclude patterns:
+
+```yaml
+assets:
+  - path: agent-manager/
+    exclude: [node_modules, dist, "*.test.*"]
+```
+
+Exclude patterns use `filepath.Match` syntax and match against any path segment. This prevents dev-only artifacts from leaking into the Docker build context.
+
+In templates, reference assets by name (the directory name without trailing slash):
+
+```yaml
 contributes:
   runtime:
     extra_builds:
@@ -225,6 +242,33 @@ contributes:
 ```
 
 ## Writing a Gateway Middleware
+
+### TLS and the Gateway CA Certificate
+
+The agent-sandbox gateway uses a MITM proxy to intercept outbound HTTPS traffic for credential injection. A self-signed CA certificate is generated at startup and installed into the container's system CA store.
+
+**Important:** Node.js does not use the system CA store. It ships its own bundled Mozilla CAs. Any Node.js process making HTTPS calls through the gateway will get TLS errors unless `NODE_EXTRA_CA_CERTS` is set.
+
+The agent container's Dockerfile sets `ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/gateway-ca.crt`, and the entrypoint exports it. However, some ACP clients (e.g., OpenACP) filter environment variables before spawning agent subprocesses for security reasons. If your plugin spawns agents through such a client, you must ensure `NODE_EXTRA_CA_CERTS` is passed through.
+
+**For OpenACP:** Add it to the agent's `env` field in `.openacp/agents.json`:
+
+```json
+{
+  "version": 1,
+  "installed": {
+    "my-agent": {
+      "env": {
+        "NODE_EXTRA_CA_CERTS": "/usr/local/share/ca-certificates/gateway-ca.crt"
+      }
+    }
+  }
+}
+```
+
+**For custom channel adapters that spawn agent-manager directly:** The env var is already inherited from the container's environment — no action needed.
+
+**Symptoms of a missing CA cert:** TLS handshake failures (EOF), `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, or `SELF_SIGNED_CERT_IN_CHAIN` errors in gateway logs showing repeated connection attempts with no successful forwarding.
 
 Gateway middlewares are Go files compiled into the gateway binary during Docker build (not during CLI build). Users do not need Go installed.
 
