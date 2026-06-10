@@ -60,7 +60,7 @@ Local plugin paths are validated to not escape the project directory (path trave
 
 ## Core Version Fetching
 
-- CLI queries GitHub Releases API for `core-v*` tags
+- CLI queries GitHub Releases API for `v*` tags
 - Downloads `agent-sandbox-core-<version>.tar.gz` from release assets
 - Caches at `~/.cache/agent-sandbox/core/<version>/` (Linux) or `~/Library/Caches/agent-sandbox/core/<version>/` (macOS)
 - `core_version: latest` resolves to the newest tag (cached for 1 hour)

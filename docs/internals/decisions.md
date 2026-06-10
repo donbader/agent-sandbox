@@ -75,10 +75,10 @@
 
 | Change | User action |
 |--------|-------------|
-| New built-in plugin | Push `core-v*` tag, then `agent-sandbox generate` fetches it |
-| Plugin data fix (runtime.yaml) | Push `core-v*` tag, then `agent-sandbox generate` fetches it |
-| Gateway handler fix | Push `core-v*` tag, then rebuild container |
-| Channel plugin fix | Push `core-v*` tag, then rebuild container |
+| New built-in plugin | Push `v*` tag, then `agent-sandbox generate` fetches it |
+| Plugin data fix (runtime.yaml) | Push `v*` tag, then `agent-sandbox generate` fetches it |
+| Gateway handler fix | Push `v*` tag, then rebuild container |
+| Channel plugin fix | Push `v*` tag, then rebuild container |
 | CLI template engine fix | `agent-sandbox upgrade` |
 | Config schema change | Edit agent.yaml → re-generate |
 

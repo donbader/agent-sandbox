@@ -17,7 +17,7 @@ The split solves all three: the shim is stable, the core is versioned per-projec
 1. Handles `version` and `upgrade` directly (no core needed)
 2. For all other commands, resolves the target core version:
    - Reads `core_version` from `agent.yaml` in the working directory (or `-C` target)
-   - If `latest`, queries GitHub API for newest `core-v*` tag (cached 1h)
+   - If `latest`, queries GitHub API for newest `v*` tag (cached 1h)
    - If a specific version (e.g. `v0.13.0`), uses it directly
 3. Checks if that version is cached at `~/.agent-sandbox/core/<version>/`
 4. If not cached, downloads the platform-appropriate tarball from GitHub Releases
@@ -71,7 +71,7 @@ Multiple core versions coexist. Different projects can pin different versions wi
 
 ## Release Model
 
-- **Core releases** are the primary release mechanism. Tagged `core-v*`, they produce platform tarballs containing everything the core binary needs.
+- **Core releases** are the primary release mechanism. Tagged `v*`, they produce platform tarballs containing everything the core binary needs.
 - **Shim releases** are rare — only when the shim protocol changes (new env vars, different resolution logic, new self-hosted commands).
 - **Legacy CLI releases** (GoReleaser) are being retired after v1.27.0.
 

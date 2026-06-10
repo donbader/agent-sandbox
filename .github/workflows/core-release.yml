@@ -1,9 +1,9 @@
-name: Core Release
+name: Release
 
 on:
   push:
     tags:
-      - "core-v*"
+      - "v*"
 
 permissions:
   contents: write
@@ -39,7 +39,7 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#core-}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Build host binary
         run: |
@@ -151,17 +151,17 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Core ${{ needs.build.outputs.version }}"
+          name: "${{ needs.build.outputs.version }}"
           body: |
-            Core release `${{ needs.build.outputs.version }}` for agent-sandbox.
+            Release `${{ needs.build.outputs.version }}` for agent-sandbox.
 
             Contains platform-specific host binary (`agent-sandbox-core`), pre-built gateway binaries (linux/amd64 + linux/arm64), templates, plugins (with TS source), presets, and SDK.
 
             ### Artifacts
-            - `core-${{ needs.build.outputs.version }}-darwin-arm64.tar.gz` — macOS Apple Silicon
-            - `core-${{ needs.build.outputs.version }}-darwin-amd64.tar.gz` — macOS Intel
-            - `core-${{ needs.build.outputs.version }}-linux-amd64.tar.gz` — Linux x86_64
-            - `core-${{ needs.build.outputs.version }}-linux-arm64.tar.gz` — Linux ARM64
+            - `agent-sandbox-core-${{ needs.build.outputs.version }}-darwin-arm64.tar.gz` — macOS Apple Silicon
+            - `agent-sandbox-core-${{ needs.build.outputs.version }}-darwin-amd64.tar.gz` — macOS Intel
+            - `agent-sandbox-core-${{ needs.build.outputs.version }}-linux-amd64.tar.gz` — Linux x86_64
+            - `agent-sandbox-core-${{ needs.build.outputs.version }}-linux-arm64.tar.gz` — Linux ARM64
 
             Used by CLI when `core_version: ${{ needs.build.outputs.version }}` is set in agent.yaml.
           files: artifacts/*

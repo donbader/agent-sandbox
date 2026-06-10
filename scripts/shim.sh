@@ -5,7 +5,7 @@ SHIM_VERSION="1.5.0"
 GITHUB_REPO="donbader/agent-sandbox"
 SANDBOX_HOME="${AGENT_SANDBOX_HOME:-$HOME/.agent-sandbox}"
 CACHE_DIR="$SANDBOX_HOME/core"
-SHIM_URL="https://github.com/$GITHUB_REPO/releases/download/shim-latest/shim.sh"
+SHIM_URL="https://raw.githubusercontent.com/$GITHUB_REPO/main/scripts/shim.sh"
 
 die() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 
@@ -13,8 +13,8 @@ die() { printf 'Error: %s\n' "$1" >&2; exit 1; }
 
 resolve_latest() {
   curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=20" \
-    | grep '"tag_name":' | grep 'core-v' | head -1 \
-    | sed 's/.*"core-v\([^"]*\)".*/\1/'
+    | grep '"tag_name":' | grep '"v' | head -1 \
+    | sed 's/.*"v\([^"]*\)".*/\1/'
 }
 
 ensure_cached() {
@@ -23,7 +23,7 @@ ensure_cached() {
   _tmp="$_dir.tmp.$$"
   rm -rf "$_tmp"; mkdir -p "$_tmp"
   printf 'Downloading core %s...\n' "$1" >&2
-  curl -fsSL "https://github.com/$GITHUB_REPO/releases/download/core-v${1}/agent-sandbox-core-v${1}-${PLATFORM}.tar.gz" \
+  curl -fsSL "https://github.com/$GITHUB_REPO/releases/download/v${1}/agent-sandbox-core-v${1}-${PLATFORM}.tar.gz" \
     | tar -xz -C "$_tmp" || { rm -rf "$_tmp"; die "Failed to download core $1"; }
   rm -rf "$_dir"; mv "$_tmp" "$_dir"; touch "$_dir/.complete"
 }

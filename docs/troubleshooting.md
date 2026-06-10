@@ -116,7 +116,7 @@ GitHub API returned no matching release for the requested version.
 **Checks:**
 - GitHub API rate limit may be exhausted — wait or set `GITHUB_TOKEN` in your environment
 - Try again in a few minutes
-- Verify the version exists: `gh release list -R donbader/agent-sandbox | grep core-v`
+- Verify the version exists: `gh release list -R donbader/agent-sandbox | grep '"v'`
 
 ### "Invalid core_version"
 

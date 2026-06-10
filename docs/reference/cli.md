@@ -14,7 +14,7 @@ From the user's perspective, you just run `agent-sandbox <command>`. The shim is
 When you run any command, the shim:
 
 1. Reads `core_version` from `agent.yaml` in the current (or `-C`) directory
-2. If `latest`, queries GitHub API for the newest `core-v*` release (cached 1h)
+2. If `latest`, queries GitHub API for the newest `v*` release (cached 1h)
 3. Downloads the core binary if not already cached at `~/.agent-sandbox/core/<version>/`
 4. Execs into `agent-sandbox-core` with all original arguments
 

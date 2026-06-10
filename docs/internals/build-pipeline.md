@@ -115,7 +115,7 @@ CMD ["sleep", "infinity"]
 | Root go.mod + go.sum | Gateway build dependencies | ~5KB | Indefinite (per version) |
 | Generation templates (`templates/`) | Dockerfile, entrypoint, gateway Dockerfile | ~5KB | Indefinite (per version) |
 
-For `core_version: latest`, the CLI queries the GitHub API to find the newest `core-v*` release (cached 1h). For specific versions (e.g. `core_version: v1.0.0`), the tarball is cached indefinitely.
+For `core_version: latest`, the CLI queries the GitHub API to find the newest `v*` release (cached 1h). For specific versions (e.g. `core_version: v1.0.0`), the tarball is cached indefinitely.
 
 Gateway rewriters (auth-header, telegram-url) are config-driven — instantiated at runtime from `config.yaml`, not compiled per-plugin.
 
@@ -232,7 +232,7 @@ agent-sandbox/
 
 ### Core Release (primary)
 
-Tagged `core-v*`. Produces 4 platform-specific tarballs:
+Tagged `v*`. Produces 4 platform-specific tarballs:
 
 | Platform | Tarball |
 |----------|---------|
