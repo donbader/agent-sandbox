@@ -117,7 +117,7 @@ CMD ["sleep", "infinity"]
 
 For `core_version: latest`, the CLI queries the GitHub API to find the newest `v*` release (cached 1h). For specific versions (e.g. `core_version: v1.0.0`), the tarball is cached indefinitely.
 
-Gateway rewriters (auth-header, telegram-url) are config-driven — instantiated at runtime from `config.yaml`, not compiled per-plugin.
+Gateway rewriters (auth-header) are config-driven — instantiated at runtime from `config.yaml`, not compiled per-plugin.
 
 ## Secret Resolution via .env
 
@@ -127,7 +127,7 @@ The `generate` command loads the project's `.env` file early in the build flow. 
 
 The generated `docker-compose.yml` includes several conveniences:
 
-- **Network alias:** The agent service gets a `agent` network alias, so sidecar containers can reach it via hostname `agent` (e.g. `ws://agent:3100/acp`).
+- **Network alias:** The agent service gets an `agent` network alias, so other containers on the internal network can reach it by hostname.
 - **Healthcheck:** If the agent runtime exposes ports (declared in `preset.yaml`), a healthcheck is added using `curl` against the first declared port's `/health` endpoint.
 - **Sidecar dependency:** Any sidecar services defined by plugins implicitly get `depends_on: { agent: { condition: service_healthy } }`, ensuring the agent is healthy before sidecars start.
 
@@ -146,7 +146,7 @@ The gateway binary is compiled during Docker build, not CLI build:
 1. CLI fetches gateway core source from GitHub Releases cache to `.build/gateway-src/` (includes `core/gateway/` + `core/sdk/` + root `go.mod`/`go.sum`)
 2. CLI generates `config.yaml` with rewriter rules from active feature plugins
 3. Docker multi-stage compiles gateway binary into a single binary
-4. Config-driven rewriter types (`telegram-url`, `auth-header`) are instantiated at runtime from `config.yaml`
+4. Config-driven rewriter types (`auth-header`) are instantiated at runtime from `config.yaml`
 
 This means:
 - Gateway config changes = re-run `agent-sandbox generate`, rebuild container

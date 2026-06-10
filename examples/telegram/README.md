@@ -1,15 +1,15 @@
 # Telegram Bot Example
 
-A sandboxed codex agent accessible via Telegram. Uses ACP (Agent Client Protocol) over stdio to manage codex, with a sidecar adapter bridging Telegram messages via WebSocket.
+A sandboxed codex agent accessible via Telegram, using OpenACP as the channel layer.
 
 ## Architecture
 
 ```
-Telegram API (long-polling via grammY)
+Telegram API (forum Topics)
      |
-  telegram-adapter (sidecar container)
-     | WebSocket (ws://agent:3100/acp)
-  agent-manager (entrypoint, inside agent container)
+  OpenACP (entrypoint, manages Telegram channel)
+     | ACP over stdio
+  agent-manager (stdio relay)
      | ACP over stdio
   codex-acp (child process)
      | HTTPS (transparent proxy via iptables DNAT)
@@ -18,11 +18,11 @@ Telegram API (long-polling via grammY)
   LLM API (agent-gateway.stx-ai.net)
 ```
 
-**agent-manager** — spawns codex-acp, performs ACP handshake (initialize + authenticate), exposes an ACP endpoint over HTTP/WebSocket on port 3100.
+**OpenACP** — entrypoint process. Manages the Telegram channel via forum Topics, spawns agent-manager over stdio using the ACP protocol.
 
-**telegram-adapter** — connects to agent-manager via WebSocket, receives Telegram messages via grammY long-polling, forwards them as ACP prompts.
+**agent-manager** — spawned by OpenACP via stdio. Spawns codex-acp (or any other ACP agent) as a child process and relays ACP messages.
 
-**gateway** — transparent HTTPS proxy that MITMs traffic, injects auth headers, rewrites credentials.
+**gateway** — transparent HTTPS proxy that MITMs traffic, injects auth headers, rewrites credentials (e.g. Telegram bot token rewriting).
 
 ## Startup Sequence
 
@@ -30,10 +30,9 @@ Telegram API (long-polling via grammY)
 2. `agent-sandbox compose up --build` builds and starts all containers
 3. Gateway starts first (healthcheck), agent container waits for it
 4. Agent container sets up iptables DNAT redirect (transparent proxy), installs CA cert
-5. Agent-manager starts, spawns codex-acp, performs ACP init + auth handshake
-6. Agent-manager exposes HTTP/WS endpoint on port 3100 (healthcheck)
-7. Telegram-adapter starts (depends_on agent healthy), connects to `ws://agent:3100/acp`
-8. User messages flow: Telegram -> adapter -> agent-manager -> codex-acp -> gateway -> LLM API -> response back
+5. OpenACP starts as entrypoint, spawns agent-manager via stdio (ACP)
+6. agent-manager spawns codex-acp via stdio, performs ACP init + auth handshake
+7. User messages flow: Telegram → OpenACP → agent-manager → codex-acp → gateway → LLM API → response back
 
 ## Setup
 
@@ -63,8 +62,8 @@ agent-sandbox compose logs -f
 
 ## Configuration
 
-- `agent.yaml` — agent config (runtime, gateway, plugins, adapter)
-- `plugins/telegram/` — local plugin (telegram-adapter sidecar definition)
+- `agent.yaml` — agent config (runtime, gateway, plugins)
+- `plugins/telegram/` — local plugin (gateway middleware for bot token rewriting)
 
 ### agent.yaml
 
@@ -77,7 +76,6 @@ runtime:
   extra_builds:
     - "RUN npm install -g @agentclientprotocol/codex-acp"
     - "ENV OPENAI_API_KEY=gateway-managed"
-  entrypoint: ["node", "/opt/agent-manager/dist/index.js"]
 
 gateway:
   services:
@@ -96,17 +94,21 @@ installations:
       acp_command: ["codex-acp"]
       acp_install: "npm install -g @zed-industries/codex-acp@0.15.0"
 
-  - plugin: ./plugins/telegram
+  - plugin: ./plugins/open-acp
     options:
       bot_token: "${TELEGRAM_BOT_TOKEN}"
       allowed_users:
         - "@${TELEGRAM_USERNAME}"
+
+  - plugin: ./plugins/telegram
+    options:
+      bot_token: "${TELEGRAM_BOT_TOKEN}"
 ```
 
 ## How It Works
 
-The agent container runs `agent-manager` as its entrypoint. Agent-manager spawns `codex-acp` as a child process and communicates via ACP over stdio. After completing the ACP handshake, it exposes an HTTP/WebSocket server on port 3100.
+OpenACP runs as the container entrypoint and manages the Telegram channel using forum Topics (one topic per conversation). It spawns agent-manager via stdio using the ACP protocol.
 
-The telegram-adapter runs as a separate sidecar container. It connects to the agent-manager's WebSocket endpoint and polls Telegram for messages using grammY. When a message arrives from an allowed user, the adapter sends it as an ACP prompt over the WebSocket. Responses stream back the same way.
+agent-manager in turn spawns `codex-acp` as a child process and relays ACP messages between OpenACP and the agent. The entire chain is stdio-based — no WebSocket or HTTP between components.
 
-All outbound HTTPS from the agent container is transparently redirected through the gateway via iptables DNAT. The gateway MITMs connections and injects real credentials (LLM API key) so the agent never sees actual secrets.
+All outbound HTTPS from the agent container is transparently redirected through the gateway via iptables DNAT. The gateway MITMs connections and injects real credentials (LLM API key, Telegram bot token rewriting) so the agent never sees actual secrets.

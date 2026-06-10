@@ -58,7 +58,7 @@ contributes:
       my-adapter:
         build: ./my-adapter
         environment:
-          AGENT_URL: "ws://agent:3100/acp"
+          UPSTREAM_URL: "http://agent:8080/api"
 ```
 
 ### `options` fields
@@ -174,7 +174,7 @@ contributes:
       my-adapter:
         build: ./my-adapter
         environment:
-          AGENT_URL: "ws://agent:3100/acp"
+          UPSTREAM_URL: "http://agent:8080/api"
 ```
 
 Each entry under `services` follows Docker Compose service syntax (build, image, environment, ports, volumes, etc.).

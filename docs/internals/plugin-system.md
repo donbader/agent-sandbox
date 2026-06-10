@@ -102,12 +102,14 @@ Template functions: `toJSON`, `asset`, `index`.
 
 ## Gateway Middleware Compilation
 
-Middleware `.go` files are Go templates rendered at generate-time, then compiled into the gateway binary during Docker build:
+Custom Go middlewares are rendered as Go templates at generate-time. When Go is available, the generator copies the source tree to a temp directory, injects the rendered middleware files + a blank import, compiles the gateway binary, then cleans up. The source tree is never modified.
 
 1. Generate-time: render `.go` template with plugin options (secrets resolved from `.env`)
-2. Copy rendered `.go` into `.build/gateway-src/core/gateway/middlewares/custom/`
-3. Docker build: gateway `Dockerfile` runs `go build` which picks up all files in `custom/`
-4. Result: gateway binary contains all middleware logic with secrets baked in
+2. Copy gateway source to a temp directory
+3. Inject rendered `.go` files into `core/gateway/middlewares/custom/` within the temp dir
+4. Add blank import so Go compiler picks up the custom package
+5. Run `go build` in the temp dir to produce the gateway binary
+6. Copy compiled binary to `.build/`, remove temp dir
 
 Middleware uses the SDK:
 

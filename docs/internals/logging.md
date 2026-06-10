@@ -165,7 +165,7 @@ log_level: debug
 
 ## Output Format
 
-Both sides output **JSON to stdout**, one object per line:
+Channel-manager outputs **JSON to stdout**, one object per line. Agent-manager outputs **JSON to stderr** (keeping stdout clean for ACP protocol traffic):
 
 ```json
 {"level":"info","time":1780442704733,"component":"plugin:mcp-oauth","providers":["notion"],"msg":"plugin initialized"}
