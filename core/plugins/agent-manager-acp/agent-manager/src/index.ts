@@ -9,6 +9,7 @@ const log = createLogger("agent-manager");
 interface ManagerConfig {
   acp_command: string[];
   cwd: string;
+  ws_port?: number;
 }
 
 async function main(): Promise<void> {
@@ -61,10 +62,9 @@ async function main(): Promise<void> {
     log.info("agent ACP authenticated");
   }
 
-  // WebSocket server: enabled by default on port 3100.
-  // Set AGENT_MANAGER_WS_PORT=0 to disable.
-  const wsPortStr = process.env.AGENT_MANAGER_WS_PORT ?? process.env.AGENT_MANAGER_PORT ?? "3100";
-  const wsPort = parseInt(wsPortStr, 10);
+  // WebSocket server: controlled by plugin.options.port in config.
+  // Set to 0 to disable WS and run stdio-only.
+  const wsPort = config.ws_port ?? 3100;
 
   // Stdio relay: always available for local ACP clients.
   // Don't exit on stdin close when WebSocket server is also running.
