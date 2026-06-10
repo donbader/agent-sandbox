@@ -155,11 +155,14 @@ if [ -n "$DEV_MODE" ]; then
     die "Dev mode requires 'go' or 'flox' on PATH"
   fi
   # Strip --dev from args before exec
-  _args=""
-  for _arg in "$@"; do
-    [ "$_arg" = "--dev" ] || _args="$_args \"$_arg\""
+  _i=0; _total=$#
+  while [ "$_i" -lt "$_total" ]; do
+    _i=$((_i + 1))
+    _arg="$1"; shift
+    [ "$_arg" = "--dev" ] && continue
+    set -- "$@" "$_arg"
   done
-  eval exec "$DEV_BIN" $_args
+  exec "$DEV_BIN" "$@"
 fi
 
 # --- Resolve core version ---

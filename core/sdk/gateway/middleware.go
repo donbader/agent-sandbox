@@ -76,19 +76,6 @@ type pendingBinding struct {
 
 var pendingBindings []pendingBinding
 
-// applyPendingBindings resolves any BindDomains calls that arrived before RegisterMiddleware.
-func applyPendingBindings() {
-	for _, pb := range pendingBindings {
-		for i := range registry {
-			if registry[i].Name == pb.name {
-				registry[i].Domains = pb.domains
-				break
-			}
-		}
-	}
-	pendingBindings = nil
-}
-
 // All returns all registered middleware definitions.
 func All() []MiddlewareDef {
 	return registry
