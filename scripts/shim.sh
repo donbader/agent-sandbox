@@ -166,6 +166,9 @@ else
   die "No agent.yaml or fleet.yaml found in $PROJECT_DIR. Run 'agent-sandbox init' first."
 fi
 
+# Strip leading 'v' prefix if present (e.g. v1.2.3 → 1.2.3)
+VER="${VER#v}"
+
 case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) die "Invalid core_version: '$VER'" ;; esac
 
 ensure_cached "$VER"
