@@ -181,30 +181,32 @@ resolve_fleet_version() {
   resolve_version_from_yaml "$_agent_yaml"
 }
 
+# require_latest resolves latest version or dies trying.
+require_latest() {
+  _v=$(resolve_latest)
+  [ -n "$_v" ] || die "Could not resolve latest core version"
+  printf '%s' "$_v"
+}
+
 if [ -f "$PROJECT_DIR/agent.yaml" ]; then
   VER=$(resolve_version_from_yaml "$PROJECT_DIR/agent.yaml")
   if [ -z "$VER" ]; then
-    VER=$(resolve_latest)
-    [ -n "$VER" ] || die "Could not resolve latest core version"
+    VER=$(require_latest)
     printf 'Warning: core_version not set. Using latest (%s).\n' "$VER" >&2
     printf 'Pin it: add core_version: %s to agent.yaml\n' "$VER" >&2
   elif [ "$VER" = "latest" ]; then
-    VER=$(resolve_latest)
-    [ -n "$VER" ] || die "Could not resolve latest core version"
+    VER=$(require_latest)
   fi
 elif [ -f "$PROJECT_DIR/fleet.yaml" ]; then
   VER=$(resolve_fleet_version)
   if [ -z "$VER" ]; then
-    VER=$(resolve_latest)
-    [ -n "$VER" ] || die "Could not resolve latest core version"
+    VER=$(require_latest)
     printf 'Warning: core_version not set in fleet agents. Using latest (%s).\n' "$VER" >&2
   elif [ "$VER" = "latest" ]; then
-    VER=$(resolve_latest)
-    [ -n "$VER" ] || die "Could not resolve latest core version"
+    VER=$(require_latest)
   fi
 elif [ "$CMD" = "init" ]; then
-  VER=$(resolve_latest)
-  [ -n "$VER" ] || die "Could not resolve latest core version"
+  VER=$(require_latest)
 else
   die "No agent.yaml or fleet.yaml found in $PROJECT_DIR. Run 'agent-sandbox init' first."
 fi
