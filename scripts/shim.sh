@@ -76,9 +76,14 @@ done
 
 case "$CMD" in
   upgrade)
+    _old_ver="$SHIM_VERSION"
     self_replace
-    _ver=$(grep '^SHIM_VERSION=' "$SANDBOX_HOME/bin/agent-sandbox" | cut -d'"' -f2)
-    printf 'Upgraded to shim v%s\n' "$_ver"
+    _new_ver=$(grep '^SHIM_VERSION=' "$SANDBOX_HOME/bin/agent-sandbox" | cut -d'"' -f2)
+    if [ "$_old_ver" = "$_new_ver" ]; then
+      printf 'Already up to date (shim v%s)\n' "$_old_ver"
+    else
+      printf 'Upgraded shim v%s → v%s\n' "$_old_ver" "$_new_ver"
+    fi
     exit 0 ;;
   version)
     printf 'shim: %s\n' "$SHIM_VERSION"
