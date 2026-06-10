@@ -2,6 +2,6 @@ name: claude-code
 base_image: node:24-slim
 install:
   - apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*
-  - --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code@2.1.170 @agentclientprotocol/claude-agent-acp@0.40.0 && node /usr/local/lib/node_modules/@anthropic-ai/claude-code/install.cjs
+  - --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code@2.1.170 @agentclientprotocol/claude-agent-acp@0.44.0 && node /usr/local/lib/node_modules/@anthropic-ai/claude-code/install.cjs
 cmd: ["sleep", "infinity"]
 acp_cmd: ["claude-agent-acp"]
