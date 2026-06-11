@@ -50,6 +50,9 @@ func loadPlugin(plugin PluginConfig) error {
 		dataDir = d
 	}
 
+	// Resolve ${VAR} references in options from environment
+	opts := resolveEnvVars(plugin.Options)
+
 	// Load middleware handlers
 	for _, mw := range plugin.Gateway.Middlewares {
 		entryPoint := filepath.Join(plugin.Dir, mw.Script)
@@ -61,7 +64,6 @@ func loadPlugin(plugin PluginConfig) error {
 		domains := mw.Domains
 		scriptName := filepath.Base(mw.Script)
 		mwName := fmt.Sprintf("ts:%s:%s", plugin.Name, scriptName)
-		opts := plugin.Options
 		pluginDataDir := dataDir
 
 		gateway.RegisterMiddleware(mwName, func(ctx *gateway.MiddlewareContext) error {
@@ -79,7 +81,6 @@ func loadPlugin(plugin PluginConfig) error {
 		}
 
 		namespacedPath := "/plugins/" + plugin.Name + normalizePath(route.Path)
-		opts := plugin.Options
 		pluginDataDir := dataDir
 
 		gateway.RegisterRoute(gateway.RouteDef{
@@ -175,4 +176,52 @@ func normalizePath(path string) string {
 		path = "/" + path
 	}
 	return strings.TrimRight(path, "/")
+}
+
+// resolveEnvVars recursively resolves ${VAR} patterns in plugin options
+// from the gateway's own environment variables.
+func resolveEnvVars(opts map[string]any) map[string]any {
+	resolved := make(map[string]any, len(opts))
+	for k, v := range opts {
+		resolved[k] = resolveValue(v)
+	}
+	return resolved
+}
+
+func resolveValue(v any) any {
+	switch val := v.(type) {
+	case string:
+		return expandEnv(val)
+	case map[string]any:
+		resolved := make(map[string]any, len(val))
+		for k, nested := range val {
+			resolved[k] = resolveValue(nested)
+		}
+		return resolved
+	case []any:
+		resolved := make([]any, len(val))
+		for i, item := range val {
+			resolved[i] = resolveValue(item)
+		}
+		return resolved
+	default:
+		return v
+	}
+}
+
+// expandEnv replaces all ${VAR} patterns in s with os.Getenv(VAR).
+func expandEnv(s string) string {
+	for {
+		start := strings.Index(s, "${")
+		if start == -1 {
+			return s
+		}
+		end := strings.Index(s[start+2:], "}")
+		if end == -1 {
+			return s
+		}
+		varName := s[start+2 : start+2+end]
+		envVal := os.Getenv(varName)
+		s = s[:start] + envVal + s[start+2+end+1:]
+	}
 }

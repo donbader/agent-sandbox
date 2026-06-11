@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
-	"github.com/donbader/agent-sandbox/internal/envvar"
 	"github.com/donbader/agent-sandbox/internal/plugin"
 	"gopkg.in/yaml.v3"
 )
@@ -251,14 +250,11 @@ func (g *Generator) writePluginsYAML(gatewayDir string, cfg *config.Config, cont
 			continue
 		}
 
-		// Resolve options (expand env vars)
+		// Pass options through verbatim — ${VAR} references are resolved
+		// by the gateway at startup from its own environment.
 		resolvedOpts := make(map[string]any, len(inst.Options))
 		for k, v := range inst.Options {
-			if s, ok := v.(string); ok {
-				resolvedOpts[k] = envvar.Expand(s)
-			} else {
-				resolvedOpts[k] = v
-			}
+			resolvedOpts[k] = v
 		}
 
 		entry := pluginsYAMLEntry{

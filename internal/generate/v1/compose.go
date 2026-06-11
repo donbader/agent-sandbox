@@ -360,9 +360,7 @@ func extractVolumeName(volume string) string {
 }
 
 // collectGatewayEnvVars extracts env var names referenced in gateway service headers
-// and returns them as docker-compose environment entries (passthrough format).
-// Note: middleware env vars are NOT included here — middleware code gets secrets
-// baked in at generate-time via template rendering.
+// and plugin options, returning them as docker-compose environment entries (passthrough format).
 func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) []string {
 	seen := map[string]bool{}
 
@@ -386,11 +384,40 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 		}
 	}
 
+	// From plugin installation options (${VAR} references resolved at gateway startup)
+	for _, inst := range cfg.Installations {
+		extractEnvVarsFromOptions(inst.Options, seen)
+	}
+
 	var envVars []string
 	for v := range seen {
 		envVars = append(envVars, v)
 	}
 	return envVars
+}
+
+// extractEnvVarsFromOptions recursively scans plugin options for ${VAR} references.
+func extractEnvVarsFromOptions(opts map[string]any, seen map[string]bool) {
+	for _, v := range opts {
+		scanValueForEnvVars(v, seen)
+	}
+}
+
+func scanValueForEnvVars(v any, seen map[string]bool) {
+	switch val := v.(type) {
+	case string:
+		if ev := envvar.Extract(val); ev != "" {
+			seen[ev] = true
+		}
+	case map[string]any:
+		for _, nested := range val {
+			scanValueForEnvVars(nested, seen)
+		}
+	case []any:
+		for _, item := range val {
+			scanValueForEnvVars(item, seen)
+		}
+	}
 }
 
 // mergeCapabilities deduplicates contributed capabilities into the base set.
