@@ -75,3 +75,52 @@ func TestLoadProject_NoFleetYAML(t *testing.T) {
 	_, err := LoadProject(dir)
 	assert.ErrorContains(t, err, "fleet.yaml")
 }
+
+func TestResolveAgent_SingleAgent(t *testing.T) {
+	project := &Project{
+		Dir: "/tmp/test",
+		Agents: []Agent{
+			{Name: "solo", Dir: "/tmp/test/solo", Config: &Config{Name: "solo"}},
+		},
+	}
+
+	// Empty name resolves to the only agent
+	agent, err := project.ResolveAgent("")
+	require.NoError(t, err)
+	assert.Equal(t, "solo", agent.Name)
+
+	// Explicit name also works
+	agent, err = project.ResolveAgent("solo")
+	require.NoError(t, err)
+	assert.Equal(t, "solo", agent.Name)
+
+	// Wrong name errors
+	_, err = project.ResolveAgent("nonexistent")
+	assert.ErrorContains(t, err, "not found")
+	assert.ErrorContains(t, err, "solo")
+}
+
+func TestResolveAgent_MultipleAgents(t *testing.T) {
+	project := &Project{
+		Dir: "/tmp/test",
+		Agents: []Agent{
+			{Name: "coder", Dir: "/tmp/test/coder", Config: &Config{Name: "coder"}},
+			{Name: "reviewer", Dir: "/tmp/test/reviewer", Config: &Config{Name: "reviewer"}},
+		},
+	}
+
+	// Empty name errors with list
+	_, err := project.ResolveAgent("")
+	assert.ErrorContains(t, err, "multiple agents")
+	assert.ErrorContains(t, err, "coder")
+	assert.ErrorContains(t, err, "reviewer")
+
+	// Explicit name works
+	agent, err := project.ResolveAgent("coder")
+	require.NoError(t, err)
+	assert.Equal(t, "coder", agent.Name)
+
+	agent, err = project.ResolveAgent("reviewer")
+	require.NoError(t, err)
+	assert.Equal(t, "reviewer", agent.Name)
+}
