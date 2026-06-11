@@ -18,8 +18,9 @@ import (
 )
 
 var (
-	outputPath = flag.String("o", "core/gateway/types/gateway.d.ts", "output path for generated .d.ts")
-	sourceDir  = flag.String("src", "core/gateway/internal/jsruntime", "directory to scan for annotations")
+	outputPath    = flag.String("o", "core/gateway/types/gateway.d.ts", "output path for generated .d.ts")
+	templatesOut  = flag.String("templates", "internal/generate/templates/gateway.d.ts", "output path for embedded templates copy")
+	sourceDir     = flag.String("src", "core/gateway/internal/jsruntime", "directory to scan for annotations")
 )
 
 // Annotation represents a parsed @ts-method or @ts-prop comment.
@@ -53,7 +54,7 @@ func main() {
 	output := generate(annotations)
 
 	// Also copy to templates dir for embedding
-	templatesPath := "internal/generate/templates/gateway.d.ts"
+	templatesPath := *templatesOut
 
 	for _, path := range []string{*outputPath, templatesPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

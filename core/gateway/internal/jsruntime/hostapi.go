@@ -1,6 +1,6 @@
 package jsruntime
 
-//go:generate go run ../../../../cmd/gen-gateway-types
+//go:generate go run ../../../../cmd/gen-gateway-types -src . -o ../../types/gateway.d.ts -templates ../../../../internal/generate/templates/gateway.d.ts
 
 import (
 	"context"
