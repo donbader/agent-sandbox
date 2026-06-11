@@ -335,4 +335,15 @@ func (g *Generator) writeGatewayBuildFiles(gatewayDir string) error {
 	return nil
 }
 
+// copyGatewayTypes writes gateway.d.ts into the .build/ directory so external
+// projects can reference it for TypeScript autocompletion in middlewares.
+func (g *Generator) copyGatewayTypes(buildDir string) error {
+	data, err := g.templates.LoadRaw("gateway.d.ts")
+	if err != nil {
+		// Non-fatal: types file is optional for older cores
+		return nil
+	}
+	return os.WriteFile(filepath.Join(buildDir, "gateway.d.ts"), []byte(data), 0644)
+}
+
 
