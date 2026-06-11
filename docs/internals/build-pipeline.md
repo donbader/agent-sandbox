@@ -97,10 +97,10 @@ Resolved values are baked into gateway `config.yaml` (for auth-header injection)
 ## CA Lifecycle
 
 If any plugin declares MITM domains (services with `https://` URLs), the generator:
-1. Creates a self-signed CA (cert + key) in `.build/gateway/ca/`
-2. The gateway uses this CA to issue per-domain certs at runtime
-3. The agent container trusts this CA (injected into system trust store)
-4. CA is regenerated on every `generate` (ephemeral)
+1. Configures the gateway to perform MITM on those domains
+2. The gateway generates/reuses a CA keypair at runtime (persisted on shared volume)
+3. The agent container trusts this CA (injected into system trust store at boot)
+4. CA persists across gateway restarts (365-day validity, auto-regenerated if expired)
 
 ## Dev Mode (`--dev`)
 

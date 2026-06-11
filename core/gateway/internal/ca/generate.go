@@ -9,16 +9,26 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-// GenerateAndStore creates a fresh ECDSA P-256 CA keypair, writes the public cert
-// to sharedCertPath (for the agent container) and the private key to privateKeyPath
-// (gateway-internal only). Returns the parsed tls.Certificate for MITM use.
+// GenerateAndStore loads an existing CA keypair if both files exist, or creates
+// a fresh ECDSA P-256 CA keypair. The public cert is written to sharedCertPath
+// (for the agent container) and the private key to privateKeyPath (gateway-internal).
+// Returns the parsed tls.Certificate for MITM use.
 func GenerateAndStore(sharedCertPath, privateKeyPath string) (tls.Certificate, error) {
+	// Try loading existing keypair first
+	if cert, err := loadExisting(sharedCertPath, privateKeyPath); err == nil {
+		slog.Info("reusing existing CA keypair", "cert", sharedCertPath)
+		return cert, nil
+	}
+
+	slog.Info("generating new CA keypair")
+
 	// Generate CA private key
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -37,7 +47,7 @@ func GenerateAndStore(sharedCertPath, privateKeyPath string) (tls.Certificate, e
 			CommonName:   "agent-sandbox CA",
 		},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
-		NotAfter:              time.Now().Add(24 * time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
@@ -84,4 +94,33 @@ func GenerateAndStore(sharedCertPath, privateKeyPath string) (tls.Certificate, e
 		Certificate: [][]byte{caDER},
 		PrivateKey:  caKey,
 	}, nil
+}
+
+// loadExisting attempts to load a CA cert+key from disk.
+// Returns an error if either file is missing or unparseable.
+func loadExisting(certPath, keyPath string) (tls.Certificate, error) {
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("parsing existing CA keypair: %w", err)
+	}
+
+	// Verify it hasn't expired
+	x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("parsing CA certificate: %w", err)
+	}
+	if time.Now().After(x509Cert.NotAfter) {
+		return tls.Certificate{}, fmt.Errorf("CA certificate expired at %s", x509Cert.NotAfter)
+	}
+
+	return cert, nil
 }
