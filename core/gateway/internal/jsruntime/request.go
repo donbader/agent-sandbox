@@ -50,25 +50,34 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 		}
 	}
 
-	requestObj := map[string]any{
-		"method":  rc.Request.Method,
-		"url":     rc.Request.URL.String(),
-		"host":    rc.Request.Host,
-		"path":    rc.Request.URL.Path,
-		"query":   query,
-		"headers": headers,
-		"setHeader": func(call goja.FunctionCall) goja.Value {
-			key := call.Argument(0).String()
-			val := call.Argument(1).String()
-			rc.Request.Header.Set(key, val)
-			return goja.Undefined()
-		},
-		"setPath": func(call goja.FunctionCall) goja.Value {
-			newPath := call.Argument(0).String()
-			rc.Request.URL.Path = newPath
-			rc.Request.URL.RawPath = ""
-			return goja.Undefined()
-		},
+	rt := vm.Runtime()
+
+	// Build the request object with read-only properties that throw on assignment.
+	// This prevents silent bugs where ctx.request.path = "..." does nothing.
+	requestObj := rt.NewObject()
+	requestObj.Set("method", rc.Request.Method)
+	requestObj.Set("url", rc.Request.URL.String())
+	requestObj.Set("host", rc.Request.Host)
+	requestObj.Set("path", rc.Request.URL.Path)
+	requestObj.Set("query", query)
+	requestObj.Set("headers", headers)
+	requestObj.Set("setHeader", func(call goja.FunctionCall) goja.Value {
+		key := call.Argument(0).String()
+		val := call.Argument(1).String()
+		rc.Request.Header.Set(key, val)
+		return goja.Undefined()
+	})
+	requestObj.Set("setPath", func(call goja.FunctionCall) goja.Value {
+		newPath := call.Argument(0).String()
+		rc.Request.URL.Path = newPath
+		rc.Request.URL.RawPath = ""
+		return goja.Undefined()
+	})
+
+	// Freeze read-only properties so assignment throws a TypeError in strict mode
+	// and is a no-op in sloppy mode (with a helpful error via defineProperty).
+	for _, prop := range []string{"method", "url", "host", "path", "query", "headers"} {
+		requestObj.DefineDataProperty(prop, requestObj.Get(prop), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
 	responseObj := map[string]any{
@@ -87,8 +96,6 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 			return goja.Undefined()
 		},
 	}
-
-	rt := vm.Runtime()
 
 	return map[string]any{
 		"request":  requestObj,
