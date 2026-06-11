@@ -65,16 +65,24 @@ type RequestHandler interface {
 
 ### Middleware (TypeScript plugins)
 
-All request modification flows through TypeScript plugins loaded at gateway startup. Each plugin exports a `middleware` function:
+All request modification flows through TypeScript plugins loaded at gateway startup. Each plugin exports a default handler function:
 
 ```typescript
-// core/plugins/github-pat/src/middleware.ts
-import type { MiddlewareContext } from "@agent-sandbox/sdk";
+/// <reference path="../../.build/gateway.d.ts" />
 
-export function middleware(ctx: MiddlewareContext): void {
-  ctx.request.setHeader("Authorization", `Bearer ${ctx.options.token}`);
-}
+const handler: MiddlewareHandler = (ctx, options) => {
+  ctx.request.setHeader("Authorization", `Bearer ${options.token}`);
+  gw.secrets.register(options.token);
+};
+export default handler;
 ```
+
+**ctx.request properties** (all read-only — assignment is a silent no-op):
+- `method`, `url`, `host`, `path`, `query`, `headers`
+
+**ctx.request mutators** (the ONLY way to modify requests):
+- `ctx.request.setHeader(key, val)` — set/overwrite a header
+- `ctx.request.setPath(newPath)` — rewrite the URL path (e.g. for token injection into path-based APIs like Telegram)
 
 Domain-scoped: each plugin only runs for requests matching its configured domains (declared in `plugin.yaml`).
 

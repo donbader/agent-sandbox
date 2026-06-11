@@ -164,26 +164,34 @@ All `contributes` fields support Go `text/template` syntax. Available data:
 
 TypeScript middleware intercepts proxied requests. Scripts are loaded by the gateway at runtime via goja (no compilation step).
 
+Type definitions are generated into `.build/gateway.d.ts` at generate time. Reference them for autocompletion:
+
 ```typescript
-// src/my-auth.ts
-export default function(ctx: any, options: any) {
+/// <reference path="../../.build/gateway.d.ts" />
+
+const handler: MiddlewareHandler = (ctx, options) => {
   const token = options.token;
   if (!token) return;
 
   const basic = gw.crypto.base64.encode("x-access-token:" + token);
   ctx.request.setHeader("Authorization", "Basic " + basic);
   gw.secrets.register(token);
-}
+};
+export default handler;
 ```
 
 **Key points:**
 
-- `export default function(ctx, options)` — required signature
-- `ctx.request` — access and modify the HTTP request (headers, body, URL)
+- `export default handler` — required: must export a function as default
+- `ctx.request.path`, `ctx.request.url` — read-only (assignment is a no-op)
+- `ctx.request.setHeader(key, val)` — set/overwrite a request header
+- `ctx.request.setPath(newPath)` — rewrite the URL path before forwarding
 - `ctx.abort(status, body)` — terminate the request early with a response
 - `options` — resolved plugin options from `agent.yaml`
 - `gw.*` — host APIs (see below)
 - Return normally → request continues to upstream
+
+**Common mistake:** Do NOT assign to `ctx.request.path` or `ctx.request.url` directly — it silently does nothing. Use `ctx.request.setPath()` instead.
 
 ## Writing a Route Handler
 
@@ -273,13 +281,16 @@ contributes:
 **3. Write the middleware** (`src/example-auth.ts`):
 
 ```typescript
-export default function(ctx: any, options: any) {
+/// <reference path="../../.build/gateway.d.ts" />
+
+const handler: MiddlewareHandler = (ctx, options) => {
   const token = options.token;
   if (!token) return;
 
   ctx.request.setHeader("Authorization", "Bearer " + token);
   gw.secrets.register(token);
-}
+};
+export default handler;
 ```
 
 **4. Configure in `agent.yaml`:**
