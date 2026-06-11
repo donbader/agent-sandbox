@@ -120,6 +120,7 @@ func composeCmd(dir *string) *cobra.Command {
 }
 
 func gatewayURLCmd(dir *string) *cobra.Command {
+	var agentName string
 	cmd := &cobra.Command{
 		Use:   "gateway-url",
 		Short: "Print the gateway's public URL (resolves dynamic port)",
@@ -135,13 +136,17 @@ func gatewayURLCmd(dir *string) *cobra.Command {
 			}
 			projectName := filepath.Base(absDir)
 
-			// Load config to get the agent name (gateway service = <name>-gateway)
-			cfg, err := config.Load(*dir)
+			project, err := config.LoadProject(*dir)
 			if err != nil {
-				return fmt.Errorf("load config: %w", err)
+				return fmt.Errorf("load project: %w", err)
 			}
 
-			gatewayService := cfg.Name + "-gateway"
+			agent, err := project.ResolveAgent(agentName)
+			if err != nil {
+				return err
+			}
+
+			gatewayService := agent.Name + "-gateway"
 
 			runtime := runtimeBinary(*dir)
 			c := exec.Command(runtime, "compose",
@@ -159,8 +164,6 @@ func gatewayURLCmd(dir *string) *cobra.Command {
 				return fmt.Errorf("could not resolve gateway port")
 			}
 
-			// docker compose port returns "0.0.0.0:PORT" or ":::PORT"
-			// Normalize to localhost
 			hostPort = strings.Replace(hostPort, "0.0.0.0:", "localhost:", 1)
 			if strings.HasPrefix(hostPort, ":::") {
 				hostPort = "localhost:" + strings.TrimPrefix(hostPort, ":::")
@@ -170,26 +173,21 @@ func gatewayURLCmd(dir *string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&agentName, "agent", "", "Agent name (required for multi-agent projects)")
 	return cmd
 }
 
 // runtimeBinary determines the container runtime CLI to use.
-// Priority: AGENT_SANDBOX_RUNTIME env var > agent.yaml runtime_engine > "docker"
+// Priority: AGENT_SANDBOX_RUNTIME env var > first agent's runtime_engine > "docker"
 func runtimeBinary(dir string) string {
 	if rt := os.Getenv("AGENT_SANDBOX_RUNTIME"); rt != "" {
 		return rt
 	}
-	// Try to load config for runtime_engine setting
-	cfg, err := loadConfigSafe(dir)
-	if err == nil && cfg.RuntimeEngine != "" {
-		return cfg.RuntimeEngineBinary()
+	project, err := config.LoadProject(dir)
+	if err == nil && len(project.Agents) > 0 && project.Agents[0].Config.RuntimeEngine != "" {
+		return project.Agents[0].Config.RuntimeEngineBinary()
 	}
 	return "docker"
-}
-
-// loadConfigSafe attempts to load config without failing fatally.
-func loadConfigSafe(dir string) (*config.Config, error) {
-	return config.Load(dir)
 }
 
 func initCmd() *cobra.Command {
