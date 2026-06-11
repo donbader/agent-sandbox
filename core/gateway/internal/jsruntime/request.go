@@ -63,6 +63,12 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 			rc.Request.Header.Set(key, val)
 			return goja.Undefined()
 		},
+		"setPath": func(call goja.FunctionCall) goja.Value {
+			newPath := call.Argument(0).String()
+			rc.Request.URL.Path = newPath
+			rc.Request.URL.RawPath = ""
+			return goja.Undefined()
+		},
 	}
 
 	responseObj := map[string]any{
