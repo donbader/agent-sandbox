@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=.build/schema.json
+# yaml-language-server: $schema=../.build/schema.json
 # Telegram bot agent — agent-manager-acp proxies ACP, telegram connects as sidecar.
 name: telegram-agent
 core_version: latest

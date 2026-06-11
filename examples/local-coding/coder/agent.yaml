@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=.build/schema.json
+# yaml-language-server: $schema=../.build/schema.json
 name: coder
 core_version: latest
 log_level: debug
