@@ -203,46 +203,6 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	return result
 }
 
-// BuildCompose generates a docker-compose.yml string from config and plugin contributions.
-// projectDir is used to compute relative paths for sidecar build contexts.
-func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir string) (string, error) {
-	buildDir := filepath.Join(projectDir, ".build")
-
-	pair := buildAgentPair(agentPairParams{
-		cfg:          cfg,
-		contribs:     contribs,
-		agentName:    cfg.Name,
-		gatewayName:  cfg.Name + "-gateway",
-		agentAlias:   "agent",
-		gatewayAlias: "gateway",
-		certsVolume:  "certs",
-		agentBuild: map[string]any{
-			"context":    "..",
-			"dockerfile": ".build/Dockerfile",
-		},
-		gatewayBuild: map[string]any{
-			"context":    "./gateway",
-			"dockerfile": "Dockerfile",
-		},
-		gatewayVolumes: []string{"certs:/shared/certs"},
-		sidecarPrefix:  "",
-		buildDir:       buildDir,
-		exposeGateway:  true,
-	})
-
-	compose := composeFile{
-		Services: pair.services,
-		Volumes:  pair.volumes,
-		Networks: map[string]any{"sandbox": map[string]any{"driver": "bridge"}},
-	}
-
-	data, err := yaml.Marshal(compose)
-	if err != nil {
-		return "", fmt.Errorf("marshal compose: %w", err)
-	}
-	return string(data), nil
-}
-
 // ComposeAgentEntry holds the data needed to generate one agent's services in a fleet compose file.
 type ComposeAgentEntry struct {
 	Config   *config.Config
@@ -304,68 +264,6 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 	data, err := yaml.Marshal(compose)
 	if err != nil {
 		return "", fmt.Errorf("marshal compose: %w", err)
-	}
-	return string(data), nil
-}
-
-// BuildFleetCompose generates a unified docker-compose.yml for multiple agents.
-// Each agent gets its own service + gateway, sharing a single sandbox network.
-func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, error) {
-	compose := composeFile{
-		Services: map[string]any{},
-		Volumes:  map[string]any{},
-		Networks: map[string]any{"sandbox": map[string]any{"driver": "bridge"}},
-	}
-
-	for _, agent := range agents {
-		cfg := agent.Config
-		agentName := cfg.Name
-		gatewayName := cfg.Name + "-gateway"
-		certsVolume := agentName + "-certs"
-
-		// Relative build dir from .build/ (e.g., "./<agent-name>")
-		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
-		if err != nil {
-			relBuildDir = agent.BuildDir
-		}
-
-		// Paths must be relative to .build/ (where docker-compose.yml lives),
-		// not .build/<agent>/ (the per-agent build dir).
-		composeDir := filepath.Join(projectDir, ".build")
-
-		pair := buildAgentPair(agentPairParams{
-			cfg:          cfg,
-			contribs:     agent.Contribs,
-			agentName:    agentName,
-			gatewayName:  gatewayName,
-			agentAlias:   agentName,
-			gatewayAlias: gatewayName,
-			certsVolume:  certsVolume,
-			agentBuild: map[string]any{
-				"context":    "..",
-				"dockerfile": filepath.Join(".build", relBuildDir, "Dockerfile"),
-			},
-			gatewayBuild: map[string]any{
-				"context":    fmt.Sprintf("./%s/gateway", relBuildDir),
-				"dockerfile": "Dockerfile",
-			},
-			gatewayVolumes: []string{
-				certsVolume + ":/shared/certs",
-				fmt.Sprintf("./%s/config.yaml:/etc/gateway/config.yaml:ro", relBuildDir),
-			},
-			sidecarPrefix: agentName,
-			buildDir:      composeDir,
-			exposeGateway: false,
-		})
-
-		// Merge pair results into the fleet compose file.
-		maps.Copy(compose.Services, pair.services)
-		maps.Copy(compose.Volumes, pair.volumes)
-	}
-
-	data, err := yaml.Marshal(compose)
-	if err != nil {
-		return "", fmt.Errorf("marshal fleet compose: %w", err)
 	}
 	return string(data), nil
 }
