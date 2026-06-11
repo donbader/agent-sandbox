@@ -1,7 +1,7 @@
 // PKCE helpers and file-based pending flow storage.
 // Shared between login.ts and callback.ts via file system (no in-memory state).
 
-declare const gw: any;
+/// <reference path="../../../gateway/types/gateway.d.ts" />
 
 export function generateCodeVerifier(): string {
   const bytes = gw.crypto.randomBytes(32);

@@ -1,7 +1,7 @@
 // OAuth callback handler — exchanges authorization code for token.
 // GET /plugins/mcp-oauth/callback?code=X&state=Y
 
-declare const gw: any;
+/// <reference path="../../../gateway/types/gateway.d.ts" />
 
 import { consumePendingFlow, verifyHmacState } from "./pkce";
 
@@ -90,7 +90,7 @@ function successHTML(providerName: string): string {
 </body></html>`;
 }
 
-export default function(ctx: any, options: any) {
+export default function(ctx: GatewayContext, options: PluginOptions) {
   const providers: Record<string, ProviderConfig> = options.providers || {};
   const callbackURL = options.callback_url || "";
   const providersJSON = JSON.stringify(providers);
