@@ -55,19 +55,19 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 	// Build the request object with read-only properties that throw on assignment.
 	// This prevents silent bugs where ctx.request.path = "..." does nothing.
 	requestObj := rt.NewObject()
-	requestObj.Set("method", rc.Request.Method)
-	requestObj.Set("url", rc.Request.URL.String())
-	requestObj.Set("host", rc.Request.Host)
-	requestObj.Set("path", rc.Request.URL.Path)
-	requestObj.Set("query", query)
-	requestObj.Set("headers", headers)
-	requestObj.Set("setHeader", func(call goja.FunctionCall) goja.Value {
+	_ = requestObj.Set("method", rc.Request.Method)
+	_ = requestObj.Set("url", rc.Request.URL.String())
+	_ = requestObj.Set("host", rc.Request.Host)
+	_ = requestObj.Set("path", rc.Request.URL.Path)
+	_ = requestObj.Set("query", query)
+	_ = requestObj.Set("headers", headers)
+	_ = requestObj.Set("setHeader", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
 		val := call.Argument(1).String()
 		rc.Request.Header.Set(key, val)
 		return goja.Undefined()
 	})
-	requestObj.Set("setPath", func(call goja.FunctionCall) goja.Value {
+	_ = requestObj.Set("setPath", func(call goja.FunctionCall) goja.Value {
 		newPath := call.Argument(0).String()
 		rc.Request.URL.Path = newPath
 		rc.Request.URL.RawPath = ""
@@ -77,7 +77,7 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 	// Freeze read-only properties so assignment throws a TypeError in strict mode
 	// and is a no-op in sloppy mode (with a helpful error via defineProperty).
 	for _, prop := range []string{"method", "url", "host", "path", "query", "headers"} {
-		requestObj.DefineDataProperty(prop, requestObj.Get(prop), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
+		_ = requestObj.DefineDataProperty(prop, requestObj.Get(prop), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
 	responseObj := map[string]any{
