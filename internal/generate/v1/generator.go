@@ -183,6 +183,53 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 	return nil
 }
 
+// RunProject executes the full generation pipeline for any project.
+func (g *Generator) RunProject(project *config.Project) error {
+	buildDir := filepath.Join(g.projectDir, ".build")
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
+		return fmt.Errorf("create .build dir: %w", err)
+	}
+
+	var entries []ComposeAgentEntry
+	for _, agent := range project.Agents {
+		agentBuildDir := filepath.Join(buildDir, agent.Name)
+		if err := os.MkdirAll(agentBuildDir, 0755); err != nil {
+			return fmt.Errorf("create build dir for %s: %w", agent.Name, err)
+		}
+
+		result, err := g.generateAgent(agent.Config, agent.Dir, agentBuildDir)
+		if err != nil {
+			return fmt.Errorf("generate %s: %w", agent.Name, err)
+		}
+
+		if err := g.writeGatewayBuild(agentBuildDir, result.Config, result.Contribs, result.Resolved); err != nil {
+			return fmt.Errorf("write gateway build for %s: %w", agent.Name, err)
+		}
+
+		entries = append(entries, ComposeAgentEntry{
+			Config:   result.Config,
+			Contribs: result.Contribs,
+			BuildDir: agentBuildDir,
+		})
+	}
+
+	compose, err := BuildProjectCompose(entries, g.projectDir)
+	if err != nil {
+		return fmt.Errorf("build compose: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
+		return fmt.Errorf("write docker-compose.yml: %w", err)
+	}
+
+	if err := generateSchema(buildDir); err != nil {
+		return fmt.Errorf("generate schema: %w", err)
+	}
+	if err := g.copyGatewayTypes(buildDir); err != nil {
+		return fmt.Errorf("copy gateway types: %w", err)
+	}
+	return nil
+}
+
 // generateAgent is the shared per-agent generation logic used by both Run() and RunFleet().
 // It resolves plugins, generates Dockerfile + entrypoint + gateway config.
 // All user-facing relative paths (e.g. home_directory) are resolved from agentDir

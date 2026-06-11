@@ -448,6 +448,91 @@ gateway:
 	}
 }
 
+func TestGenerator_RunProject(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Create two agent directories
+	for _, name := range []string{"alpha", "beta"} {
+		agentDir := filepath.Join(projectDir, name)
+		require.NoError(t, os.MkdirAll(agentDir, 0755))
+		agentYAML := fmt.Sprintf(`
+name: %s
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+gateway:
+  services:
+    - url: https://api.example.com
+      headers:
+        Authorization: Bearer ${TOKEN}
+`, name)
+		require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+	}
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "alpha", Dir: filepath.Join(projectDir, "alpha"), Config: mustParseConfig(t, filepath.Join(projectDir, "alpha", "agent.yaml"))},
+			{Name: "beta", Dir: filepath.Join(projectDir, "beta"), Config: mustParseConfig(t, filepath.Join(projectDir, "beta", "agent.yaml"))},
+		},
+	}
+
+	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
+	require.NoError(t, g.RunProject(project))
+
+	buildDir := filepath.Join(projectDir, ".build")
+
+	// Verify nested structure
+	for _, name := range []string{"alpha", "beta"} {
+		assert.FileExists(t, filepath.Join(buildDir, name, "Dockerfile"))
+		assert.FileExists(t, filepath.Join(buildDir, name, "entrypoint.sh"))
+		assert.FileExists(t, filepath.Join(buildDir, name, "config.yaml"))
+		assert.FileExists(t, filepath.Join(buildDir, name, "gateway", "config.yaml"))
+	}
+
+	// Verify unified compose
+	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
+	composeData, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(composeData), "alpha:")
+	assert.Contains(t, string(composeData), "alpha-gateway:")
+	assert.Contains(t, string(composeData), "beta:")
+	assert.Contains(t, string(composeData), "beta-gateway:")
+}
+
+func TestGenerator_RunProject_SingleAgent(t *testing.T) {
+	projectDir := t.TempDir()
+
+	agentDir := filepath.Join(projectDir, "solo")
+	require.NoError(t, os.MkdirAll(agentDir, 0755))
+	agentYAML := `
+name: solo
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "solo", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
+
+	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
+	require.NoError(t, g.RunProject(project))
+
+	buildDir := filepath.Join(projectDir, ".build")
+
+	// Still nested even for single agent
+	assert.FileExists(t, filepath.Join(buildDir, "solo", "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "solo", "gateway", "config.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
+}
+
 func mustParseConfig(t *testing.T, path string) *config.Config {
 	t.Helper()
 	dir := filepath.Dir(path)
