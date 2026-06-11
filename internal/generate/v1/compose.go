@@ -142,8 +142,8 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 		},
 	}
 
-	// Expose gateway HTTP port when plugin routes are registered (e.g. OAuth callbacks)
-	if p.exposeGateway && contribs != nil && len(contribs.Gateway.Routes) > 0 {
+	// Expose gateway HTTP port for port discovery via `docker compose port`.
+	if p.exposeGateway {
 		gatewaySvc["ports"] = []string{"8080"}
 	}
 	// Wire log_level from agent config to gateway container.
@@ -248,6 +248,64 @@ type ComposeAgentEntry struct {
 	Config   *config.Config
 	Contribs *plugin.Contributions
 	BuildDir string // absolute path to the agent's .build/<name>/ directory
+}
+
+// BuildProjectCompose generates a unified docker-compose.yml for any project (1 or N agents).
+// Gateway port is always exposed for port discovery via `docker compose port`.
+func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string, error) {
+	compose := composeFile{
+		Services: map[string]any{},
+		Volumes:  map[string]any{},
+		Networks: map[string]any{"sandbox": map[string]any{"driver": "bridge"}},
+	}
+
+	for _, agent := range agents {
+		cfg := agent.Config
+		agentName := cfg.Name
+		gatewayName := cfg.Name + "-gateway"
+		certsVolume := agentName + "-certs"
+
+		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
+		if err != nil {
+			relBuildDir = agent.BuildDir
+		}
+
+		composeDir := filepath.Join(projectDir, ".build")
+
+		pair := buildAgentPair(agentPairParams{
+			cfg:          cfg,
+			contribs:     agent.Contribs,
+			agentName:    agentName,
+			gatewayName:  gatewayName,
+			agentAlias:   agentName,
+			gatewayAlias: gatewayName,
+			certsVolume:  certsVolume,
+			agentBuild: map[string]any{
+				"context":    "..",
+				"dockerfile": filepath.Join(".build", relBuildDir, "Dockerfile"),
+			},
+			gatewayBuild: map[string]any{
+				"context":    fmt.Sprintf("./%s/gateway", relBuildDir),
+				"dockerfile": "Dockerfile",
+			},
+			gatewayVolumes: []string{
+				certsVolume + ":/shared/certs",
+				fmt.Sprintf("./%s/config.yaml:/etc/gateway/config.yaml:ro", relBuildDir),
+			},
+			sidecarPrefix: agentName,
+			buildDir:      composeDir,
+			exposeGateway: true,
+		})
+
+		maps.Copy(compose.Services, pair.services)
+		maps.Copy(compose.Volumes, pair.volumes)
+	}
+
+	data, err := yaml.Marshal(compose)
+	if err != nil {
+		return "", fmt.Errorf("marshal compose: %w", err)
+	}
+	return string(data), nil
 }
 
 // BuildFleetCompose generates a unified docker-compose.yml for multiple agents.

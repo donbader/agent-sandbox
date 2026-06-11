@@ -224,6 +224,82 @@ func TestBuildCompose_PluginCapAddDedup(t *testing.T) {
 	assert.Contains(t, agentCaps, "SYS_CHROOT")
 }
 
+func TestBuildProjectCompose_SingleAgent(t *testing.T) {
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "my-agent",
+				Runtime: config.RuntimeConfig{
+					Image:   "@builtin/codex",
+					Volumes: []string{"data:/opt/data"},
+				},
+			},
+			Contribs: nil,
+			BuildDir: "/project/.build/my-agent",
+		},
+	}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Agent and gateway services present
+	assert.Contains(t, output, "my-agent:")
+	assert.Contains(t, output, "my-agent-gateway:")
+
+	// Gateway port always exposed
+	var composed struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	err = yaml.Unmarshal([]byte(output), &composed)
+	require.NoError(t, err)
+	assert.Contains(t, composed.Services["my-agent-gateway"].Ports, "8080")
+
+	// Build paths are nested
+	assert.Contains(t, output, ".build/my-agent/Dockerfile")
+}
+
+func TestBuildProjectCompose_MultipleAgents(t *testing.T) {
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "coder",
+				Runtime: config.RuntimeConfig{Image: "@builtin/codex"},
+			},
+			Contribs: nil,
+			BuildDir: "/project/.build/coder",
+		},
+		{
+			Config: &config.Config{
+				Name: "reviewer",
+				Runtime: config.RuntimeConfig{Image: "@builtin/codex"},
+			},
+			Contribs: nil,
+			BuildDir: "/project/.build/reviewer",
+		},
+	}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "coder:")
+	assert.Contains(t, output, "coder-gateway:")
+	assert.Contains(t, output, "reviewer:")
+	assert.Contains(t, output, "reviewer-gateway:")
+
+	// Both gateways expose port
+	var composed struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	err = yaml.Unmarshal([]byte(output), &composed)
+	require.NoError(t, err)
+	assert.Contains(t, composed.Services["coder-gateway"].Ports, "8080")
+	assert.Contains(t, composed.Services["reviewer-gateway"].Ports, "8080")
+}
+
 func TestBuildFleetCompose(t *testing.T) {
 	agents := []ComposeAgentEntry{
 		{
