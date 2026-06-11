@@ -1,5 +1,7 @@
 # Gateway — Developer Notes
 
+**Generated:** 2025-06-12 | **Commit:** a67c01e | **Branch:** main
+
 ## Overview
 
 The gateway is a transparent egress proxy that intercepts all outbound HTTPS from the agent container via iptables DNAT. It performs TLS MITM on configured domains to inject credentials and rewrite requests, while passing all other traffic through untouched.
