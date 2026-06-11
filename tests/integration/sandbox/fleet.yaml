@@ -1,0 +1,8 @@
+# Integration test fleet config
+agents:
+  - sandbox-test
+
+shared:
+  gateway:
+    services: []
+  installations: []
