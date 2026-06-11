@@ -9,7 +9,7 @@ Deploy AI coding agents in Docker containers with transparent egress proxy, cred
 - **Data-driven plugins** — runtime presets (codex, claude-code, pi) and feature plugins configured via YAML
 - **Transparent gateway** — all agent traffic routes through a proxy for credential injection and MITM
 - **Secret isolation** — real credentials never enter the agent container
-- **Multi-agent** — run multiple agents from a single `fleet.yaml` with shared config
+- **Fleet-native** — every project uses `fleet.yaml` + per-agent subdirectories (even single-agent)
 - **Security audit** — verify the sandbox contract with `agent-sandbox audit`
 - **One command** — `agent-sandbox generate && agent-sandbox compose up --build`
 
@@ -22,33 +22,9 @@ curl -fsSL https://raw.githubusercontent.com/donbader/agent-sandbox/main/scripts
 # Add to PATH (add to your shell profile)
 export PATH="$HOME/.agent-sandbox/bin:$PATH"
 
-# Scaffold a project
-mkdir my-agent && cd my-agent
+# Scaffold a project (creates fleet.yaml + agent subdirectory)
+mkdir my-project && cd my-project
 agent-sandbox init
-
-# Or write config manually
-cat > agent.yaml << 'EOF'
-name: coder
-core_version: latest
-
-runtime:
-  image: "@builtin/codex"
-
-gateway:
-  services:
-    - url: https://api.openai.com
-      headers:
-        Authorization: Bearer ${OPENAI_API_KEY}
-
-installations:
-  - plugin: "@builtin/github-pat"
-    options:
-      token: "${GITHUB_PAT}"
-  - plugin: "@builtin/home-override"
-    options:
-      home_directory: "./home"
-      volume: true
-EOF
 
 # Add secrets
 echo "OPENAI_API_KEY=sk-..." > .env
@@ -63,10 +39,10 @@ agent-sandbox compose up --build -d
 
 ```bash
 agent-sandbox init              # interactive project scaffold
-agent-sandbox generate          # agent.yaml → .build/ (Dockerfile, docker-compose.yml, gateway)
+agent-sandbox generate          # fleet.yaml → .build/<agent-name>/... (Dockerfile, entrypoint, gateway)
 agent-sandbox compose ...       # docker compose passthrough (auto-injects -f and --env-file)
 agent-sandbox audit             # verify running sandbox meets security contract
-agent-sandbox gateway-url       # print gateway's public URL
+agent-sandbox gateway-url       # print gateway's public URL (use --agent for multi-agent)
 agent-sandbox upgrade           # update the shim to latest version
 agent-sandbox version           # print shim + core versions
 ```
@@ -90,9 +66,9 @@ agent-sandbox -C examples/multi-agent compose up --build
 │  - Execs into agent-sandbox-core                               │
 │                                                                │
 │  agent-sandbox-core                                            │
-│  - Reads agent.yaml / fleet.yaml                               │
+│  - Reads fleet.yaml + per-agent agent.yaml                     │
 │  - Resolves plugins (@builtin/ and local)                      │
-│  - Generates .build/ (Dockerfile, compose, gateway)            │
+│  - Generates .build/<agent-name>/... + docker-compose.yml      │
 │  - Runs: docker compose up                                     │
 │                                                                │
 │  ┌──────────────────┐       ┌────────────────────────────────┐ │
@@ -125,7 +101,7 @@ agent-sandbox -C examples/multi-agent compose up --build
 
 | Guide                                               | Description                                                |
 | --------------------------------------------------- | ---------------------------------------------------------- |
-| [Fleet Mode](docs/guides/fleet-mode.md)             | Multi-agent setup with shared credentials                  |
+| [Multi-Agent](docs/guides/fleet-mode.md)            | Adding multiple agents with shared credentials             |
 | [Creating Plugins](docs/guides/creating-plugins.md) | Build your own plugin (plugin.yaml, middleware, templates) |
 
 **Reference:**

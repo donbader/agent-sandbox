@@ -23,33 +23,41 @@ agent-sandbox version
 **Option A: Interactive scaffold**
 
 ```bash
-mkdir my-agent && cd my-agent
+mkdir my-project && cd my-project
 agent-sandbox init
 ```
 
-`init` asks for an agent name and runtime, then writes `agent.yaml` and `.env.example`.
+`init` asks for an agent name and runtime, then creates `fleet.yaml`, an agent subdirectory with `agent.yaml`, and `.env.example`.
 
 **Option B: Manual config**
 
 ```bash
-mkdir my-agent && cd my-agent
+mkdir my-project && cd my-project
 ```
 
-Create `agent.yaml`:
+Create `fleet.yaml`:
 
 ```yaml
-# yaml-language-server: $schema=.build/schema.json
+agents:
+  - coder
+
+shared:
+  gateway:
+    services:
+      - url: https://api.openai.com
+        headers:
+          Authorization: Bearer ${OPENAI_API_KEY}
+```
+
+Create `coder/agent.yaml`:
+
+```yaml
+# yaml-language-server: $schema=../.build/coder/schema.json
 name: coder
 core_version: latest
 
 runtime:
   image: "@builtin/codex"
-
-gateway:
-  services:
-    - url: https://api.openai.com
-      headers:
-        Authorization: Bearer ${OPENAI_API_KEY}
 
 installations:
   - plugin: "@builtin/github-pat"
@@ -131,6 +139,6 @@ installations:
 
 - [Configuration Reference](configuration.md) — full agent.yaml schema
 - [Plugins](plugins.md) — all available plugins
-- [Fleet Mode](guides/fleet-mode.md) — run multiple agents
+- [Multi-Agent](guides/fleet-mode.md) — adding multiple agents to a project
 - [Security](security.md) — how isolation works
 - [Migration Guide](reference/migration.md) — upgrading from older CLI versions

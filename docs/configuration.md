@@ -192,22 +192,21 @@ volumes:
 | `runtime.env` | map | Environment variables injected into the agent container |
 | `volumes` | list | Shared volumes between gateway and agent |
 
-## Fleet Mode (Multi-Agent)
+## Fleet Structure (fleet.yaml)
 
-For multiple agents, use `fleet.yaml` instead of `agent.yaml`:
+Every project uses `fleet.yaml` at the root, even for a single agent. `agent-sandbox init` always creates this structure.
 
 ```yaml
 # fleet.yaml
 agents:
-  - agent-001
-  - agent-002
+  - coder
 
 shared:
   gateway:
     services:
-      - url: https://agent-gateway.stx-ai.net
+      - url: https://api.openai.com
         headers:
-          Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+          Authorization: Bearer ${OPENAI_API_KEY}
   installations:
     - plugin: "@builtin/github-pat"
       options:
@@ -217,15 +216,20 @@ shared:
 Each agent directory contains its own `agent.yaml`:
 
 ```
-my-fleet/
+my-project/
   fleet.yaml
   .env
-  agent-001/
+  coder/
     agent.yaml
     home/
-  agent-002/
-    agent.yaml
-    home/
+```
+
+For multiple agents, add entries to `agents:`:
+
+```yaml
+agents:
+  - agent-001
+  - agent-002
 ```
 
 **Merge rules:**
@@ -233,18 +237,22 @@ my-fleet/
 - `shared.installations` merges into each agent (same plugin → per-agent wins)
 - Each agent gets its own gateway container with independently loaded middleware
 
-See [Fleet Mode Guide](guides/fleet-mode.md) for a complete walkthrough.
+See [Multi-Agent Guide](guides/fleet-mode.md) for a complete walkthrough.
 
 ## Project Structure
 
 ```
-my-agent/
-  agent.yaml          ← configuration
-  .env                ← secrets (gitignored)
-  home/               ← files to copy into /home/agent (via home-override plugin)
-  .build/             ← generated artifacts (gitignored)
-    Dockerfile
-    docker-compose.yml
-    gateway-config/
-    schema.json
+my-project/
+  fleet.yaml            ← project configuration (lists agents + shared config)
+  .env                  ← secrets (gitignored)
+  coder/                ← agent subdirectory
+    agent.yaml          ← per-agent configuration
+    home/               ← files to copy into /home/agent (via home-override plugin)
+  .build/               ← generated artifacts (gitignored)
+    docker-compose.yml  ← single compose file for all agents
+    coder/              ← per-agent build artifacts
+      Dockerfile
+      entrypoint.sh
+      gateway-config/
+      schema.json
 ```
