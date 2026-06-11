@@ -61,7 +61,11 @@ func main() {
 	for i, ah := range cfg.AuthHeaders {
 		domain := ah.Domain
 		header := ah.Header
-		value := ah.Value
+		value := expandEnvVars(ah.Value)
+		if value == "" {
+			slog.Warn("auth-header skipped: env var not set", "domain", domain, "header", header)
+			continue
+		}
 		name := fmt.Sprintf("auth-header:%s:%d", domain, i)
 		gateway.RegisterSecret(value)
 		gateway.RegisterMiddleware(name, func(ctx *gateway.MiddlewareContext) error {
@@ -163,4 +167,30 @@ func main() {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
 	slog.Info("shutting down")
+}
+
+// expandEnvVars replaces all ${VAR} patterns in s with os.Getenv(VAR).
+func expandEnvVars(s string) string {
+	for {
+		start := indexOf(s, "${")
+		if start == -1 {
+			return s
+		}
+		end := indexOf(s[start+2:], "}")
+		if end == -1 {
+			return s
+		}
+		varName := s[start+2 : start+2+end]
+		envVal := os.Getenv(varName)
+		s = s[:start] + envVal + s[start+2+end+1:]
+	}
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }
