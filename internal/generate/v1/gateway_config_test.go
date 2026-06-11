@@ -39,27 +39,6 @@ func TestBuildGatewayConfig(t *testing.T) {
 	assert.Equal(t, "https://github.com", gwCfg.Services[1].URL)
 }
 
-func TestBuildGatewayConfig_WithMiddleware(t *testing.T) {
-	cfg := &config.Config{
-		Gateway: config.GatewayConfig{
-			Services: []config.GatewayServiceEntry{
-				{
-					URL: "https://api.telegram.org",
-					Middlewares: []config.MiddlewareEntry{
-						{Custom: "./middlewares/telegram.go"},
-					},
-				},
-			},
-		},
-	}
-
-	gwCfg := BuildGatewayConfig(cfg, nil)
-
-	// Services are still collected even when legacy middleware entries exist
-	require.Len(t, gwCfg.Services, 1)
-	assert.Equal(t, "https://api.telegram.org", gwCfg.Services[0].URL)
-}
-
 func TestBuildGatewayConfig_NilContribs(t *testing.T) {
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{

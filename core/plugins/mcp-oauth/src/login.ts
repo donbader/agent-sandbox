@@ -1,7 +1,7 @@
 // Login route handler — initiates OAuth PKCE flow.
 // GET /plugins/mcp-oauth/login/{provider}
 
-declare const gw: any;
+/// <reference path="../../../gateway/types/gateway.d.ts" />
 
 import {
   generateCodeVerifier,
@@ -115,7 +115,7 @@ function loadCachedRegistration(providerName: string): Registration | null {
   return null;
 }
 
-function deriveCallbackURL(ctx: any, options: any): string {
+function deriveCallbackURL(ctx: GatewayContext, options: PluginOptions): string {
   if (options.callback_url) return options.callback_url;
 
   // Derive from request headers
@@ -126,7 +126,7 @@ function deriveCallbackURL(ctx: any, options: any): string {
   return proto + "://" + host + "/plugins/mcp-oauth/callback";
 }
 
-export default function(ctx: any, options: any) {
+export default function(ctx: GatewayContext, options: PluginOptions) {
   const providers: Record<string, ProviderConfig> = options.providers || {};
 
   // Extract provider name from path: /plugins/mcp-oauth/login/{provider}

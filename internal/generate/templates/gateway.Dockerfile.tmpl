@@ -1,5 +1,6 @@
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget
+ARG GATEWAY_HASH
 COPY gateway /usr/local/bin/gateway
 COPY config.yaml /etc/gateway/config.yaml
 COPY plugins.yaml /etc/gateway/plugins.yaml

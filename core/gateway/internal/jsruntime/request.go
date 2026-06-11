@@ -50,43 +50,68 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 		}
 	}
 
-	requestObj := map[string]any{
-		"method":  rc.Request.Method,
-		"url":     rc.Request.URL.String(),
-		"host":    rc.Request.Host,
-		"path":    rc.Request.URL.Path,
-		"query":   query,
-		"headers": headers,
-		"setHeader": func(call goja.FunctionCall) goja.Value {
-			key := call.Argument(0).String()
-			val := call.Argument(1).String()
-			rc.Request.Header.Set(key, val)
-			return goja.Undefined()
-		},
+	rt := vm.Runtime()
+
+	// Build the request object with read-only properties that throw on assignment.
+	// This prevents silent bugs where ctx.request.path = "..." does nothing.
+	requestObj := rt.NewObject()
+	// @ts-prop ctx.request.method: readonly method: string
+	_ = requestObj.Set("method", rc.Request.Method)
+	// @ts-prop ctx.request.url: readonly url: string
+	_ = requestObj.Set("url", rc.Request.URL.String())
+	// @ts-prop ctx.request.host: readonly host: string
+	_ = requestObj.Set("host", rc.Request.Host)
+	// @ts-prop ctx.request.path: readonly path: string
+	_ = requestObj.Set("path", rc.Request.URL.Path)
+	// @ts-prop ctx.request.query: readonly query: Record<string, string>
+	_ = requestObj.Set("query", query)
+	// @ts-prop ctx.request.headers: readonly headers: Record<string, string>
+	_ = requestObj.Set("headers", headers)
+	// @ts-method ctx.request.setHeader(key: string, value: string): void
+	_ = requestObj.Set("setHeader", func(call goja.FunctionCall) goja.Value {
+		key := call.Argument(0).String()
+		val := call.Argument(1).String()
+		rc.Request.Header.Set(key, val)
+		return goja.Undefined()
+	})
+	// @ts-method ctx.request.setPath(newPath: string): void
+	_ = requestObj.Set("setPath", func(call goja.FunctionCall) goja.Value {
+		newPath := call.Argument(0).String()
+		rc.Request.URL.Path = newPath
+		rc.Request.URL.RawPath = ""
+		return goja.Undefined()
+	})
+
+	// Freeze read-only properties so assignment throws a TypeError in strict mode
+	// and is a no-op in sloppy mode (with a helpful error via defineProperty).
+	for _, prop := range []string{"method", "url", "host", "path", "query", "headers"} {
+		_ = requestObj.DefineDataProperty(prop, requestObj.Get(prop), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
 	responseObj := map[string]any{
+		// @ts-method ctx.response.status(code: number): void
 		"status": func(call goja.FunctionCall) goja.Value {
 			rc.ResponseStatus = int(call.Argument(0).ToInteger())
 			return goja.Undefined()
 		},
+		// @ts-method ctx.response.header(key: string, value: string): void
 		"header": func(call goja.FunctionCall) goja.Value {
 			key := call.Argument(0).String()
 			val := call.Argument(1).String()
 			rc.ResponseHeaders.Set(key, val)
 			return goja.Undefined()
 		},
+		// @ts-method ctx.response.body(content: string): void
 		"body": func(call goja.FunctionCall) goja.Value {
 			rc.ResponseBody = call.Argument(0).String()
 			return goja.Undefined()
 		},
 	}
 
-	rt := vm.Runtime()
-
 	return map[string]any{
 		"request":  requestObj,
 		"response": responseObj,
+		// @ts-method ctx.env(key: string): string | undefined
 		"env": func(call goja.FunctionCall) goja.Value {
 			key := call.Argument(0).String()
 			val := os.Getenv(key)
@@ -95,6 +120,7 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 			}
 			return rt.ToValue(val)
 		},
+		// @ts-method ctx.abort(status: number, body?: string, headers?: Record<string, string>): void
 		"abort": func(call goja.FunctionCall) goja.Value {
 			rc.AbortStatus = int(call.Argument(0).ToInteger())
 			if len(call.Arguments) > 1 {

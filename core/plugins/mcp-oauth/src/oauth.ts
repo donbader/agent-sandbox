@@ -2,7 +2,7 @@
 // Matches requests by host against configured provider MCP URLs.
 // Reads/refreshes tokens from disk, injects Authorization header.
 
-declare const gw: any;
+/// <reference path="../../../gateway/types/gateway.d.ts" />
 
 interface StoredToken {
   access_token: string;
@@ -125,7 +125,7 @@ function buildAuthorizeURL(
   return provider.authorize_endpoint + "?" + params.join("&");
 }
 
-export default function(ctx: any, options: any) {
+export default function(ctx: GatewayContext, options: PluginOptions) {
   const providers: Record<string, ProviderConfig> = options.providers || {};
   const callbackURL = options.callback_url || "";
   const providersJSON = JSON.stringify(providers);

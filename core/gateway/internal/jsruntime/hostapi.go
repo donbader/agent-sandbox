@@ -1,5 +1,7 @@
 package jsruntime
 
+//go:generate go run ../../../../cmd/gen-gateway-types -src . -o ../../types/gateway.d.ts -templates ../../../../internal/generate/templates/gateway.d.ts
+
 import (
 	"context"
 	"crypto/hmac"
@@ -32,6 +34,7 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 	rt := vm.Runtime()
 
 	cryptoObj := rt.NewObject()
+	// @ts-method gw.crypto.sha256(data: string, encoding?: "hex" | "base64url" | "base64"): string
 	_ = cryptoObj.Set("sha256", func(call goja.FunctionCall) goja.Value {
 		data := call.Argument(0).String()
 		h := sha256.Sum256([]byte(data))
@@ -49,6 +52,7 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 			return rt.ToValue(hex.EncodeToString(h[:]))
 		}
 	})
+	// @ts-method gw.crypto.hmac(key: string, data: string): string
 	_ = cryptoObj.Set("hmac", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
 		data := call.Argument(1).String()
@@ -56,6 +60,7 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 		mac.Write([]byte(data))
 		return rt.ToValue(hex.EncodeToString(mac.Sum(nil)))
 	})
+	// @ts-method gw.crypto.randomBytes(n: number): Uint8Array
 	_ = cryptoObj.Set("randomBytes", func(call goja.FunctionCall) goja.Value {
 		n := int(call.Argument(0).ToInteger())
 		if n <= 0 || n > 1024*1024 { // Cap at 1MB
@@ -67,10 +72,12 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 	})
 
 	base64urlObj := rt.NewObject()
+	// @ts-method gw.crypto.base64url.encode(data: string): string
 	_ = base64urlObj.Set("encode", func(call goja.FunctionCall) goja.Value {
 		data := call.Argument(0).String()
 		return rt.ToValue(base64.RawURLEncoding.EncodeToString([]byte(data)))
 	})
+	// @ts-method gw.crypto.base64url.decode(encoded: string): string
 	_ = base64urlObj.Set("decode", func(call goja.FunctionCall) goja.Value {
 		encoded := call.Argument(0).String()
 		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
@@ -79,13 +86,16 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 		}
 		return rt.ToValue(string(decoded))
 	})
+	// @ts-skip (structural wiring)
 	_ = cryptoObj.Set("base64url", base64urlObj)
 
 	base64Obj := rt.NewObject()
+	// @ts-method gw.crypto.base64.encode(data: string): string
 	_ = base64Obj.Set("encode", func(call goja.FunctionCall) goja.Value {
 		data := call.Argument(0).String()
 		return rt.ToValue(base64.StdEncoding.EncodeToString([]byte(data)))
 	})
+	// @ts-method gw.crypto.base64.decode(encoded: string): string
 	_ = base64Obj.Set("decode", func(call goja.FunctionCall) goja.Value {
 		encoded := call.Argument(0).String()
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
@@ -94,10 +104,12 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 		}
 		return rt.ToValue(string(decoded))
 	})
+	// @ts-skip (structural wiring)
 	_ = cryptoObj.Set("base64", base64Obj)
 
 	// File I/O (scoped to DataDir)
 	fsObj := rt.NewObject()
+	// @ts-method gw.fs.read(path: string): string
 	_ = fsObj.Set("read", func(call goja.FunctionCall) goja.Value {
 		relPath := call.Argument(0).String()
 		absPath, err := safeJoin(cfg.DataDir, relPath)
@@ -110,6 +122,7 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 		}
 		return rt.ToValue(string(data))
 	})
+	// @ts-method gw.fs.write(path: string, content: string): void
 	_ = fsObj.Set("write", func(call goja.FunctionCall) goja.Value {
 		relPath := call.Argument(0).String()
 		content := call.Argument(1).String()
@@ -128,6 +141,7 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 
 	// HTTP client (synchronous, SSRF-safe by default)
 	httpObj := rt.NewObject()
+	// @ts-method gw.http.fetch(url: string, opts?: { method?: string; body?: string; headers?: Record<string, string> }): { status: number; headers: Record<string, string>; body: string }
 	_ = httpObj.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		urlStr := call.Argument(0).String()
 		method := "GET"
@@ -199,6 +213,7 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 
 	// Secrets
 	secretsObj := rt.NewObject()
+	// @ts-method gw.secrets.register(secret: string): void
 	_ = secretsObj.Set("register", func(call goja.FunctionCall) goja.Value {
 		secret := call.Argument(0).String()
 		if secret != "" {
@@ -209,16 +224,19 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 
 	// Logging
 	logObj := rt.NewObject()
+	// @ts-method gw.log.info(msg: string): void
 	_ = logObj.Set("info", func(call goja.FunctionCall) goja.Value {
 		msg := call.Argument(0).String()
 		slog.Info("plugin: " + msg)
 		return goja.Undefined()
 	})
+	// @ts-method gw.log.error(msg: string): void
 	_ = logObj.Set("error", func(call goja.FunctionCall) goja.Value {
 		msg := call.Argument(0).String()
 		slog.Error("plugin: " + msg)
 		return goja.Undefined()
 	})
+	// @ts-method gw.log.debug(msg: string): void
 	_ = logObj.Set("debug", func(call goja.FunctionCall) goja.Value {
 		msg := call.Argument(0).String()
 		slog.Debug("plugin: " + msg)
@@ -226,11 +244,17 @@ func InjectHostAPIs(vm *VM, cfg *HostAPIConfig) {
 	})
 
 	// Assemble gw object
+	// @ts-skip (structural wiring)
 	gwObj := rt.NewObject()
+	// @ts-skip (structural wiring)
 	_ = gwObj.Set("crypto", cryptoObj)
+	// @ts-skip (structural wiring)
 	_ = gwObj.Set("fs", fsObj)
+	// @ts-skip (structural wiring)
 	_ = gwObj.Set("http", httpObj)
+	// @ts-skip (structural wiring)
 	_ = gwObj.Set("secrets", secretsObj)
+	// @ts-skip (structural wiring)
 	_ = gwObj.Set("log", logObj)
 	_ = vm.Set("gw", gwObj)
 }

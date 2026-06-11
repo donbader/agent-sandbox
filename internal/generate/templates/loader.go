@@ -12,7 +12,7 @@ import (
 	"text/template"
 )
 
-//go:embed *.tmpl
+//go:embed *.tmpl *.d.ts
 var Embedded embed.FS
 
 // Loader resolves templates from an fs.FS source.

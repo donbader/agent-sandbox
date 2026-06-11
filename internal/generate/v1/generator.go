@@ -124,6 +124,9 @@ func (g *Generator) RunWithConfig(cfg *config.Config, agentDir string) error {
 	if err := generateSchema(buildDir); err != nil {
 		return fmt.Errorf("generate schema: %w", err)
 	}
+	if err := g.copyGatewayTypes(buildDir); err != nil {
+		return fmt.Errorf("copy gateway types: %w", err)
+	}
 	return nil
 }
 
@@ -173,6 +176,9 @@ func (g *Generator) RunFleet(agents []config.FleetAgent) error {
 
 	if err := generateSchema(buildDir); err != nil {
 		return fmt.Errorf("generate schema: %w", err)
+	}
+	if err := g.copyGatewayTypes(buildDir); err != nil {
+		return fmt.Errorf("copy gateway types: %w", err)
 	}
 	return nil
 }

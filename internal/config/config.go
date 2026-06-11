@@ -74,15 +74,9 @@ type GatewayConfig struct {
 
 // GatewayServiceEntry represents an allowed upstream service.
 type GatewayServiceEntry struct {
-	URL         string            `yaml:"url" json:"url" jsonschema:"required,title=url,description=Service endpoint: HTTPS URL (https://api.example.com) or internal host:port (sidecar:8080)"`
-	Network     string            `yaml:"network" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach (optional, defaults to sandbox network)"`
-	Headers     map[string]string `yaml:"headers" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway on every proxied request"`
-	Middlewares []MiddlewareEntry `yaml:"middlewares" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=Custom middleware chain"`
-}
-
-// MiddlewareEntry represents a gateway middleware configuration.
-type MiddlewareEntry struct {
-	Custom string `yaml:"custom" json:"custom" jsonschema:"required,title=custom,description=Relative path to custom middleware .go file"`
+	URL     string            `yaml:"url" json:"url" jsonschema:"required,title=url,description=Service endpoint: HTTPS URL (https://api.example.com) or internal host:port (sidecar:8080)"`
+	Network string            `yaml:"network" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach (optional, defaults to sandbox network)"`
+	Headers map[string]string `yaml:"headers" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway on every proxied request"`
 }
 
 // Installation represents a plugin installation with options.
