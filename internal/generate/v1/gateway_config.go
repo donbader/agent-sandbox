@@ -126,20 +126,17 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 		rc.MITMDomains = append(rc.MITMDomains, domain)
 	}
 
-	// Convert auth-header entries to runtime format with resolved env var values.
+	// Convert auth-header entries to runtime format, preserving ${VAR} for runtime resolution.
 	for _, ah := range gwCfg.AuthHeaders {
 		if ah.EnvVar == "" {
 			continue // skip entries with no env var reference
 		}
-		envVal := os.Getenv(ah.EnvVar)
-		if envVal == "" {
-			continue // skip entries where env var is not set
-		}
-		resolvedValue := strings.Replace(ah.ValueFormat, "${value}", envVal, 1)
+		// Write the value format with ${ENV_VAR} for runtime resolution by the gateway.
+		value := strings.Replace(ah.ValueFormat, "${value}", "${"+ah.EnvVar+"}", 1)
 		rc.AuthHeaders = append(rc.AuthHeaders, authHeaderRuntime{
 			Domain: ah.Domain,
 			Header: ah.Header,
-			Value:  resolvedValue,
+			Value:  value,
 		})
 	}
 
