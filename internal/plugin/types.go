@@ -96,14 +96,9 @@ type GatewayMiddleware struct {
 }
 
 type GatewayService struct {
-	URL         string            `yaml:"url"`
-	Network     string            `yaml:"network"`
-	Headers     map[string]string `yaml:"headers"`
-	Middlewares []MiddlewareRef   `yaml:"middlewares"`
-}
-
-type MiddlewareRef struct {
-	Custom string `yaml:"custom"`
+	URL     string            `yaml:"url"`
+	Network string            `yaml:"network"`
+	Headers map[string]string `yaml:"headers"`
 }
 
 type SidecarContrib struct {

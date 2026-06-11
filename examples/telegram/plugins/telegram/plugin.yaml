@@ -23,8 +23,9 @@ contributes:
   gateway:
     services:
       - url: https://api.telegram.org
-        middlewares:
-          - custom: "./middlewares/telegram-token-rewrite.go"
+    middlewares:
+      - script: "./src/telegram-token-rewrite.ts"
+        domains: ["api.telegram.org"]
   sidecar:
     services:
       telegram:
