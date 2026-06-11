@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -316,6 +318,17 @@ func (g *Generator) writeGatewayBuildFiles(gatewayDir string) error {
 	if err != nil {
 		return fmt.Errorf("load gateway Dockerfile template: %w", err)
 	}
+
+	// Compute a content hash of the gateway binary to bust Docker's layer cache.
+	// Without this, Docker may reuse a stale COPY layer even after the binary changes.
+	binaryPath := filepath.Join(gatewayDir, "gateway")
+	binaryData, err := os.ReadFile(binaryPath)
+	if err == nil {
+		hash := sha256.Sum256(binaryData)
+		hashStr := hex.EncodeToString(hash[:8]) // short hash is sufficient for cache busting
+		dockerfile = strings.Replace(dockerfile, "ARG GATEWAY_HASH", "ARG GATEWAY_HASH="+hashStr, 1)
+	}
+
 	if err := os.WriteFile(filepath.Join(gatewayDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
 		return fmt.Errorf("write gateway Dockerfile: %w", err)
 	}
