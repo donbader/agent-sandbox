@@ -247,6 +247,34 @@ agent-sandbox -C examples/local-coding compose up --build
 # Edit TypeScript, then re-run generate + compose up to test changes
 ```
 
+## Extending the Gateway JS Runtime
+
+When adding new methods or properties to the TypeScript middleware API (in `core/gateway/internal/jsruntime/`):
+
+1. Add a `@ts-method` or `@ts-prop` annotation before each `.Set()` call:
+   ```go
+   // @ts-method ctx.request.setFoo(bar: string): void
+   _ = requestObj.Set("setFoo", func(call goja.FunctionCall) goja.Value { ... })
+   ```
+
+2. Use `@ts-skip` for structural wiring that doesn't map to a TS API:
+   ```go
+   // @ts-skip (structural wiring)
+   _ = gwObj.Set("crypto", cryptoObj)
+   ```
+
+3. Regenerate the type definitions:
+   ```bash
+   go generate ./core/gateway/...
+   ```
+
+4. Verify lint passes (CI enforces this):
+   ```bash
+   go run ./cmd/lint-ts-annotations
+   ```
+
+The generated `gateway.d.ts` is written to both `core/gateway/types/` (for internal plugins) and `internal/generate/templates/` (embedded into builds and distributed to `.build/gateway.d.ts` for external plugins).
+
 ## Example: Credential Injection Plugin
 
 Walk-through of building a simple credential injection plugin from scratch.

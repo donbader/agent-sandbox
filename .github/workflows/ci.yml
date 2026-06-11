@@ -91,6 +91,19 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      - name: Lint TS annotations
+        run: go run ./cmd/lint-ts-annotations
+
+      - name: Check generated files are up to date
+        run: |
+          go generate ./...
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: 'go generate ./...' produced uncommitted changes:"
+            git diff --stat
+            git diff
+            exit 1
+          fi
+
       - name: Build core binary
         run: go build -o agent-sandbox-core ./cmd/agent-sandbox-core/
 
