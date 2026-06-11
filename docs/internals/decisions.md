@@ -16,8 +16,8 @@ Key design decisions and their rationale. For detailed ADRs, see [docs/reference
 | 8 | Runtime presets are pure YAML | No Go code for presets. CLI reads `runtime.yaml` and generates Dockerfile. Adding a new runtime (e.g. a new agent) requires only YAML — no Go changes, no CLI release. |
 | 9 | Plugin updates don't require CLI upgrades | Plugins ship in the core tarball, separate from the shim. New plugins or plugin changes only need a core version bump. The CLI is a generic template engine. |
 | 10 | MITM for HTTPS interception | Gateway acts as a TLS-terminating proxy for configured domains. Per-domain certs signed by an ephemeral CA trusted by the agent. Enables header injection and request inspection for HTTPS traffic. |
-| 11 | Fleet mode shares config | `shared` block in fleet.yaml is merged into all agents. Reduces duplication. Per-agent overrides win conflicts. Each agent still gets its own gateway (independent security boundaries). |
-| 12 | Core version pinning | `core_version: 1.31.1` in agent.yaml ensures reproducible builds. `latest` is available but discouraged for production. Shim falls back to local cache if download fails. |
+| 11 | Shared config in fleet.yaml | `shared` block in fleet.yaml is merged into all agents. Reduces duplication. Per-agent overrides win conflicts. Each agent still gets its own gateway (independent security boundaries). |
+| 12 | Core version pinning | `core_version: 1.31.1` in per-agent `agent.yaml` ensures reproducible builds. `latest` is available but discouraged for production. Shim falls back to local cache if download fails. |
 
 ## Evolution from agent-fleet
 
@@ -29,7 +29,7 @@ This project evolved from [agent-fleet](https://github.com/donbader/agent-fleet)
 | Go middleware compiled per-project | TypeScript loaded at runtime |
 | Gateway source in Docker build | Pre-built gateway binary |
 | Hardcoded agent types | Data-driven runtime presets |
-| Single agent per project | Fleet mode (multi-agent) |
+| Single agent per project | Unified fleet model (single or multi-agent) |
 
 ## Principles
 

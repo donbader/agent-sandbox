@@ -45,7 +45,22 @@ The **gateway** intercepts outbound requests to `api.telegram.org` and rewrites 
 mkdir my-telegram-agent && cd my-telegram-agent
 ```
 
-### 2. Create `agent.yaml`
+### 2. Create the project structure
+
+Create a `fleet.yaml` at the project root and an agent subdirectory:
+
+```bash
+mkdir telegram-agent
+```
+
+**fleet.yaml** (project root):
+
+```yaml
+agents:
+  - telegram-agent
+```
+
+**telegram-agent/agent.yaml**:
 
 ```yaml
 name: telegram-agent

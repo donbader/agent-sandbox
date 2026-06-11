@@ -6,7 +6,7 @@
 
 The CLI can't find a runtime plugin matching your `runtime:` field.
 
-**Fix:** Check spelling in `agent.yaml`. Available built-in runtimes: `codex`, `claude-code`, `pi`. For custom runtimes, use the inline definition in agent.yaml.
+**Fix:** Check spelling in your per-agent `agent.yaml` (inside the agent's subdirectory). Available built-in runtimes: `codex`, `claude-code`, `pi`. For custom runtimes, use the inline definition in agent.yaml.
 
 ### Container won't start: "gateway host not found"
 
@@ -55,7 +55,7 @@ If using a custom base image, make sure `ca-certificates` is installed and `upda
 
 ### Environment variables not injected
 
-The CLI scans for `${VAR}` patterns and generates `.env.example`. Actual values must be in a `.env` file next to your `agent.yaml`.
+The CLI scans for `${VAR}` patterns and generates `.env.example`. Actual values must be in a `.env` file at the project root (next to `fleet.yaml`).
 
 **Fix:**
 ```bash
