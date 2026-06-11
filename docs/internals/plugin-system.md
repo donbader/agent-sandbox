@@ -68,7 +68,7 @@ Local plugin paths are validated to not escape the project directory (path trave
 
 ## Generation Pipeline (per agent)
 
-1. Load agent.yaml (or fleet.yaml + per-agent agent.yaml)
+1. Load fleet.yaml + per-agent agent.yaml
 2. Load `.env` for secret resolution
 3. Fetch core version from GitHub Releases (cached)
 4. Resolve plugins (`@builtin/` from core FS, `./` from local FS)
@@ -128,9 +128,9 @@ export default function(ctx: any, options: any) {
 
 Host APIs available: `gw.crypto`, `gw.fs`, `gw.http`, `gw.secrets`, `gw.log`.
 
-## Fleet Mode Merging
+## Project Merging
 
-`LoadFleetAgents()` merges `shared` into each per-agent config:
+`LoadProject()` merges `shared` into each per-agent config:
 
 - `shared.installations` prepended to per-agent installations (same plugin name → per-agent wins)
 - `shared.gateway.services` prepended to per-agent services (same URL → per-agent wins)

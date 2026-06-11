@@ -1,6 +1,6 @@
 # Build Pipeline
 
-How `agent-sandbox generate` transforms agent.yaml into Docker build artifacts.
+How `agent-sandbox generate` transforms fleet.yaml into Docker build artifacts.
 
 ## Overview
 
@@ -9,12 +9,12 @@ The generate command reads configuration, resolves plugins, and writes a complet
 ## Pipeline Flow
 
 ```
-agent.yaml → resolve plugins → render templates → .build/
+fleet.yaml + per-agent agent.yaml → resolve plugins → render templates → .build/
 ```
 
 Detailed steps:
 
-1. **Load configuration** — Parse agent.yaml (or fleet.yaml + per-agent configs). Load `.env` for secret resolution.
+1. **Load configuration** — Parse fleet.yaml + per-agent agent.yaml configs. Load `.env` for secret resolution.
 
 2. **Resolve core** — Fetch core tarball from GitHub Releases (cached at `~/.agent-sandbox/core/<version>/`). Contains presets, plugins, templates, and pre-built gateway binaries. Falls back to local cache on network failure (60s timeout).
 
@@ -40,23 +40,25 @@ Detailed steps:
 
 ```
 .build/
-  Dockerfile                  ← agent container (preset + plugin contributions)
-  entrypoint.sh               ← startup script (pre_entrypoint + CMD)
-  docker-compose.yml          ← orchestration
-  gateway/
-    gateway-linux-<arch>      ← pre-built binary (from core tarball)
-    config.yaml               ← proxy config (MITM domains, auth headers, DNS)
-    plugins.yaml              ← TypeScript plugin manifest
-    Dockerfile                ← minimal FROM + COPY binary + config
-    ca/                       ← generated CA cert/key for MITM
-  plugins/
-    github-pat/
-      src/github-auth.ts      ← TypeScript loaded at gateway runtime
-    mcp-oauth/
-      src/oauth.ts
-      src/login.ts
-      src/callback.ts
-      src/pkce.ts
+  <agent-name>/
+    Dockerfile                ← agent container (preset + plugin contributions)
+    entrypoint.sh             ← startup script (pre_entrypoint + CMD)
+    gateway/
+      gateway-linux-<arch>    ← pre-built binary (from core tarball)
+      config.yaml             ← proxy config (MITM domains, auth headers, DNS)
+      plugins.yaml            ← TypeScript plugin manifest
+      Dockerfile              ← minimal FROM + COPY binary + config
+      ca/                     ← generated CA cert/key for MITM
+    plugins/
+      github-pat/
+        src/github-auth.ts    ← TypeScript loaded at gateway runtime
+      mcp-oauth/
+        src/oauth.ts
+        src/login.ts
+        src/callback.ts
+        src/pkce.ts
+  docker-compose.yml          ← single compose file orchestrating all agents
+  schema.json
 ```
 
 ## Gateway Container
@@ -113,24 +115,6 @@ When running from the source repo with `--dev`:
 ```bash
 agent-sandbox --dev -C examples/local-coding generate
 ```
-
-## Multi-Agent (Fleet Mode)
-
-Fleet mode generates one `.build/` per agent:
-```
-.build/
-  agent-a/
-    Dockerfile
-    entrypoint.sh
-    gateway/...
-  agent-b/
-    Dockerfile
-    entrypoint.sh
-    gateway/...
-  docker-compose.yml          ← single compose file orchestrating all agents
-```
-
-Each agent gets its own gateway with independently configured plugins and MITM domains.
 
 ## Release Model
 
