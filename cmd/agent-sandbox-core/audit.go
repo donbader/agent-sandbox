@@ -43,34 +43,23 @@ The sandbox must be running (agent-sandbox compose up) before auditing.`,
 func runAudit(dir string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
-		return fmt.Errorf("resolve project dir: %w", err)
+		return fmt.Errorf("resolve dir: %w", err)
 	}
 	projectName := filepath.Base(absDir)
 
-	cfg, err := config.Load(dir)
+	project, err := config.LoadProject(absDir)
 	if err != nil {
-		// Try fleet mode
-		fleet, ferr := config.LoadFleet(dir)
-		if ferr != nil {
-			return fmt.Errorf("cannot load agent.yaml or fleet.yaml: %w", err)
-		}
-		// Audit each agent in fleet
-		var allChecks []auditCheck
-		for _, agentDir := range fleet.Agents {
-			agentCfg, err := config.Load(filepath.Join(dir, agentDir))
-			if err != nil {
-				return fmt.Errorf("loading agent %s: %w", agentDir, err)
-			}
-			checks := auditAgent(agentCfg, projectName, dir)
-			printAgentResults(agentCfg.Name, checks)
-			allChecks = append(allChecks, checks...)
-		}
-		return printSummary(allChecks)
+		return err
 	}
 
-	checks := auditAgent(cfg, projectName, dir)
-	printAgentResults(cfg.Name, checks)
-	return printSummary(checks)
+	var allChecks []auditCheck
+	for _, agent := range project.Agents {
+		checks := auditAgent(agent.Config, projectName, agent.Dir)
+		printAgentResults(agent.Name, checks)
+		allChecks = append(allChecks, checks...)
+	}
+
+	return printSummary(allChecks)
 }
 
 func auditAgent(cfg *config.Config, projectName, dir string) []auditCheck {
