@@ -1,12 +1,8 @@
-# Fleet Mode
+# Multi-Agent Projects
 
-Run multiple agents from a single project directory, sharing gateway credentials and plugins.
+Every agent-sandbox project uses a unified structure: a `fleet.yaml` at the project root listing agents, with each agent in its own subdirectory containing an `agent.yaml`. This applies whether you have one agent or many.
 
-## When to Use
-
-- You need multiple agents with different runtimes (e.g., codex + claude-code)
-- Agents share API credentials but have independent workspaces
-- You want a single `compose up` to start everything
+This guide covers working with multiple agents — sharing config, per-agent overrides, and managing the fleet as a whole.
 
 ## Project Structure
 
@@ -124,6 +120,16 @@ agent-sandbox compose down -v
 - The compose project name is derived from the folder name (not hardcoded)
 - Each agent's `home/` directory is independent — seed it with runtime-specific config (e.g., codex provider settings)
 - The `.env` file is shared across all agents; per-agent secrets aren't supported yet
+
+## Adding a New Agent
+
+To add another agent to an existing project:
+
+1. Create a new subdirectory with an `agent.yaml` inside
+2. Add the directory name to the `agents` list in `fleet.yaml`
+3. Run `agent-sandbox generate` to regenerate build artifacts
+
+The new agent inherits all `shared` config automatically.
 
 ## Example
 

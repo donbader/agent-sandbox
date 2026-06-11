@@ -142,8 +142,8 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 		},
 	}
 
-	// Expose gateway HTTP port when plugin routes are registered (e.g. OAuth callbacks)
-	if p.exposeGateway && contribs != nil && len(contribs.Gateway.Routes) > 0 {
+	// Expose gateway HTTP port for port discovery via `docker compose port`.
+	if p.exposeGateway {
 		gatewaySvc["ports"] = []string{"8080"}
 	}
 	// Wire log_level from agent config to gateway container.
@@ -203,46 +203,6 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	return result
 }
 
-// BuildCompose generates a docker-compose.yml string from config and plugin contributions.
-// projectDir is used to compute relative paths for sidecar build contexts.
-func BuildCompose(cfg *config.Config, contribs *plugin.Contributions, projectDir string) (string, error) {
-	buildDir := filepath.Join(projectDir, ".build")
-
-	pair := buildAgentPair(agentPairParams{
-		cfg:          cfg,
-		contribs:     contribs,
-		agentName:    cfg.Name,
-		gatewayName:  cfg.Name + "-gateway",
-		agentAlias:   "agent",
-		gatewayAlias: "gateway",
-		certsVolume:  "certs",
-		agentBuild: map[string]any{
-			"context":    "..",
-			"dockerfile": ".build/Dockerfile",
-		},
-		gatewayBuild: map[string]any{
-			"context":    "./gateway",
-			"dockerfile": "Dockerfile",
-		},
-		gatewayVolumes: []string{"certs:/shared/certs"},
-		sidecarPrefix:  "",
-		buildDir:       buildDir,
-		exposeGateway:  true,
-	})
-
-	compose := composeFile{
-		Services: pair.services,
-		Volumes:  pair.volumes,
-		Networks: map[string]any{"sandbox": map[string]any{"driver": "bridge"}},
-	}
-
-	data, err := yaml.Marshal(compose)
-	if err != nil {
-		return "", fmt.Errorf("marshal compose: %w", err)
-	}
-	return string(data), nil
-}
-
 // ComposeAgentEntry holds the data needed to generate one agent's services in a fleet compose file.
 type ComposeAgentEntry struct {
 	Config   *config.Config
@@ -250,9 +210,9 @@ type ComposeAgentEntry struct {
 	BuildDir string // absolute path to the agent's .build/<name>/ directory
 }
 
-// BuildFleetCompose generates a unified docker-compose.yml for multiple agents.
-// Each agent gets its own service + gateway, sharing a single sandbox network.
-func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, error) {
+// BuildProjectCompose generates a unified docker-compose.yml for any project (1 or N agents).
+// Gateway port is always exposed for port discovery via `docker compose port`.
+func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string, error) {
 	compose := composeFile{
 		Services: map[string]any{},
 		Volumes:  map[string]any{},
@@ -265,14 +225,11 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 		gatewayName := cfg.Name + "-gateway"
 		certsVolume := agentName + "-certs"
 
-		// Relative build dir from .build/ (e.g., "./<agent-name>")
 		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
 		if err != nil {
 			relBuildDir = agent.BuildDir
 		}
 
-		// Paths must be relative to .build/ (where docker-compose.yml lives),
-		// not .build/<agent>/ (the per-agent build dir).
 		composeDir := filepath.Join(projectDir, ".build")
 
 		pair := buildAgentPair(agentPairParams{
@@ -297,17 +254,16 @@ func BuildFleetCompose(agents []ComposeAgentEntry, projectDir string) (string, e
 			},
 			sidecarPrefix: agentName,
 			buildDir:      composeDir,
-			exposeGateway: false,
+			exposeGateway: true,
 		})
 
-		// Merge pair results into the fleet compose file.
 		maps.Copy(compose.Services, pair.services)
 		maps.Copy(compose.Volumes, pair.volumes)
 	}
 
 	data, err := yaml.Marshal(compose)
 	if err != nil {
-		return "", fmt.Errorf("marshal fleet compose: %w", err)
+		return "", fmt.Errorf("marshal compose: %w", err)
 	}
 	return string(data), nil
 }

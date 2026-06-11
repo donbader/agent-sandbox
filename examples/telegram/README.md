@@ -24,9 +24,23 @@ Telegram API (forum Topics)
 
 **gateway** — transparent HTTPS proxy that MITMs traffic, injects auth headers, rewrites credentials (e.g. Telegram bot token rewriting).
 
+## Project Structure
+
+```
+examples/telegram/
+  fleet.yaml              ← declares the "telegram-agent" agent
+  .env                    ← secrets (bot token, API key)
+  telegram-agent/
+    agent.yaml            ← agent config
+    home/                 ← pre-seeded home directory
+  plugins/
+    telegram/             ← local plugin (bot token rewriting)
+    open-acp/             ← local plugin (OpenACP entrypoint)
+```
+
 ## Startup Sequence
 
-1. `agent-sandbox generate` reads `agent.yaml`, loads `.env`, generates Dockerfile + compose + gateway config
+1. `agent-sandbox generate` reads `fleet.yaml` + `telegram-agent/agent.yaml`, loads `.env`, generates Dockerfile + compose + gateway config
 2. `agent-sandbox compose up --build` builds and starts all containers
 3. Gateway starts first (healthcheck), agent container waits for it
 4. Agent container sets up iptables DNAT redirect (transparent proxy), installs CA cert
@@ -62,10 +76,11 @@ agent-sandbox compose logs -f
 
 ## Configuration
 
-- `agent.yaml` — agent config (runtime, gateway, plugins)
+- `fleet.yaml` — declares the agent(s) in this project
+- `telegram-agent/agent.yaml` — agent config (runtime, gateway, plugins)
 - `plugins/telegram/` — local plugin (gateway middleware for bot token rewriting)
 
-### agent.yaml
+### telegram-agent/agent.yaml
 
 ```yaml
 name: telegram-agent

@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=.build/fleet-schema.json
+agents:
+  - coder
+
+shared:
+  gateway:
+    services: []
+  installations: []

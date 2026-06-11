@@ -120,6 +120,7 @@ func composeCmd(dir *string) *cobra.Command {
 }
 
 func gatewayURLCmd(dir *string) *cobra.Command {
+	var agentName string
 	cmd := &cobra.Command{
 		Use:   "gateway-url",
 		Short: "Print the gateway's public URL (resolves dynamic port)",
@@ -135,13 +136,17 @@ func gatewayURLCmd(dir *string) *cobra.Command {
 			}
 			projectName := filepath.Base(absDir)
 
-			// Load config to get the agent name (gateway service = <name>-gateway)
-			cfg, err := config.Load(*dir)
+			project, err := config.LoadProject(*dir)
 			if err != nil {
-				return fmt.Errorf("load config: %w", err)
+				return fmt.Errorf("load project: %w", err)
 			}
 
-			gatewayService := cfg.Name + "-gateway"
+			agent, err := project.ResolveAgent(agentName)
+			if err != nil {
+				return err
+			}
+
+			gatewayService := agent.Name + "-gateway"
 
 			runtime := runtimeBinary(*dir)
 			c := exec.Command(runtime, "compose",
@@ -159,8 +164,6 @@ func gatewayURLCmd(dir *string) *cobra.Command {
 				return fmt.Errorf("could not resolve gateway port")
 			}
 
-			// docker compose port returns "0.0.0.0:PORT" or ":::PORT"
-			// Normalize to localhost
 			hostPort = strings.Replace(hostPort, "0.0.0.0:", "localhost:", 1)
 			if strings.HasPrefix(hostPort, ":::") {
 				hostPort = "localhost:" + strings.TrimPrefix(hostPort, ":::")
@@ -170,26 +173,21 @@ func gatewayURLCmd(dir *string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&agentName, "agent", "", "Agent name (required for multi-agent projects)")
 	return cmd
 }
 
 // runtimeBinary determines the container runtime CLI to use.
-// Priority: AGENT_SANDBOX_RUNTIME env var > agent.yaml runtime_engine > "docker"
+// Priority: AGENT_SANDBOX_RUNTIME env var > first agent's runtime_engine > "docker"
 func runtimeBinary(dir string) string {
 	if rt := os.Getenv("AGENT_SANDBOX_RUNTIME"); rt != "" {
 		return rt
 	}
-	// Try to load config for runtime_engine setting
-	cfg, err := loadConfigSafe(dir)
-	if err == nil && cfg.RuntimeEngine != "" {
-		return cfg.RuntimeEngineBinary()
+	project, err := config.LoadProject(dir)
+	if err == nil && len(project.Agents) > 0 && project.Agents[0].Config.RuntimeEngine != "" {
+		return project.Agents[0].Config.RuntimeEngineBinary()
 	}
 	return "docker"
-}
-
-// loadConfigSafe attempts to load config without failing fatally.
-func loadConfigSafe(dir string) (*config.Config, error) {
-	return config.Load(dir)
 }
 
 func initCmd() *cobra.Command {
@@ -197,17 +195,12 @@ func initCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize a new agent-sandbox project (interactive)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check if agent.yaml or fleet.yaml already exists
-			if _, err := os.Stat("agent.yaml"); err == nil {
-				return fmt.Errorf("agent.yaml already exists in this directory")
-			}
 			if _, err := os.Stat("fleet.yaml"); err == nil {
 				return fmt.Errorf("fleet.yaml already exists in this directory")
 			}
 
 			reader := bufio.NewReader(os.Stdin)
 
-			// Fleet mode selection
 			agentCountStr := prompt(reader, "How many agents? [1]: ")
 			agentCount := 1
 			if agentCountStr != "" {
@@ -216,103 +209,79 @@ func initCmd() *cobra.Command {
 				}
 			}
 
+			rt := selectRuntime(reader)
+
+			// Determine agent names
+			var agentNames []string
 			if agentCount == 1 {
-				return initSingleAgent(reader)
+				dirName := filepath.Base(mustCwd())
+				name := prompt(reader, fmt.Sprintf("Agent name [%s]: ", dirName))
+				if name == "" {
+					name = dirName
+				}
+				agentNames = []string{name}
+			} else {
+				for i := 1; i <= agentCount; i++ {
+					agentNames = append(agentNames, fmt.Sprintf("agent-%03d", i))
+				}
 			}
-			return initFleet(reader, agentCount)
+
+			// Write fleet.yaml
+			var fleet strings.Builder
+			fleet.WriteString("# yaml-language-server: $schema=.build/fleet-schema.json\n")
+			fleet.WriteString("agents:\n")
+			for _, name := range agentNames {
+				fmt.Fprintf(&fleet, "  - %s\n", name)
+			}
+			fleet.WriteString("\nshared:\n")
+			fleet.WriteString("  gateway:\n")
+			fleet.WriteString("    services: []\n")
+			fleet.WriteString("  installations: []\n")
+
+			if err := os.WriteFile("fleet.yaml", []byte(fleet.String()), 0644); err != nil {
+				return fmt.Errorf("writing fleet.yaml: %w", err)
+			}
+
+			// Write per-agent directories
+			for _, name := range agentNames {
+				if err := os.MkdirAll(name, 0755); err != nil {
+					return fmt.Errorf("creating %s/: %w", name, err)
+				}
+
+				var agent strings.Builder
+				agent.WriteString("# yaml-language-server: $schema=../.build/schema.json\n")
+				fmt.Fprintf(&agent, "name: %s\n", name)
+				fmt.Fprintf(&agent, "core_version: %s\n", coreVersionForInit())
+				agent.WriteString("runtime:\n")
+				fmt.Fprintf(&agent, "  image: \"@builtin/%s\"\n", rt)
+				agent.WriteString("  entrypoint: [\"sleep\", \"infinity\"]\n")
+				agent.WriteString("gateway:\n")
+				agent.WriteString("  services: []\n")
+				agent.WriteString("installations: []\n")
+
+				agentPath := filepath.Join(name, "agent.yaml")
+				if err := os.WriteFile(agentPath, []byte(agent.String()), 0644); err != nil {
+					return fmt.Errorf("writing %s: %w", agentPath, err)
+				}
+			}
+
+			// Write .env.example
+			if err := os.WriteFile(".env.example", []byte("# Shared secrets\n"), 0644); err != nil {
+				return fmt.Errorf("writing .env.example: %w", err)
+			}
+
+			fmt.Printf("\nCreated fleet.yaml with %d agent(s)\n", agentCount)
+			for _, name := range agentNames {
+				fmt.Printf("  %s/agent.yaml\n", name)
+			}
+			fmt.Println("\nNext steps:")
+			fmt.Println("  1. Add gateway services and plugins")
+			fmt.Println("  2. Create .env with your secrets")
+			fmt.Println("  3. agent-sandbox generate")
+			fmt.Println("  4. agent-sandbox compose up --build -d")
+			return nil
 		},
 	}
-}
-
-func initSingleAgent(reader *bufio.Reader) error {
-	dirName := filepath.Base(mustCwd())
-	name := prompt(reader, fmt.Sprintf("Agent name [%s]: ", dirName))
-	if name == "" {
-		name = dirName
-	}
-
-	rt := selectRuntime(reader)
-
-	var b strings.Builder
-	b.WriteString("# yaml-language-server: $schema=.build/schema.json\n")
-	_, _ = fmt.Fprintf(&b, "name: %s\n", name)
-	_, _ = fmt.Fprintf(&b, "core_version: %s\n", coreVersionForInit())
-	b.WriteString("runtime:\n")
-	_, _ = fmt.Fprintf(&b, "  image: \"@builtin/%s\"\n", rt)
-	b.WriteString("  entrypoint: [\"sleep\", \"infinity\"]\n")
-	b.WriteString("gateway:\n")
-	b.WriteString("  services: []\n")
-	b.WriteString("installations: []\n")
-
-	if err := os.WriteFile("agent.yaml", []byte(b.String()), 0644); err != nil {
-		return fmt.Errorf("writing agent.yaml: %w", err)
-	}
-
-	fmt.Println("\nCreated agent.yaml")
-	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Add gateway services and plugins to agent.yaml")
-	fmt.Println("  2. Create .env with your secrets")
-	fmt.Println("  3. agent-sandbox generate")
-	fmt.Println("  4. agent-sandbox compose up --build -d")
-	return nil
-}
-
-func initFleet(reader *bufio.Reader, count int) error {
-	rt := selectRuntime(reader)
-
-	// Generate fleet.yaml
-	var fleet strings.Builder
-	fleet.WriteString("# yaml-language-server: $schema=.build/fleet-schema.json\n")
-	fleet.WriteString("agents:\n")
-	for i := 1; i <= count; i++ {
-		_, _ = fmt.Fprintf(&fleet, "  - agent-%03d\n", i)
-	}
-	fleet.WriteString("\nshared:\n")
-	fleet.WriteString("  gateway:\n")
-	fleet.WriteString("    services: []\n")
-	fleet.WriteString("  installations: []\n")
-
-	if err := os.WriteFile("fleet.yaml", []byte(fleet.String()), 0644); err != nil {
-		return fmt.Errorf("writing fleet.yaml: %w", err)
-	}
-
-	// Generate per-agent directories
-	for i := 1; i <= count; i++ {
-		agentName := fmt.Sprintf("agent-%03d", i)
-		if err := os.MkdirAll(agentName, 0755); err != nil {
-			return fmt.Errorf("creating %s/: %w", agentName, err)
-		}
-
-		var agent strings.Builder
-		agent.WriteString("# yaml-language-server: $schema=../.build/schema.json\n")
-		_, _ = fmt.Fprintf(&agent, "name: %s\n", agentName)
-		_, _ = fmt.Fprintf(&agent, "core_version: %s\n", coreVersionForInit())
-		agent.WriteString("runtime:\n")
-		_, _ = fmt.Fprintf(&agent, "  image: \"@builtin/%s\"\n", rt)
-		agent.WriteString("installations: []\n")
-
-		agentPath := filepath.Join(agentName, "agent.yaml")
-		if err := os.WriteFile(agentPath, []byte(agent.String()), 0644); err != nil {
-			return fmt.Errorf("writing %s: %w", agentPath, err)
-		}
-	}
-
-	// Generate .env.example
-	if err := os.WriteFile(".env.example", []byte("# Shared secrets\n"), 0644); err != nil {
-		return fmt.Errorf("writing .env.example: %w", err)
-	}
-
-	fmt.Printf("\nCreated fleet.yaml with %d agents\n", count)
-	for i := 1; i <= count; i++ {
-		fmt.Printf("  agent-%03d/agent.yaml\n", i)
-	}
-	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Add shared gateway services and plugins to fleet.yaml")
-	fmt.Println("  2. Customize per-agent config in each agent-NNN/agent.yaml")
-	fmt.Println("  3. Create .env with your secrets")
-	fmt.Println("  4. agent-sandbox generate")
-	fmt.Println("  5. agent-sandbox compose up --build -d")
-	return nil
 }
 
 func selectRuntime(reader *bufio.Reader) string {

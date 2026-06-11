@@ -320,20 +320,21 @@ runtime:
 `
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer", "agent.yaml"), []byte(reviewerYAML), 0644))
 
-		fleet, agents, err := LoadFleetAgents(dir)
+		project, err := LoadProject(dir)
 		require.NoError(t, err)
-		assert.Len(t, fleet.Agents, 2)
-		require.Len(t, agents, 2)
+		require.Len(t, project.Agents, 2)
 
 		// coder: per-agent github-pat wins
-		coder := agents[0]
+		coder := project.Agents[0]
+		assert.Equal(t, "coder", coder.Name)
 		assert.Equal(t, "coder", coder.Config.Name)
 		require.Len(t, coder.Config.Installations, 1)
 		assert.Equal(t, "@builtin/github-pat", coder.Config.Installations[0].Plugin)
 		assert.Equal(t, "${CODER_PAT}", coder.Config.Installations[0].Options["token"])
 
 		// reviewer: gets shared github-pat
-		reviewer := agents[1]
+		reviewer := project.Agents[1]
+		assert.Equal(t, "reviewer", reviewer.Name)
 		assert.Equal(t, "reviewer", reviewer.Config.Name)
 		require.Len(t, reviewer.Config.Installations, 1)
 		assert.Equal(t, "@builtin/github-pat", reviewer.Config.Installations[0].Plugin)
@@ -348,7 +349,7 @@ agents:
 `
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(fleetYAML), 0644))
 
-		_, _, err := LoadFleetAgents(dir)
+		_, err := LoadProject(dir)
 		assert.ErrorContains(t, err, "loading agent")
 	})
 }
@@ -443,17 +444,17 @@ gateway:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer", "agent.yaml"), []byte(reviewerYAML), 0644))
 
-	_, agents, err := LoadFleetAgents(dir)
+	project, err := LoadProject(dir)
 	require.NoError(t, err)
-	require.Len(t, agents, 2)
+	require.Len(t, project.Agents, 2)
 
 	// coder: gets shared gateway only
-	coder := agents[0]
+	coder := project.Agents[0]
 	require.Len(t, coder.Config.Gateway.Services, 1)
 	assert.Equal(t, "https://agent-gateway.stx-ai.net", coder.Config.Gateway.Services[0].URL)
 
 	// reviewer: gets shared + own gateway (additive)
-	reviewer := agents[1]
+	reviewer := project.Agents[1]
 	require.Len(t, reviewer.Config.Gateway.Services, 2)
 	assert.Equal(t, "https://agent-gateway.stx-ai.net", reviewer.Config.Gateway.Services[0].URL)
 	assert.Equal(t, "https://api.anthropic.com", reviewer.Config.Gateway.Services[1].URL)

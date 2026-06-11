@@ -1,6 +1,6 @@
 # Plugin Catalog
 
-Plugins extend agent containers with additional capabilities — credential injection, SSH access, home directory customization, and more. They are declared in `agent.yaml` under the `installations` key:
+Plugins extend agent containers with additional capabilities — credential injection, SSH access, home directory customization, and more. They are declared in each agent's `agent.yaml` (inside the agent subdirectory) under the `installations` key:
 
 ```yaml
 installations:

@@ -45,7 +45,7 @@ These are handled by `agent-sandbox-core`:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-C, --dir` | `.` | Project directory containing agent.yaml or fleet.yaml |
+| `-C, --dir` | `.` | Project directory containing fleet.yaml |
 
 ## Environment Variables
 
@@ -56,7 +56,7 @@ These are handled by `agent-sandbox-core`:
 
 ## generate
 
-Reads `agent.yaml` (or `fleet.yaml` for multi-agent) and produces the `.build/` directory containing all Docker artifacts.
+Reads `fleet.yaml` and per-agent `agent.yaml` files, then produces the `.build/` directory containing all Docker artifacts.
 
 ```bash
 agent-sandbox generate
@@ -64,10 +64,10 @@ agent-sandbox -C examples/multi-agent generate
 ```
 
 **Output:**
-- `.build/Dockerfile` — agent container image
+- `.build/<agent-name>/Dockerfile` — agent container image
+- `.build/<agent-name>/entrypoint.sh` — iptables + CA + privilege drop
+- `.build/<agent-name>/gateway/` — gateway config and binary
 - `.build/docker-compose.yml` — all services
-- `.build/entrypoint.sh` — iptables + CA + privilege drop
-- `.build/gateway-src/` — gateway Go source (compiled during Docker build)
 - `.build/schema.json` — JSON Schema for agent.yaml
 
 ## compose
@@ -101,7 +101,7 @@ Exit code is non-zero if any check fails.
 
 ## init
 
-Interactive scaffold that creates `agent.yaml` and `.env.example`:
+Interactive scaffold that creates `fleet.yaml`, an agent subdirectory with `agent.yaml`, and `.env.example`:
 
 ```bash
 mkdir my-agent && cd my-agent
@@ -126,7 +126,12 @@ Prints the gateway's public URL (useful for webhook configuration):
 
 ```bash
 agent-sandbox gateway-url
+agent-sandbox gateway-url --agent coder
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--agent` | (first agent) | Target agent in a multi-agent project |
 
 ## Typical Workflow
 

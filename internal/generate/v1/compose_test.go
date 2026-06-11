@@ -29,7 +29,12 @@ func TestBuildCompose(t *testing.T) {
 		},
 	}
 
-	output, err := BuildCompose(cfg, contribs, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: contribs,
+		BuildDir: "/project/.build/test-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Agent service uses config name
@@ -39,8 +44,8 @@ func TestBuildCompose(t *testing.T) {
 	// Gateway service uses config name + "-gateway"
 	assert.Contains(t, output, "test-agent-gateway:")
 
-	// Sidecar present with relative path from .build/
-	assert.Contains(t, output, "telegram:")
+	// Sidecar present with agent name prefix and relative path from .build/
+	assert.Contains(t, output, "test-agent-telegram:")
 	assert.Contains(t, output, "AGENT_URL")
 	assert.Contains(t, output, "../sidecar")
 }
@@ -53,7 +58,12 @@ func TestBuildCompose_NoSidecars(t *testing.T) {
 		},
 	}
 
-	output, err := BuildCompose(cfg, nil, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: nil,
+		BuildDir: "/project/.build/simple-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "simple-agent:")
@@ -76,7 +86,12 @@ func TestBuildCompose_PluginPorts(t *testing.T) {
 		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
 	}
 
-	output, err := BuildCompose(cfg, contribs, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: contribs,
+		BuildDir: "/project/.build/ssh-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "2222:2222")
@@ -90,7 +105,12 @@ func TestBuildCompose_CapDrop(t *testing.T) {
 		},
 	}
 
-	output, err := BuildCompose(cfg, nil, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: nil,
+		BuildDir: "/project/.build/secure-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Both agent and gateway should drop all capabilities
@@ -115,7 +135,12 @@ func TestBuildCompose_PodmanUserns(t *testing.T) {
 		},
 	}
 
-	output, err := BuildCompose(cfg, nil, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: nil,
+		BuildDir: "/project/.build/podman-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "userns_mode: keep-id")
@@ -129,7 +154,12 @@ func TestBuildCompose_DockerNoUserns(t *testing.T) {
 		},
 	}
 
-	output, err := BuildCompose(cfg, nil, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: nil,
+		BuildDir: "/project/.build/docker-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	assert.NotContains(t, output, "userns_mode")
@@ -151,7 +181,12 @@ func TestBuildCompose_PodmanSSHNoUserns(t *testing.T) {
 		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
 	}
 
-	output, err := BuildCompose(cfg, contribs, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: contribs,
+		BuildDir: "/project/.build/podman-ssh-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Plugin declares skip_userns — userns_mode must be skipped.
@@ -173,7 +208,12 @@ func TestBuildCompose_PluginCapAdd(t *testing.T) {
 		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
 	}
 
-	output, err := BuildCompose(cfg, contribs, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: contribs,
+		BuildDir: "/project/.build/cap-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Base caps present
@@ -200,7 +240,12 @@ func TestBuildCompose_PluginCapAddDedup(t *testing.T) {
 		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
 	}
 
-	output, err := BuildCompose(cfg, contribs, "/project")
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: contribs,
+		BuildDir: "/project/.build/dedup-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	var composed struct {
@@ -222,6 +267,82 @@ func TestBuildCompose_PluginCapAddDedup(t *testing.T) {
 	assert.Equal(t, 1, count, "NET_ADMIN should appear exactly once")
 	// SYS_CHROOT contributed by plugin is present.
 	assert.Contains(t, agentCaps, "SYS_CHROOT")
+}
+
+func TestBuildProjectCompose_SingleAgent(t *testing.T) {
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "my-agent",
+				Runtime: config.RuntimeConfig{
+					Image:   "@builtin/codex",
+					Volumes: []string{"data:/opt/data"},
+				},
+			},
+			Contribs: nil,
+			BuildDir: "/project/.build/my-agent",
+		},
+	}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Agent and gateway services present
+	assert.Contains(t, output, "my-agent:")
+	assert.Contains(t, output, "my-agent-gateway:")
+
+	// Gateway port always exposed
+	var composed struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	err = yaml.Unmarshal([]byte(output), &composed)
+	require.NoError(t, err)
+	assert.Contains(t, composed.Services["my-agent-gateway"].Ports, "8080")
+
+	// Build paths are nested
+	assert.Contains(t, output, ".build/my-agent/Dockerfile")
+}
+
+func TestBuildProjectCompose_MultipleAgents(t *testing.T) {
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "coder",
+				Runtime: config.RuntimeConfig{Image: "@builtin/codex"},
+			},
+			Contribs: nil,
+			BuildDir: "/project/.build/coder",
+		},
+		{
+			Config: &config.Config{
+				Name: "reviewer",
+				Runtime: config.RuntimeConfig{Image: "@builtin/codex"},
+			},
+			Contribs: nil,
+			BuildDir: "/project/.build/reviewer",
+		},
+	}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "coder:")
+	assert.Contains(t, output, "coder-gateway:")
+	assert.Contains(t, output, "reviewer:")
+	assert.Contains(t, output, "reviewer-gateway:")
+
+	// Both gateways expose port
+	var composed struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	err = yaml.Unmarshal([]byte(output), &composed)
+	require.NoError(t, err)
+	assert.Contains(t, composed.Services["coder-gateway"].Ports, "8080")
+	assert.Contains(t, composed.Services["reviewer-gateway"].Ports, "8080")
 }
 
 func TestBuildFleetCompose(t *testing.T) {
@@ -254,7 +375,7 @@ func TestBuildFleetCompose(t *testing.T) {
 		},
 	}
 
-	output, err := BuildFleetCompose(agents, "/project")
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Both agents present
@@ -276,7 +397,7 @@ func TestBuildFleetCompose(t *testing.T) {
 
 	// Named volumes
 	assert.Contains(t, output, "coder-data:")
-	assert.Contains(t, output, "certs:")
+	assert.Contains(t, output, "coder-certs:")
 
 	// Ports from coder
 	assert.Contains(t, output, "8080:8080")
@@ -324,7 +445,7 @@ func TestBuildFleetCompose_SidecarNamespacing(t *testing.T) {
 		},
 	}
 
-	output, err := BuildFleetCompose(agents, "/project")
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Sidecars should be namespaced by agent name to avoid collisions
@@ -357,7 +478,7 @@ func TestBuildFleetCompose_SidecarBuildPath(t *testing.T) {
 		},
 	}
 
-	output, err := BuildFleetCompose(agents, "/project")
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Path from .build/docker-compose.yml to /project/dorey-001/plugins/telegram/telegram-adapter
@@ -386,7 +507,7 @@ func TestBuildFleetCompose_PluginCapAdd(t *testing.T) {
 		},
 	}
 
-	output, err := BuildFleetCompose(agents, "/project")
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	var composed struct {
@@ -422,7 +543,7 @@ func TestBuildFleetCompose_SkipUserns(t *testing.T) {
 		},
 	}
 
-	output, err := BuildFleetCompose(agents, "/project")
+	output, err := BuildProjectCompose(agents, "/project")
 	require.NoError(t, err)
 
 	// Plugin declares skip_userns on a podman engine — userns_mode must NOT appear.

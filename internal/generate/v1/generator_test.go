@@ -15,8 +15,9 @@ import (
 func TestGenerator_Run(t *testing.T) {
 	projectDir := t.TempDir()
 
-	// Write a local plugin
-	pluginDir := filepath.Join(projectDir, "plugins", "my-tool")
+	// Write a local plugin inside the agent subdirectory
+	agentDir := filepath.Join(projectDir, "test-agent")
+	pluginDir := filepath.Join(agentDir, "plugins", "my-tool")
 	require.NoError(t, os.MkdirAll(pluginDir, 0755))
 	pluginYAML := `
 name: my-tool
@@ -31,7 +32,7 @@ contributes:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(pluginYAML), 0644))
 
-	// Write agent.yaml that uses the plugin
+	// Write agent.yaml in the agent subdirectory
 	agentYAML := `
 name: test-agent
 core_version: latest
@@ -49,19 +50,26 @@ installations:
     options:
       version: "2.0.0"
 `
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "test-agent", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
 
 	g := NewGenerator(projectDir, nil)
 	g.SetPresets(testPresets)
-	require.NoError(t, g.Run())
+	require.NoError(t, g.RunProject(project))
 
-	// Verify outputs
+	// Verify outputs (nested layout)
 	buildDir := filepath.Join(projectDir, ".build")
-	assert.FileExists(t, filepath.Join(buildDir, "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "test-agent", "Dockerfile"))
 	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
 
 	// Check Dockerfile content
-	df, err := os.ReadFile(filepath.Join(buildDir, "Dockerfile"))
+	df, err := os.ReadFile(filepath.Join(buildDir, "test-agent", "Dockerfile"))
 	require.NoError(t, err)
 	assert.Contains(t, string(df), "FROM node:24-slim")
 	assert.Contains(t, string(df), "npm install -g my-tool@2.0.0")
@@ -70,8 +78,8 @@ installations:
 	// Check compose content
 	comp, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
 	require.NoError(t, err)
-	assert.Contains(t, string(comp), "agent:")
-	assert.Contains(t, string(comp), "gateway:")
+	assert.Contains(t, string(comp), "test-agent:")
+	assert.Contains(t, string(comp), "test-agent-gateway:")
 }
 
 func TestGenerator_UsesLocalCore(t *testing.T) {
@@ -103,6 +111,9 @@ contributes:
 	// Create go.mod in coreDir (simulates self-contained core distribution)
 	require.NoError(t, os.WriteFile(filepath.Join(coreDir, "go.mod"), []byte("module github.com/donbader/agent-sandbox\n\ngo 1.26\n"), 0644))
 
+	// Agent lives in a subdirectory
+	agentDir := filepath.Join(projectDir, "test-agent")
+	require.NoError(t, os.MkdirAll(agentDir, 0755))
 	agentYAML := `
 name: test-agent
 core_version: latest
@@ -114,24 +125,32 @@ installations:
     options:
       token: "ghp_test123"
 `
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "test-agent", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
 
 	g := NewGeneratorWithCore(projectDir, coreDir)
-	require.NoError(t, g.Run())
+	require.NoError(t, g.RunProject(project))
 
 	buildDir := filepath.Join(projectDir, ".build")
-	assert.FileExists(t, filepath.Join(buildDir, "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "test-agent", "Dockerfile"))
 	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
-	assert.FileExists(t, filepath.Join(buildDir, "gateway", "Dockerfile"))
-	assert.FileExists(t, filepath.Join(buildDir, "gateway", "config.yaml"))
-	assert.FileExists(t, filepath.Join(buildDir, "gateway", "plugins.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "test-agent", "gateway", "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "test-agent", "gateway", "config.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "test-agent", "gateway", "plugins.yaml"))
 }
 
 func TestGenerator_Run_WithSidecar(t *testing.T) {
 	projectDir := t.TempDir()
 
-	// Plugin that contributes a sidecar
-	pluginDir := filepath.Join(projectDir, "plugins", "my-sidecar")
+	// Plugin that contributes a sidecar (in agent subdirectory)
+	agentDir := filepath.Join(projectDir, "test-agent")
+	pluginDir := filepath.Join(agentDir, "plugins", "my-sidecar")
 	require.NoError(t, os.MkdirAll(pluginDir, 0755))
 	pluginYAML := `
 name: my-sidecar
@@ -160,15 +179,22 @@ installations:
     options:
       port: "8080"
 `
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "test-agent", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
 
 	g := NewGenerator(projectDir, nil)
-	require.NoError(t, g.Run())
+	require.NoError(t, g.RunProject(project))
 
 	buildDir := filepath.Join(projectDir, ".build")
 	comp, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
 	require.NoError(t, err)
-	assert.Contains(t, string(comp), "mysvc:")
+	assert.Contains(t, string(comp), "test-agent-mysvc:")
 	assert.Contains(t, string(comp), "PORT")
 	assert.Contains(t, string(comp), "8080")
 }
@@ -176,8 +202,9 @@ installations:
 func TestGenerator_Run_RequiresUnsatisfied(t *testing.T) {
 	projectDir := t.TempDir()
 
-	// Plugin that declares a requires dependency
-	pluginDir := filepath.Join(projectDir, "plugins", "my-channel")
+	// Plugin that declares a requires dependency (in agent subdirectory)
+	agentDir := filepath.Join(projectDir, "test-agent")
+	pluginDir := filepath.Join(agentDir, "plugins", "my-channel")
 	require.NoError(t, os.MkdirAll(pluginDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(`
 name: my-channel
@@ -198,10 +225,17 @@ runtime:
 installations:
   - plugin: ./plugins/my-channel
 `
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "test-agent", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
 
 	g := NewGenerator(projectDir, nil)
-	err := g.Run()
+	err := g.RunProject(project)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "requires \"@builtin/agent-manager-acp\"")
 }
@@ -209,8 +243,11 @@ installations:
 func TestGenerator_Run_RequiresSatisfied(t *testing.T) {
 	projectDir := t.TempDir()
 
+	// Agent subdirectory with plugins
+	agentDir := filepath.Join(projectDir, "test-agent")
+
 	// "dep" plugin (simulates agent-manager-acp)
-	depDir := filepath.Join(projectDir, "plugins", "agent-manager-acp")
+	depDir := filepath.Join(agentDir, "plugins", "agent-manager-acp")
 	require.NoError(t, os.MkdirAll(depDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(depDir, "plugin.yaml"), []byte(`
 name: agent-manager-acp
@@ -221,7 +258,7 @@ contributes:
 `), 0644))
 
 	// Plugin that requires agent-manager-acp
-	channelDir := filepath.Join(projectDir, "plugins", "my-channel")
+	channelDir := filepath.Join(agentDir, "plugins", "my-channel")
 	require.NoError(t, os.MkdirAll(channelDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(channelDir, "plugin.yaml"), []byte(`
 name: my-channel
@@ -243,10 +280,17 @@ installations:
   - plugin: ./plugins/agent-manager-acp
   - plugin: ./plugins/my-channel
 `
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "test-agent", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
 
 	g := NewGenerator(projectDir, nil)
-	require.NoError(t, g.Run())
+	require.NoError(t, g.RunProject(project))
 }
 
 func TestGenerator_Run_BundledPluginAssets(t *testing.T) {
@@ -278,6 +322,9 @@ contributes:
 	require.NoError(t, os.WriteFile(filepath.Join(gatewayDir, "main.go"), []byte("package main\n"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(coreDir, "go.mod"), []byte("module test\n\ngo 1.26\n"), 0644))
 
+	// Agent lives in a subdirectory
+	agentDir := filepath.Join(projectDir, "test-agent")
+	require.NoError(t, os.MkdirAll(agentDir, 0755))
 	agentYAML := `
 name: test-agent
 core_version: latest
@@ -287,19 +334,26 @@ runtime:
 installations:
   - plugin: "@builtin/my-bundled"
 `
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "test-agent", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
 
 	g := NewGeneratorWithCore(projectDir, coreDir)
-	require.NoError(t, g.Run())
+	require.NoError(t, g.RunProject(project))
 
-	// Verify asset was extracted to .build/plugins/my-bundled/my-src/
-	extractedFile := filepath.Join(projectDir, ".build", "plugins", "my-bundled", "my-src", "main.ts")
+	// Verify asset was extracted to .build/test-agent/plugins/my-bundled/my-src/
+	extractedFile := filepath.Join(projectDir, ".build", "test-agent", "plugins", "my-bundled", "my-src", "main.ts")
 	assert.FileExists(t, extractedFile)
 
 	// Verify Dockerfile references the extracted path
-	df, err := os.ReadFile(filepath.Join(projectDir, ".build", "Dockerfile"))
+	df, err := os.ReadFile(filepath.Join(projectDir, ".build", "test-agent", "Dockerfile"))
 	require.NoError(t, err)
-	assert.Contains(t, string(df), "COPY .build/plugins/my-bundled/my-src/ /opt/my-src/")
+	assert.Contains(t, string(df), "COPY .build/test-agent/plugins/my-bundled/my-src/ /opt/my-src/")
 }
 
 // TestGenerator_Contracts_SingleAgent verifies that generated artifacts are internally consistent:
@@ -309,6 +363,8 @@ installations:
 func TestGenerator_Contracts_SingleAgent(t *testing.T) {
 	projectDir := t.TempDir()
 
+	agentDir := filepath.Join(projectDir, "test-agent")
+	require.NoError(t, os.MkdirAll(agentDir, 0755))
 	agentYAML := `
 name: test-agent
 core_version: latest
@@ -320,11 +376,18 @@ gateway:
       headers:
         Authorization: Bearer ${TOKEN}
 `
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "agent.yaml"), []byte(agentYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "test-agent", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
 
 	g := NewGenerator(projectDir, nil)
 	g.SetPresets(testPresets)
-	require.NoError(t, g.Run())
+	require.NoError(t, g.RunProject(project))
 
 	buildDir := filepath.Join(projectDir, ".build")
 
@@ -335,12 +398,12 @@ gateway:
 	var compose composeFile
 	require.NoError(t, yaml.Unmarshal(composeData, &compose))
 
-	// Verify GATEWAY_HOST matches the gateway alias
+	// Verify GATEWAY_HOST matches the gateway alias (in project mode, alias = service name)
 	agentSvcRaw, ok := compose.Services["test-agent"].(map[string]any)
 	require.True(t, ok, "test-agent service not found or wrong type")
 	envRaw, ok := agentSvcRaw["environment"].(map[string]any)
 	require.True(t, ok, "environment not found or wrong type")
-	assert.Equal(t, "gateway", envRaw["GATEWAY_HOST"])
+	assert.Equal(t, "test-agent-gateway", envRaw["GATEWAY_HOST"])
 
 	// Verify gateway alias matches
 	gatewaySvcRaw, ok := compose.Services["test-agent-gateway"].(map[string]any)
@@ -351,18 +414,18 @@ gateway:
 	require.True(t, ok)
 	aliases, ok := sandbox["aliases"].([]any)
 	require.True(t, ok)
-	assert.Contains(t, aliases, "gateway")
+	assert.Contains(t, aliases, "test-agent-gateway")
 
 	// Verify Dockerfile has CMD
-	df, err := os.ReadFile(filepath.Join(buildDir, "Dockerfile"))
+	df, err := os.ReadFile(filepath.Join(buildDir, "test-agent", "Dockerfile"))
 	require.NoError(t, err)
 	assert.Contains(t, string(df), "CMD")
 
 	// Verify gateway/config.yaml exists (Docker COPY target)
-	assert.FileExists(t, filepath.Join(buildDir, "gateway", "config.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "test-agent", "gateway", "config.yaml"))
 
 	// Verify runtime config.yaml exists (for potential volume mount)
-	assert.FileExists(t, filepath.Join(buildDir, "config.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "test-agent", "config.yaml"))
 }
 
 // TestGenerator_Contracts_Fleet verifies internal consistency of fleet-mode generation.
@@ -387,20 +450,17 @@ gateway:
 		require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
 	}
 
-	fleetYAML := `agents:
-  - dir: ./coder
-  - dir: ./reviewer
-`
-	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "fleet.yaml"), []byte(fleetYAML), 0644))
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "coder", Dir: filepath.Join(projectDir, "coder"), Config: mustParseConfig(t, filepath.Join(projectDir, "coder", "agent.yaml"))},
+			{Name: "reviewer", Dir: filepath.Join(projectDir, "reviewer"), Config: mustParseConfig(t, filepath.Join(projectDir, "reviewer", "agent.yaml"))},
+		},
+	}
 
 	g := NewGenerator(projectDir, nil)
 	g.SetPresets(testPresets)
-
-	agents := []config.FleetAgent{
-		{Config: mustParseConfig(t, filepath.Join(projectDir, "coder", "agent.yaml")), Dir: filepath.Join(projectDir, "coder")},
-		{Config: mustParseConfig(t, filepath.Join(projectDir, "reviewer", "agent.yaml")), Dir: filepath.Join(projectDir, "reviewer")},
-	}
-	require.NoError(t, g.RunFleet(agents))
+	require.NoError(t, g.RunProject(project))
 
 	buildDir := filepath.Join(projectDir, ".build")
 	composeData, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
@@ -446,6 +506,91 @@ gateway:
 	for _, name := range []string{"coder", "reviewer"} {
 		assert.FileExists(t, filepath.Join(buildDir, name, "gateway", "config.yaml"))
 	}
+}
+
+func TestGenerator_RunProject(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Create two agent directories
+	for _, name := range []string{"alpha", "beta"} {
+		agentDir := filepath.Join(projectDir, name)
+		require.NoError(t, os.MkdirAll(agentDir, 0755))
+		agentYAML := fmt.Sprintf(`
+name: %s
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+gateway:
+  services:
+    - url: https://api.example.com
+      headers:
+        Authorization: Bearer ${TOKEN}
+`, name)
+		require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+	}
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "alpha", Dir: filepath.Join(projectDir, "alpha"), Config: mustParseConfig(t, filepath.Join(projectDir, "alpha", "agent.yaml"))},
+			{Name: "beta", Dir: filepath.Join(projectDir, "beta"), Config: mustParseConfig(t, filepath.Join(projectDir, "beta", "agent.yaml"))},
+		},
+	}
+
+	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
+	require.NoError(t, g.RunProject(project))
+
+	buildDir := filepath.Join(projectDir, ".build")
+
+	// Verify nested structure
+	for _, name := range []string{"alpha", "beta"} {
+		assert.FileExists(t, filepath.Join(buildDir, name, "Dockerfile"))
+		assert.FileExists(t, filepath.Join(buildDir, name, "entrypoint.sh"))
+		assert.FileExists(t, filepath.Join(buildDir, name, "config.yaml"))
+		assert.FileExists(t, filepath.Join(buildDir, name, "gateway", "config.yaml"))
+	}
+
+	// Verify unified compose
+	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
+	composeData, err := os.ReadFile(filepath.Join(buildDir, "docker-compose.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(composeData), "alpha:")
+	assert.Contains(t, string(composeData), "alpha-gateway:")
+	assert.Contains(t, string(composeData), "beta:")
+	assert.Contains(t, string(composeData), "beta-gateway:")
+}
+
+func TestGenerator_RunProject_SingleAgent(t *testing.T) {
+	projectDir := t.TempDir()
+
+	agentDir := filepath.Join(projectDir, "solo")
+	require.NoError(t, os.MkdirAll(agentDir, 0755))
+	agentYAML := `
+name: solo
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir: projectDir,
+		Agents: []config.Agent{
+			{Name: "solo", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
+
+	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
+	require.NoError(t, g.RunProject(project))
+
+	buildDir := filepath.Join(projectDir, ".build")
+
+	// Still nested even for single agent
+	assert.FileExists(t, filepath.Join(buildDir, "solo", "Dockerfile"))
+	assert.FileExists(t, filepath.Join(buildDir, "solo", "gateway", "config.yaml"))
+	assert.FileExists(t, filepath.Join(buildDir, "docker-compose.yml"))
 }
 
 func mustParseConfig(t *testing.T, path string) *config.Config {

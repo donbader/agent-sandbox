@@ -22,7 +22,7 @@ scripts/
 cmd/agent-sandbox-core/   ← Core CLI binary (all real logic: generate, compose, audit, init, gateway-url)
 cmd/agent-sandbox/        ← Legacy CLI entrypoint (being retired after v1.27.0)
 internal/
-  config/               ← agent.yaml parsing
+  config/               ← fleet.yaml + agent.yaml parsing
   dotenv/               ← .env file loading
   envvar/               ← environment variable resolution
   generate/             ← Build artifact generation (builder structs + Go templates)
@@ -57,7 +57,7 @@ flox activate -- go test ./...
 flox activate -- golangci-lint run ./...
 
 # End-to-end (using shim)
-agent-sandbox generate -C <dir>        # reads agent.yaml → writes .build/
+agent-sandbox generate -C <dir>        # reads fleet.yaml → writes .build/<agent-name>/...
 agent-sandbox compose up --build       # docker compose passthrough
 
 # Local development (build from source)

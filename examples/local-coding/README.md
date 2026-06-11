@@ -37,9 +37,27 @@ claude
 
 > **Note:** `--user agent` is required. Without it, exec runs as root and the agent won't find its config.
 
+## Project Structure
+
+```
+examples/local-coding/
+  fleet.yaml              ← declares the "coder" agent
+  .env                    ← secrets (STX_LLM_GATEWAY_API_KEY)
+  coder/
+    agent.yaml            ← agent config
+    home/                 ← pre-seeded home directory
+```
+
 ## Configuration
 
-### agent.yaml
+### fleet.yaml
+
+```yaml
+agents:
+  - coder
+```
+
+### coder/agent.yaml
 
 ```yaml
 name: coder
@@ -80,10 +98,10 @@ installations:
 
 ### Home directory
 
-The `home/` directory contains pre-seeded agent configuration:
+The `coder/home/` directory contains pre-seeded agent configuration:
 
 ```
-home/
+coder/home/
   .claude.json          ← MCP server config (Notion)
   .claude/
     settings.json       ← permissions, environment

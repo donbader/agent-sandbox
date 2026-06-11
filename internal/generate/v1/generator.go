@@ -88,87 +88,39 @@ func (g *Generator) SetPresets(presets map[string]*Preset) {
 	}
 }
 
-// Run executes the full generation pipeline for a single-agent project.
-func (g *Generator) Run() error {
-	cfg, err := config.Load(g.projectDir)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	return g.RunWithConfig(cfg, g.projectDir)
-}
-
-// RunWithConfig executes the generation pipeline for a pre-loaded config.
-func (g *Generator) RunWithConfig(cfg *config.Config, agentDir string) error {
+// RunProject executes the full generation pipeline for any project.
+func (g *Generator) RunProject(project *config.Project) error {
 	buildDir := filepath.Join(g.projectDir, ".build")
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return fmt.Errorf("create .build dir: %w", err)
 	}
 
-	result, err := g.generateAgent(cfg, agentDir, buildDir)
-	if err != nil {
-		return err
-	}
-
-	compose, err := BuildCompose(result.Config, result.Contribs, g.projectDir)
-	if err != nil {
-		return fmt.Errorf("build compose: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
-		return fmt.Errorf("write docker-compose.yml: %w", err)
-	}
-
-	if err := g.writeGatewayBuild(buildDir, result.Config, result.Contribs, result.Resolved); err != nil {
-		return fmt.Errorf("write gateway build: %w", err)
-	}
-
-	if err := generateSchema(buildDir); err != nil {
-		return fmt.Errorf("generate schema: %w", err)
-	}
-	if err := g.copyGatewayTypes(buildDir); err != nil {
-		return fmt.Errorf("copy gateway types: %w", err)
-	}
-	return nil
-}
-
-// RunFleet executes the generation pipeline for a multi-agent fleet.
-func (g *Generator) RunFleet(agents []config.FleetAgent) error {
-	buildDir := filepath.Join(g.projectDir, ".build")
-	if err := os.MkdirAll(buildDir, 0755); err != nil {
-		return fmt.Errorf("create .build dir: %w", err)
-	}
-
-	var results []AgentResult
-	for _, agent := range agents {
-		agentBuildDir := filepath.Join(buildDir, agent.Config.Name)
+	var entries []ComposeAgentEntry
+	for _, agent := range project.Agents {
+		agentBuildDir := filepath.Join(buildDir, agent.Name)
 		if err := os.MkdirAll(agentBuildDir, 0755); err != nil {
-			return fmt.Errorf("create build dir for %s: %w", agent.Config.Name, err)
+			return fmt.Errorf("create build dir for %s: %w", agent.Name, err)
 		}
 
 		result, err := g.generateAgent(agent.Config, agent.Dir, agentBuildDir)
 		if err != nil {
-			return fmt.Errorf("generate %s: %w", agent.Config.Name, err)
+			return fmt.Errorf("generate %s: %w", agent.Name, err)
 		}
 
-		// Write gateway build into per-agent directory
 		if err := g.writeGatewayBuild(agentBuildDir, result.Config, result.Contribs, result.Resolved); err != nil {
-			return fmt.Errorf("write gateway build for %s: %w", agent.Config.Name, err)
+			return fmt.Errorf("write gateway build for %s: %w", agent.Name, err)
 		}
 
-		results = append(results, *result)
-	}
-
-	var entries []ComposeAgentEntry
-	for _, r := range results {
 		entries = append(entries, ComposeAgentEntry{
-			Config:   r.Config,
-			Contribs: r.Contribs,
-			BuildDir: r.BuildDir,
+			Config:   result.Config,
+			Contribs: result.Contribs,
+			BuildDir: agentBuildDir,
 		})
 	}
 
-	compose, err := BuildFleetCompose(entries, g.projectDir)
+	compose, err := BuildProjectCompose(entries, g.projectDir)
 	if err != nil {
-		return fmt.Errorf("build fleet compose: %w", err)
+		return fmt.Errorf("build compose: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(buildDir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
 		return fmt.Errorf("write docker-compose.yml: %w", err)

@@ -14,68 +14,43 @@ import (
 func generateCmd(dir *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "generate",
-		Short: "Generate build artifacts from agent.yaml or fleet.yaml",
+		Short: "Generate build artifacts from fleet.yaml",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectDir, err := filepath.Abs(*dir)
 			if err != nil {
 				return fmt.Errorf("resolve dir: %w", err)
 			}
 
-			// Use auto-detected coreRoot from binary location.
 			coreDir := coreRoot
 			if coreDir == "." {
 				fmt.Fprintf(os.Stderr, "Warning: could not detect core root from binary location.\n")
 			}
 
-			// Load .env file so secrets are available for auth-header baking.
 			dotenv.Load(filepath.Join(projectDir, ".env"))
 
-			// Try single-agent first, then fleet mode
-			cfg, loadErr := config.Load(projectDir)
-			if loadErr == nil {
-				return generateSingleAgent(cfg, projectDir, coreDir)
+			project, err := config.LoadProject(projectDir)
+			if err != nil {
+				return err
 			}
 
-			// Try fleet mode
-			_, agents, fleetErr := config.LoadFleetAgents(projectDir)
-			if fleetErr != nil {
-				return fmt.Errorf("cannot load agent.yaml or fleet.yaml:\n  agent: %w\n  fleet: %v", loadErr, fleetErr)
+			g := v1.NewGeneratorWithCore(projectDir, coreDir)
+			if err := g.RunProject(project); err != nil {
+				return err
 			}
 
-			return generateFleet(agents, projectDir, coreDir)
+			_ = ensureSchemaComment(filepath.Join(projectDir, "fleet.yaml"), ".build/fleet-schema.json")
+			for _, agent := range project.Agents {
+				agentYAML := filepath.Join(agent.Dir, "agent.yaml")
+				relSchema, relErr := filepath.Rel(agent.Dir, filepath.Join(projectDir, ".build", "schema.json"))
+				if relErr != nil {
+					relSchema = ".build/schema.json"
+				}
+				_ = ensureSchemaComment(agentYAML, relSchema)
+			}
+
+			fmt.Fprintf(os.Stderr, "Generated .build/ for %d agent(s) in %s\n", len(project.Agents), projectDir)
+			return nil
 		},
 	}
-
 	return cmd
-}
-
-func generateSingleAgent(cfg *config.Config, projectDir, coreDir string) error {
-	g := v1.NewGeneratorWithCore(projectDir, coreDir)
-	if err := g.RunWithConfig(cfg, projectDir); err != nil {
-		return err
-	}
-
-	_ = ensureSchemaComment(filepath.Join(projectDir, "agent.yaml"), ".build/schema.json")
-	fmt.Fprintf(os.Stderr, "Generated .build/ in %s\n", projectDir)
-	return nil
-}
-
-func generateFleet(agents []config.FleetAgent, projectDir, coreDir string) error {
-	g := v1.NewGeneratorWithCore(projectDir, coreDir)
-	if err := g.RunFleet(agents); err != nil {
-		return err
-	}
-
-	_ = ensureSchemaComment(filepath.Join(projectDir, "fleet.yaml"), ".build/fleet-schema.json")
-	for _, agent := range agents {
-		agentYAML := filepath.Join(agent.Dir, "agent.yaml")
-		relSchema, err := filepath.Rel(agent.Dir, filepath.Join(projectDir, ".build", "schema.json"))
-		if err != nil {
-			relSchema = ".build/schema.json"
-		}
-		_ = ensureSchemaComment(agentYAML, relSchema)
-	}
-
-	fmt.Fprintf(os.Stderr, "Generated .build/ for %d agents in %s\n", len(agents), projectDir)
-	return nil
 }
