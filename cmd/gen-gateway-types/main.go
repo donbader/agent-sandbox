@@ -97,7 +97,7 @@ func scanFile(path string) ([]Annotation, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	var annotations []Annotation
 	scanner := bufio.NewScanner(f)

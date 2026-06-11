@@ -81,7 +81,7 @@ func lintFile(path string) ([]violation, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	var violations []violation
 	scanner := bufio.NewScanner(f)
