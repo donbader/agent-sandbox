@@ -25,3 +25,5 @@ contributes:
         handler: "./src/callback.ts"
       - path: "/login"
         handler: "./src/login.ts"
+      - path: "/status"
+        handler: "./src/status.ts"
