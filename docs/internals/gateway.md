@@ -221,7 +221,7 @@ The gateway DNS server exists as infrastructure for future use cases (DNS-based 
 
 When a connection matches a MITM domain, `mitm.Handler` takes over:
 
-1. **Certificate generation** — At startup, the gateway loads an existing CA keypair from the shared volume (`/shared/certs/ca.crt` + `ca.key`) if present and valid. If no keypair exists or the cert has expired, it generates a fresh ECDSA P-256 CA. Per-domain leaf certs are generated on demand via `CertCache.GetOrCreate(domain, caCert)` (thread-safe, double-checked locking).
+1. **Certificate generation** — At startup, the gateway loads an existing CA keypair from the shared volume (`/shared/certs/ca.crt` + `ca.key`) if present and valid. If no keypair exists or the cert has expired, it generates a fresh ECDSA P-256 CA with 100-year validity (this is a local-only CA with no external trust chain, so short-lived certs provide no security benefit). Per-domain leaf certs are generated on demand via `CertCache.GetOrCreate(domain, caCert)` (thread-safe, double-checked locking).
 2. **TLS handshake** — wraps the client connection in a `prefixConn` (replays the already-read ClientHello bytes), then performs a `tls.Server` handshake using the generated cert.
 3. **HTTP request loop** (keep-alive aware):
    - `http.ReadRequest` from the decrypted stream
