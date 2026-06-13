@@ -27,3 +27,5 @@ contributes:
         handler: "./src/login.ts"
       - path: "/status"
         handler: "./src/status.ts"
+      - path: "/disconnect"
+        handler: "./src/disconnect.ts"
