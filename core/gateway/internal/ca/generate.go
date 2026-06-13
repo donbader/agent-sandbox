@@ -47,7 +47,7 @@ func GenerateAndStore(sharedCertPath, privateKeyPath string) (tls.Certificate, e
 			CommonName:   "agent-sandbox CA",
 		},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		NotAfter:              time.Now().Add(100 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
