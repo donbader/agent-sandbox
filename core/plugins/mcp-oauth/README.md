@@ -55,6 +55,37 @@ curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/login/
 # {"available":["notion"],"error":"provider name required","usage":"GET /plugins/mcp-oauth/login/<provider_name>"}
 ```
 
+### Specifying a Custom Callback URL
+
+The login endpoint accepts an optional `callback_url` query parameter to override the derived redirect URI. Useful when calling from within the agent container where X-Forwarded headers aren't available:
+
+```bash
+curl "$(agent-sandbox gateway-url)/plugins/mcp-oauth/login/notion?callback_url=http://localhost/oauth/callback/notion"
+```
+
+### Checking Connection Status
+
+```bash
+# Single provider
+curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/status/notion
+# {"connected":true,"expired":false}
+
+# All providers
+curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/status
+# {"notion":{"connected":true,"expired":false},"jira":{"connected":false,"expired":false}}
+```
+
+### Disconnecting a Provider
+
+Revokes the token (if the provider supports RFC 7009 revocation) and clears local storage:
+
+```bash
+curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/disconnect/notion
+# {"disconnected":true,"revoked":true,"provider":"notion"}
+```
+
+`revoked: false` means the provider doesn't expose a revocation endpoint — the token was cleared locally only.
+
 ## Usage
 
 ```yaml
@@ -119,6 +150,8 @@ Mode is auto-detected: if `client_id` is absent, dynamic mode is used.
 - **Gateway routes:**
   - `src/login.ts` — `/plugins/mcp-oauth/login/{provider}` — PKCE + Dynamic Client Registration
   - `src/callback.ts` — `/plugins/mcp-oauth/callback` — OAuth code exchange handler
+  - `src/status.ts` — `/plugins/mcp-oauth/status/{provider}` — Connection status check
+  - `src/disconnect.ts` — `/plugins/mcp-oauth/disconnect/{provider}` — Token revocation and removal
   - `src/pkce.ts` — PKCE challenge/verifier utilities
 - **Gateway volume:** Shared `oauth-tokens` volume at `token_dir`
 

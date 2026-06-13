@@ -244,11 +244,13 @@ Key patterns: single middleware with domain filter, `gw.crypto.base64.encode`, `
 
 ### mcp-oauth (complex multi-handler)
 
-Full OAuth lifecycle: token injection middleware, login route (PKCE), callback route (code exchange), dynamic client registration, token refresh.
+Full OAuth lifecycle: token injection middleware, login route (PKCE), callback route (code exchange), status checking, disconnect with revocation, dynamic client registration, token refresh.
 
 - [`core/plugins/mcp-oauth/plugin.yaml`](../core/plugins/mcp-oauth/plugin.yaml)
 - [`core/plugins/mcp-oauth/src/oauth.ts`](../core/plugins/mcp-oauth/src/oauth.ts) — middleware
 - [`core/plugins/mcp-oauth/src/login.ts`](../core/plugins/mcp-oauth/src/login.ts) — login route
 - [`core/plugins/mcp-oauth/src/callback.ts`](../core/plugins/mcp-oauth/src/callback.ts) — callback route
+- [`core/plugins/mcp-oauth/src/status.ts`](../core/plugins/mcp-oauth/src/status.ts) — status route
+- [`core/plugins/mcp-oauth/src/disconnect.ts`](../core/plugins/mcp-oauth/src/disconnect.ts) — disconnect route
 
 Key patterns: multiple routes + middleware, `gw.http.fetch` for token exchange, `gw.fs` for token persistence, `ctx.abort` for auth gating, `ctx.response.*` for route responses.
