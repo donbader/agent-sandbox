@@ -77,7 +77,11 @@ func (g *Generator) writeGatewayBuild(buildDir string, cfg *config.Config, contr
 	}
 
 	// 5. Write the Dockerfile
-	return g.writeGatewayBuildFiles(gatewayDir)
+	var gatewayVolumes []string
+	if contribs != nil {
+		gatewayVolumes = contribs.Gateway.Volumes
+	}
+	return g.writeGatewayBuildFiles(gatewayDir, gatewayVolumes)
 }
 
 // copyGatewayBinary copies the pre-built gateway binary into the build context.
@@ -306,7 +310,10 @@ func hasGatewayTSContribs(rp *resolvedPlugin) bool {
 }
 
 // writeGatewayBuildFiles writes the gateway Dockerfile into the gateway build directory.
-func (g *Generator) writeGatewayBuildFiles(gatewayDir string) error {
+// gatewayVolumes contains volume specs (e.g. "oauth-tokens:/data/plugins/mcp-oauth") whose
+// container-side paths are pre-created in the image so Docker initializes named volumes
+// with root ownership.
+func (g *Generator) writeGatewayBuildFiles(gatewayDir string, gatewayVolumes []string) error {
 	if err := os.MkdirAll(gatewayDir, 0755); err != nil {
 		return err
 	}
@@ -323,6 +330,33 @@ func (g *Generator) writeGatewayBuildFiles(gatewayDir string) error {
 		hash := sha256.Sum256(binaryData)
 		hashStr := hex.EncodeToString(hash[:8]) // short hash is sufficient for cache busting
 		dockerfile = strings.Replace(dockerfile, "ARG GATEWAY_HASH", "ARG GATEWAY_HASH="+hashStr, 1)
+	}
+
+	// Pre-create directories for named volumes so Docker initializes them with root
+	// ownership. Without this, volumes may inherit non-root UIDs and the gateway
+	// (which drops DAC_OVERRIDE) cannot write to them.
+	if len(gatewayVolumes) > 0 {
+		var mkdirs []string
+		for _, v := range gatewayVolumes {
+			parts := strings.SplitN(v, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			containerPath := parts[1]
+			// Strip trailing :ro or :rw options
+			if idx := strings.LastIndex(containerPath, ":"); idx != -1 {
+				containerPath = containerPath[:idx]
+			}
+			// Only add mkdir for absolute paths (skip bind mounts like ./foo:/bar)
+			if strings.HasPrefix(containerPath, "/") {
+				mkdirs = append(mkdirs, containerPath)
+			}
+		}
+		if len(mkdirs) > 0 {
+			mkdirLine := "RUN mkdir -p " + strings.Join(mkdirs, " ") + "\n"
+			// Insert before CMD
+			dockerfile = strings.Replace(dockerfile, "CMD [\"gateway\"]", mkdirLine+"CMD [\"gateway\"]", 1)
+		}
 	}
 
 	if err := os.WriteFile(filepath.Join(gatewayDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
