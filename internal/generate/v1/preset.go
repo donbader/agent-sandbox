@@ -14,7 +14,6 @@ type Preset struct {
 	BaseImage string   `yaml:"base_image"`
 	Install   []string `yaml:"install"`
 	CMD       []string `yaml:"cmd"`
-	AcpCMD    []string `yaml:"acp_cmd"`
 }
 
 // LoadPresets reads all presets from a core directory's presets/ folder.
