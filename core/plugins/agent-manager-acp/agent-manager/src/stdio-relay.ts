@@ -1,41 +1,37 @@
 import { createInterface } from "node:readline";
 import { createLogger } from "./logger.js";
 import { AgentProcess, JsonRpcMessage } from "./agent-process.js";
+import { MessageHandler } from "./message-handler.js";
 
 const log = createLogger("stdio-relay");
 
 /**
- * StdioRelay exposes the agent over the parent process's stdin/stdout.
+ * StdioRelay is a transport layer that bridges parent process stdin/stdout
+ * to the agent via the MessageHandler.
  *
- * Reads ndjson from process.stdin, forwards to the agent, and writes
- * agent responses/notifications to process.stdout. Supports the same
- * interception logic as AcpServer (cached init, auth bypass, /restart).
- *
- * When exitOnClose=false, stdin closing won't terminate the process
- * (useful when WebSocket server is also running).
+ * It handles only transport concerns (reading/writing ndjson over stdio).
+ * All message interception, enrichment, and command handling lives in MessageHandler.
  */
 export class StdioRelay {
+  private handler: MessageHandler;
   private agent: AgentProcess;
-  private cwd: string;
-  private initResult: JsonRpcMessage["result"] | null = null;
   private exitOnClose: boolean;
 
   constructor(agent: AgentProcess, cwd: string, opts?: { exitOnClose?: boolean }) {
     this.agent = agent;
-    this.cwd = cwd;
     this.exitOnClose = opts?.exitOnClose ?? true;
+    this.handler = new MessageHandler(agent, cwd);
   }
 
   setInitResult(result: JsonRpcMessage["result"]): void {
-    this.initResult = result;
+    this.handler.setInitResult(result);
   }
 
   start(): void {
-    // Forward agent notifications/responses to parent via stdout
+    // Agent → parent: enrich and forward
     this.agent.on("message", (msg: JsonRpcMessage) => {
-      // If it's a response to a pending request, send to parent
-      // If it's a notification (no id), also send to parent
-      this.send(msg);
+      const enriched = this.handler.handleAgentMessage(msg);
+      this.send(enriched);
     });
 
     this.agent.on("exit", (code: number | null, signal: string | null) => {
@@ -72,13 +68,14 @@ export class StdioRelay {
       }
     });
 
-    // Read from parent's stdin
+    // Parent → agent: intercept or forward
     const rl = createInterface({ input: process.stdin });
     rl.on("line", (line) => {
       if (!line.trim()) return;
       try {
         const msg: JsonRpcMessage = JSON.parse(line);
-        this.handleParentMessage(msg);
+        const response = this.handler.handleClientMessage(msg, (m) => this.send(m));
+        if (response) this.send(response);
       } catch {
         log.warn({ line: line.slice(0, 100) }, "non-JSON line from parent stdin");
       }
@@ -94,50 +91,6 @@ export class StdioRelay {
     });
 
     log.info("stdio relay started");
-  }
-
-  private handleParentMessage(msg: JsonRpcMessage): void {
-    const intercepted = this.interceptMessage(msg);
-    if (intercepted) {
-      this.send(intercepted);
-      return;
-    }
-    if (!this.agent.send(msg)) {
-      // Agent is not running — return an error response if the message has an id
-      if (msg.id) {
-        this.send({
-          jsonrpc: "2.0",
-          id: msg.id,
-          error: { code: -32000, message: "Agent process is not running" },
-        });
-      }
-    }
-  }
-
-  private interceptMessage(msg: JsonRpcMessage): JsonRpcMessage | null {
-    if (msg.method === "initialize") {
-      return { jsonrpc: "2.0", id: msg.id, result: this.initResult };
-    }
-    if (msg.method === "auth/authenticate") {
-      return { jsonrpc: "2.0", id: msg.id, result: {} };
-    }
-    if (msg.method === "session/new") {
-      if (!msg.params) msg.params = {};
-      const params = msg.params as Record<string, unknown>;
-      if (!params.cwd) params.cwd = this.cwd;
-      if (!params.mcpServers) params.mcpServers = [];
-      return null;
-    }
-    if (msg.method !== "session/prompt") return null;
-    const params = msg.params as { prompt?: Array<{ type: string; text: string }>; sessionId?: string } | undefined;
-    const text = params?.prompt?.[0]?.text?.trim();
-    if (!text) return null;
-    if (text === "/restart") {
-      log.info("intercepted /restart command");
-      this.agent.restart();
-      return { jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn", sessionId: params?.sessionId } };
-    }
-    return null;
   }
 
   private send(msg: JsonRpcMessage): void {
