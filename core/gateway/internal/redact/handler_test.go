@@ -54,8 +54,8 @@ func TestHandler_IgnoresEmptySecrets(t *testing.T) {
 	h := NewHandler(inner, []string{"", "", "real-secret"})
 
 	// Empty secrets should not cause everything to be redacted.
-	assert.Len(t, h.secrets, 1)
-	assert.Equal(t, "real-secret", h.secrets[0])
+	assert.Len(t, h.baseSecret, 1)
+	assert.Equal(t, "real-secret", h.baseSecret[0])
 }
 
 func TestHandler_PassesThroughWhenNoSecrets(t *testing.T) {
@@ -117,5 +117,61 @@ func TestHandler_ErrorValueRedacted(t *testing.T) {
 	logger.Error("upstream failed", "error", "dial tcp: connection to https://api.example.com/leaked-token refused")
 
 	assert.NotContains(t, buf.String(), "leaked-token")
+	assert.Contains(t, buf.String(), "[REDACTED]")
+}
+
+func TestHandler_WithSecretsFunc_RedactsDynamicSecrets(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewTextHandler(&buf, &slog.HandlerOptions{})
+
+	// Start with no static secrets.
+	h := NewHandler(inner, nil)
+
+	// Simulate a dynamic secret registered after handler creation (e.g. by a TS plugin).
+	dynamicSecrets := []string{"dynamic-bot-token-xyz"}
+	h = h.WithSecretsFunc(func() []string { return dynamicSecrets })
+
+	logger := slog.New(h)
+	logger.Info("request", "path", "/bot"+"dynamic-bot-token-xyz"+"/getUpdates")
+
+	assert.NotContains(t, buf.String(), "dynamic-bot-token-xyz")
+	assert.Contains(t, buf.String(), "[REDACTED]")
+}
+
+func TestHandler_WithSecretsFunc_CombinesStaticAndDynamic(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewTextHandler(&buf, &slog.HandlerOptions{})
+
+	h := NewHandler(inner, []string{"static-secret"})
+	h = h.WithSecretsFunc(func() []string { return []string{"dynamic-secret"} })
+
+	logger := slog.New(h)
+	logger.Info("both", "a", "has static-secret", "b", "has dynamic-secret")
+
+	assert.NotContains(t, buf.String(), "static-secret")
+	assert.NotContains(t, buf.String(), "dynamic-secret")
+}
+
+func TestHandler_WithSecretsFunc_PicksUpNewSecrets(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewTextHandler(&buf, &slog.HandlerOptions{})
+
+	// Simulate a registry that grows over time.
+	var registry []string
+	h := NewHandler(inner, nil).WithSecretsFunc(func() []string { return registry })
+
+	logger := slog.New(h)
+
+	// First log: secret not yet registered — it will leak.
+	logger.Info("before", "path", "/bot"+"late-registered-token"+"/send")
+	assert.Contains(t, buf.String(), "late-registered-token")
+
+	// Register the secret (as a plugin would on first request).
+	registry = append(registry, "late-registered-token")
+	buf.Reset()
+
+	// Second log: secret now redacted.
+	logger.Info("after", "path", "/bot"+"late-registered-token"+"/send")
+	assert.NotContains(t, buf.String(), "late-registered-token")
 	assert.Contains(t, buf.String(), "[REDACTED]")
 }
