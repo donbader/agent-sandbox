@@ -18,8 +18,12 @@ type RenderContext struct {
 	// Self is the full agent config, exposed as .agent in templates.
 	Self map[string]any
 
+	// Generator holds framework-provided values, exposed as .generator in templates.
+	// Always available to all plugins (e.g. {{ .generator.core_version }}).
+	Generator map[string]any
+
 	// Functions holds computed function results (name → value).
-	// Populated by the generator from the function registry scripts.
+	// Populated by executing plugin-declared scripts at generate time.
 	// Injected into .plugin.<name> for plugins that declare the function.
 	Functions map[string]string
 }
@@ -78,8 +82,9 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	}
 
 	data := map[string]any{
-		"plugin": pluginData,
-		"agent":  ctx.Self,
+		"plugin":    pluginData,
+		"agent":     ctx.Self,
+		"generator": ctx.Generator,
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
