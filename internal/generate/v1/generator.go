@@ -155,6 +155,9 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	var allContribs []*plugin.Contributions
 	resolved := make(map[string]*resolvedPlugin)
 
+	// Compute project metadata once for all plugins
+	gitDesc := g.gitDescribe()
+
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
 		if err != nil {
@@ -167,7 +170,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
 			Self:        plugin.ConfigToMap(cfg),
-			GitDescribe: g.gitDescribe(),
+			GitDescribe: gitDesc,
 			CoreVersion: g.coreVersion,
 		})
 		if err != nil {
@@ -451,8 +454,7 @@ func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
 	}
 }
 
-// projectContext builds the .project template data for plugin rendering.
-// It includes git version info from the project directory and the core version.
+// gitDescribe returns the git describe output for the project directory.
 func (g *Generator) gitDescribe() string {
 	cmd := exec.Command("git", "describe", "--tags", "--always")
 	cmd.Dir = g.projectDir

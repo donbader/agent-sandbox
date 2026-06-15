@@ -86,17 +86,19 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 		},
 	}
 
-	// Merge user-defined runtime.environment into agent service env.
-	if len(cfg.Runtime.Environment) > 0 {
-		if envMap, ok := agentSvc["environment"].(map[string]string); ok {
-			maps.Copy(envMap, cfg.Runtime.Environment)
-		}
-	}
-
 	// Merge plugin-contributed runtime.environment into agent service env.
+	// Merged before user-defined env so user config takes precedence.
 	if contribs != nil && len(contribs.Runtime.Environment) > 0 {
 		if envMap, ok := agentSvc["environment"].(map[string]string); ok {
 			maps.Copy(envMap, contribs.Runtime.Environment)
+		}
+	}
+
+	// Merge user-defined runtime.environment into agent service env.
+	// User config wins over plugin contributions on conflict.
+	if len(cfg.Runtime.Environment) > 0 {
+		if envMap, ok := agentSvc["environment"].(map[string]string); ok {
+			maps.Copy(envMap, cfg.Runtime.Environment)
 		}
 	}
 

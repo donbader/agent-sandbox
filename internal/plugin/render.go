@@ -71,7 +71,11 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	pluginData := map[string]any{"options": resolvedOpts}
 
 	// Inject computed values for declared functions
+	knownFunctions := map[string]bool{"gitDescribe": true, "coreVersion": true}
 	for _, fn := range p.Functions {
+		if !knownFunctions[fn] {
+			return nil, fmt.Errorf("plugin %q declares unknown function %q (available: gitDescribe, coreVersion)", p.Name, fn)
+		}
 		switch fn {
 		case "gitDescribe":
 			gd := ctx.GitDescribe
