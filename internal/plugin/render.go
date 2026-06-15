@@ -15,9 +15,13 @@ import (
 // This is the stable interface between the generator and plugins — add fields
 // here rather than extending function signatures.
 type RenderContext struct {
-	// Self is the full agent config, exposed as .self in templates.
-	// Plugins can access any config field: {{ .self.name }}, {{ .self.runtime.image }}, etc.
+	// Self is the full agent config, exposed as .agent in templates.
+	// Plugins can access any config field: {{ .agent.name }}, {{ .agent.runtime.image }}, etc.
 	Self map[string]any
+
+	// Project provides project-level metadata computed at generate time.
+	// Available as {{ .project.git_describe }}, {{ .project.core_version }}, etc.
+	Project map[string]any
 }
 
 // RenderContributions resolves Go templates in a plugin's contributions.
@@ -61,8 +65,9 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	}
 
 	data := map[string]any{
-		"plugin": map[string]any{"options": resolvedOpts},
-		"agent":  ctx.Self,
+		"plugin":  map[string]any{"options": resolvedOpts},
+		"agent":   ctx.Self,
+		"project": ctx.Project,
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {

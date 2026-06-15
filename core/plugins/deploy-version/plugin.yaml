@@ -1,0 +1,19 @@
+name: deploy-version
+description: Inject project and core version info as container environment variables
+
+options:
+  config_version_key:
+    type: string
+    required: false
+    default: "CONFIG_VERSION"
+    description: "Environment variable name for the config repo version (git describe)"
+  core_version_key:
+    type: string
+    required: false
+    default: "CORE_VERSION"
+    description: "Environment variable name for the agent-sandbox core version"
+
+contributes:
+  runtime:
+    extra_builds:
+      - "ENV {{ .plugin.options.config_version_key }}={{ .project.git_describe }} {{ .plugin.options.core_version_key }}={{ .project.core_version }}"

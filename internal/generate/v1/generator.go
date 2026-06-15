@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -159,7 +160,8 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		}
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
-			Self: plugin.ConfigToMap(cfg),
+			Self:    plugin.ConfigToMap(cfg),
+			Project: g.projectContext(cfg),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
@@ -440,4 +442,23 @@ func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
 			fmt.Fprintf(os.Stderr, "  Hint: plugin options are rendered at generate time — use a literal value instead.\n")
 		}
 	}
+}
+
+// projectContext builds the .project template data for plugin rendering.
+// It includes git version info from the project directory and the core version.
+func (g *Generator) projectContext(cfg *config.Config) map[string]any {
+	project := map[string]any{
+		"core_version": cfg.CoreVersion,
+	}
+
+	// Run git describe in the project directory
+	cmd := exec.Command("git", "describe", "--tags", "--always")
+	cmd.Dir = g.projectDir
+	if out, err := cmd.Output(); err == nil {
+		project["git_describe"] = strings.TrimSpace(string(out))
+	} else {
+		project["git_describe"] = "unknown"
+	}
+
+	return project
 }
