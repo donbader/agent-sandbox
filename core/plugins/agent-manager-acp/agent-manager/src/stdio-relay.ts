@@ -102,7 +102,16 @@ export class StdioRelay {
       this.send(intercepted);
       return;
     }
-    this.agent.send(msg);
+    if (!this.agent.send(msg)) {
+      // Agent is not running — return an error response if the message has an id
+      if (msg.id) {
+        this.send({
+          jsonrpc: "2.0",
+          id: msg.id,
+          error: { code: -32000, message: "Agent process is not running" },
+        });
+      }
+    }
   }
 
   private interceptMessage(msg: JsonRpcMessage): JsonRpcMessage | null {

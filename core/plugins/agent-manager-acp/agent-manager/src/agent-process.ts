@@ -88,11 +88,15 @@ export class AgentProcess extends EventEmitter {
 
   /** Send a JSON-RPC message to the agent via stdin. */
   send(msg: JsonRpcMessage): boolean {
-    if (!this.proc?.stdin) {
+    if (!this.proc?.stdin?.writable) {
       return false;
     }
-    this.proc.stdin.write(JSON.stringify(msg) + "\n");
-    return true;
+    try {
+      this.proc.stdin.write(JSON.stringify(msg) + "\n");
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Send a JSON-RPC request and wait for the matching response. */
