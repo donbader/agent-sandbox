@@ -75,7 +75,9 @@ func main() {
 		gateway.BindDomains(name, []string{domain})
 	}
 
-	// Collect ALL secrets (from config auth_headers + TS plugins)
+	// Collect static secrets known at startup (from config auth_headers).
+	// Dynamic secrets registered by TS plugins at request time are picked up
+	// via WithSecretsFunc which reads the live registry on every log record.
 	secrets := gateway.Secrets()
 
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -87,7 +89,8 @@ func main() {
 			return a
 		},
 	})
-	logger := slog.New(redact.NewHandler(jsonHandler, secrets))
+	handler := redact.NewHandler(jsonHandler, secrets).WithSecretsFunc(gateway.Secrets)
+	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
 	// Start DNS resolver
