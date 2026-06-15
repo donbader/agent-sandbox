@@ -1,16 +1,12 @@
 name: deploy-version
 description: Inject project and core version info as container environment variables (compose-level)
 
-functions:
-  gitDescribe:
-    script: "./scripts/git-describe.sh"
-
 options:
   config_version_key:
     type: string
     required: false
     default: "CONFIG_VERSION"
-    description: "Environment variable name for the config repo version (git describe)"
+    description: "Environment variable name for the config repo git hash"
   core_version_key:
     type: string
     required: false
@@ -20,5 +16,5 @@ options:
 contributes:
   runtime:
     environment:
-      "{{ .plugin.options.config_version_key }}": "{{ call .plugin.gitDescribe }}"
+      "{{ .plugin.options.config_version_key }}": "{{ .generator.git_hash }}"
       "{{ .plugin.options.core_version_key }}": "{{ .generator.core_version }}"

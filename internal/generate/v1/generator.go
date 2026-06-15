@@ -156,6 +156,10 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	resolved := make(map[string]*resolvedPlugin)
 
 	// Compute project metadata once for all plugins
+	generatorCtx := map[string]any{
+		"core_version": g.coreVersion,
+		"git_hash":     g.gitHash(),
+	}
 
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
@@ -169,7 +173,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
 			Self:      plugin.ConfigToMap(cfg),
-			Generator: map[string]any{"core_version": g.coreVersion},
+			Generator: generatorCtx,
 			Functions: g.computePluginFunctions(pluginDef),
 		})
 		if err != nil {
@@ -481,4 +485,14 @@ func (g *Generator) computePluginFunctions(p *plugin.PluginDef) map[string]strin
 	}
 
 	return results
+}
+
+// gitHash returns the short commit hash of the project directory.
+func (g *Generator) gitHash() string {
+	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	cmd.Dir = g.projectDir
+	if out, err := cmd.Output(); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	return "unknown"
 }
