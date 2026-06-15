@@ -140,6 +140,7 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 	var full struct {
 		Name        string                  `yaml:"name"`
 		Requires    []string                `yaml:"requires"`
+		Functions   map[string]FunctionDef  `yaml:"functions"`
 		Assets      []AssetEntry            `yaml:"assets"`
 		Options     map[string]OptionSchema `yaml:"options"`
 		Contributes Contributions           `yaml:"contributes"`
@@ -159,6 +160,7 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 		return &PluginDef{
 			Name:           full.Name,
 			Requires:       full.Requires,
+			Functions:      full.Functions,
 			Assets:         full.Assets,
 			Options:        full.Options,
 			ContributesRaw: contributesRaw,
@@ -170,10 +172,11 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 	contributesRaw, metadataOnly := splitContributesBlock(data)
 
 	var meta struct {
-		Name     string                  `yaml:"name"`
-		Requires []string                `yaml:"requires"`
-		Assets   []AssetEntry            `yaml:"assets"`
-		Options  map[string]OptionSchema `yaml:"options"`
+		Name      string                  `yaml:"name"`
+		Requires  []string                `yaml:"requires"`
+		Functions map[string]FunctionDef  `yaml:"functions"`
+		Assets    []AssetEntry            `yaml:"assets"`
+		Options   map[string]OptionSchema `yaml:"options"`
 	}
 	if err := yaml.Unmarshal(metadataOnly, &meta); err != nil {
 		return nil, fmt.Errorf("parse plugin.yaml: %w", err)
@@ -185,6 +188,7 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 	return &PluginDef{
 		Name:           meta.Name,
 		Requires:       meta.Requires,
+		Functions:      meta.Functions,
 		Assets:         meta.Assets,
 		Options:        meta.Options,
 		ContributesRaw: contributesRaw,
