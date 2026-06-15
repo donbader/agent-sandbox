@@ -68,10 +68,10 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	pluginData := map[string]any{"options": resolvedOpts}
 
 	// Inject computed values for declared functions
-	for _, fn := range p.Functions {
+	for fn := range p.Functions {
 		val, ok := ctx.Functions[fn]
 		if !ok {
-			return nil, fmt.Errorf("plugin %q declares unknown function %q", p.Name, fn)
+			return nil, fmt.Errorf("plugin %q declares function %q but it was not computed", p.Name, fn)
 		}
 		result := val // capture for closure
 		pluginData[fn] = func() string { return result }

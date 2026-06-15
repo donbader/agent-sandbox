@@ -12,7 +12,6 @@ import (
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate/templates"
 	"github.com/donbader/agent-sandbox/internal/plugin"
-	"gopkg.in/yaml.v3"
 )
 
 // envVarRefRe matches shell-style ${VAR} or $VAR references in rendered output.
@@ -157,7 +156,6 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	resolved := make(map[string]*resolvedPlugin)
 
 	// Compute project metadata once for all plugins
-	funcResults := g.computeFunctions()
 
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
@@ -171,7 +169,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
 			Self:      plugin.ConfigToMap(cfg),
-			Functions: funcResults,
+			Functions: g.computePluginFunctions(pluginDef),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
@@ -454,47 +452,23 @@ func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
 	}
 }
 
-// computeFunctions loads the function registry and executes all scripts,
-// returning a map of function name → computed value.
-func (g *Generator) computeFunctions() map[string]string {
+// computePluginFunctions executes a plugin's declared function scripts and returns results.
+func (g *Generator) computePluginFunctions(p *plugin.PluginDef) map[string]string {
 	results := make(map[string]string)
-
-	// Find the functions directory in the core
-	var functionsDir string
-	if g.coreDir != "" {
-		candidate := filepath.Join(g.coreDir, "functions")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			functionsDir = candidate
-		}
-	}
-	if functionsDir == "" {
+	if len(p.Functions) == 0 {
 		return results
 	}
 
-	// Parse registry.yaml
-	registryPath := filepath.Join(functionsDir, "registry.yaml")
-	registryData, err := os.ReadFile(registryPath)
-	if err != nil {
-		return results
-	}
-
-	var registry struct {
-		Functions map[string]struct {
-			Script string `yaml:"script"`
-		} `yaml:"functions"`
-	}
-	if err := yaml.Unmarshal(registryData, &registry); err != nil {
-		return results
-	}
-
-	// Execute each function script
 	env := append(os.Environ(),
 		"PROJECT_DIR="+g.projectDir,
 		"CORE_VERSION="+g.coreVersion,
 	)
 
-	for name, fn := range registry.Functions {
-		scriptPath := filepath.Join(functionsDir, fn.Script)
+	for name, fn := range p.Functions {
+		scriptPath := fn.Script
+		if p.BaseDir != "" && !filepath.IsAbs(scriptPath) {
+			scriptPath = filepath.Join(p.BaseDir, scriptPath)
+		}
 		cmd := exec.Command("sh", scriptPath)
 		cmd.Dir = g.projectDir
 		cmd.Env = env
