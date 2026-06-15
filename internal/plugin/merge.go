@@ -19,6 +19,12 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 		merged.Runtime.PreEntrypoint = append(merged.Runtime.PreEntrypoint, c.Runtime.PreEntrypoint...)
 		merged.Runtime.Ports = append(merged.Runtime.Ports, c.Runtime.Ports...)
 		merged.Runtime.Volumes = append(merged.Runtime.Volumes, c.Runtime.Volumes...)
+		if len(c.Runtime.Environment) > 0 {
+			if merged.Runtime.Environment == nil {
+				merged.Runtime.Environment = make(map[string]string)
+			}
+			maps.Copy(merged.Runtime.Environment, c.Runtime.Environment)
+		}
 		for _, cap := range c.Runtime.CapAdd {
 			if !capSeen[cap] {
 				merged.Runtime.CapAdd = append(merged.Runtime.CapAdd, cap)

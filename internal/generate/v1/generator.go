@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,12 +19,13 @@ var envVarRefRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_
 
 // Generator orchestrates v1 build artifact generation.
 type Generator struct {
-	projectDir string
-	bundledFS  fs.FS
-	gatewayFS  fs.FS
-	coreDir    string
-	templates  *templates.Loader
-	presets    map[string]*Preset
+	projectDir  string
+	bundledFS   fs.FS
+	gatewayFS   fs.FS
+	coreDir     string
+	coreVersion string
+	templates   *templates.Loader
+	presets     map[string]*Preset
 }
 
 // AgentResult holds the per-agent generation output.
@@ -92,6 +94,11 @@ func (g *Generator) SetPresets(presets map[string]*Preset) {
 	}
 }
 
+// SetCoreVersion sets the resolved core binary version (for plugin template functions).
+func (g *Generator) SetCoreVersion(v string) {
+	g.coreVersion = v
+}
+
 // RunProject executes the full generation pipeline for any project.
 func (g *Generator) RunProject(project *config.Project) error {
 	buildDir := filepath.Join(g.projectDir, ".build")
@@ -148,6 +155,8 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	var allContribs []*plugin.Contributions
 	resolved := make(map[string]*resolvedPlugin)
 
+	// Compute project metadata once for all plugins
+
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
 		if err != nil {
@@ -159,7 +168,9 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		}
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
-			Self: plugin.ConfigToMap(cfg),
+			Self:      plugin.ConfigToMap(cfg),
+			Generator: map[string]any{"core_version": g.coreVersion},
+			Functions: g.computePluginFunctions(pluginDef),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
@@ -440,4 +451,34 @@ func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
 			fmt.Fprintf(os.Stderr, "  Hint: plugin options are rendered at generate time — use a literal value instead.\n")
 		}
 	}
+}
+
+// computePluginFunctions executes a plugin's declared function scripts and returns results.
+func (g *Generator) computePluginFunctions(p *plugin.PluginDef) map[string]string {
+	results := make(map[string]string)
+	if len(p.Functions) == 0 {
+		return results
+	}
+
+	env := append(os.Environ(),
+		"PROJECT_DIR="+g.projectDir,
+		"CORE_VERSION="+g.coreVersion,
+	)
+
+	for name, fn := range p.Functions {
+		scriptPath := fn.Script
+		if p.BaseDir != "" && !filepath.IsAbs(scriptPath) {
+			scriptPath = filepath.Join(p.BaseDir, scriptPath)
+		}
+		cmd := exec.Command("sh", scriptPath)
+		cmd.Dir = g.projectDir
+		cmd.Env = env
+		if out, err := cmd.Output(); err == nil {
+			results[name] = strings.TrimSpace(string(out))
+		} else {
+			results[name] = "unknown"
+		}
+	}
+
+	return results
 }

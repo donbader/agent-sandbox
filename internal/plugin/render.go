@@ -15,9 +15,17 @@ import (
 // This is the stable interface between the generator and plugins — add fields
 // here rather than extending function signatures.
 type RenderContext struct {
-	// Self is the full agent config, exposed as .self in templates.
-	// Plugins can access any config field: {{ .self.name }}, {{ .self.runtime.image }}, etc.
+	// Self is the full agent config, exposed as .agent in templates.
 	Self map[string]any
+
+	// Generator holds framework-provided values, exposed as .generator in templates.
+	// Always available to all plugins (e.g. {{ .generator.core_version }}).
+	Generator map[string]any
+
+	// Functions holds computed function results (name → value).
+	// Populated by executing plugin-declared scripts at generate time.
+	// Injected into .plugin.<name> for plugins that declare the function.
+	Functions map[string]string
 }
 
 // RenderContributions resolves Go templates in a plugin's contributions.
@@ -60,9 +68,23 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 		return nil, fmt.Errorf("parse contributes template: %w", err)
 	}
 
+	// Build the .plugin template data with options + injected computed functions
+	pluginData := map[string]any{"options": resolvedOpts}
+
+	// Inject computed values for declared functions
+	for fn := range p.Functions {
+		val, ok := ctx.Functions[fn]
+		if !ok {
+			return nil, fmt.Errorf("plugin %q declares function %q but it was not computed", p.Name, fn)
+		}
+		result := val // capture for closure
+		pluginData[fn] = func() string { return result }
+	}
+
 	data := map[string]any{
-		"plugin": map[string]any{"options": resolvedOpts},
-		"agent":  ctx.Self,
+		"plugin":    pluginData,
+		"agent":     ctx.Self,
+		"generator": ctx.Generator,
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {

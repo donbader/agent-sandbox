@@ -653,7 +653,7 @@ func TestWarnUnresolvedVars(t *testing.T) {
 
 			warnUnresolvedVars("test-plugin", contribs)
 
-			w.Close()
+			w.Close() //nolint:errcheck // test helper, error irrelevant
 			os.Stderr = oldStderr
 
 			var buf [4096]byte

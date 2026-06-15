@@ -34,6 +34,7 @@ func generateCmd(dir *string) *cobra.Command {
 			}
 
 			g := v1.NewGeneratorWithCore(projectDir, coreDir)
+			g.SetCoreVersion(version)
 			if err := g.RunProject(project); err != nil {
 				return err
 			}

@@ -11,12 +11,18 @@ import (
 type PluginDef struct {
 	Name           string                  `yaml:"name"`
 	Requires       []string                `yaml:"requires"`
+	Functions      map[string]FunctionDef  `yaml:"functions"`
 	Assets         []AssetEntry            `yaml:"assets"`
 	Options        map[string]OptionSchema `yaml:"options"`
 	Contributes    Contributions           `yaml:"-"` // populated after template rendering
 	ContributesRaw string                  `yaml:"-"` // raw YAML template for contributes block
 	BaseDir        string                  `yaml:"-"` // directory where plugin.yaml lives (for resolving relative paths)
 	AssetPaths     map[string]string       `yaml:"-"` // resolved asset paths (set by generator after extraction)
+}
+
+// FunctionDef declares a computed function provided by a plugin.
+type FunctionDef struct {
+	Script string `yaml:"script"`
 }
 
 // AssetEntry describes a plugin asset directory with optional exclude patterns.
@@ -67,12 +73,13 @@ type Contributions struct {
 }
 
 type RuntimeContrib struct {
-	ExtraBuilds   []string `yaml:"extra_builds"`
-	PreEntrypoint []string `yaml:"pre_entrypoint"`
-	Ports         []string `yaml:"ports"`
-	Volumes       []string `yaml:"volumes"`
-	CapAdd        []string `yaml:"cap_add"` // validated at install time if plugin source is remote
-	SkipUserns    bool     `yaml:"skip_userns"`
+	ExtraBuilds   []string          `yaml:"extra_builds"`
+	Environment   map[string]string `yaml:"environment"`
+	PreEntrypoint []string          `yaml:"pre_entrypoint"`
+	Ports         []string          `yaml:"ports"`
+	Volumes       []string          `yaml:"volumes"`
+	CapAdd        []string          `yaml:"cap_add"` // validated at install time if plugin source is remote
+	SkipUserns    bool              `yaml:"skip_userns"`
 }
 
 type GatewayContrib struct {

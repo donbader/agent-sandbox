@@ -43,9 +43,22 @@ contributes:
   runtime:
     extra_builds:                   # injected into the agent Dockerfile
       - "ENV MY_TOKEN=dummy"
+    environment:                    # compose-level env vars (no rebuild needed)
+      MY_VAR: "my-value"
 ```
 
-**Template expressions** — YAML values support Go templates with access to `.plugin.options.*`. Useful for dynamic service lists:
+**Template expressions** — YAML values support Go templates. Available namespaces:
+
+| Namespace | Description | Example |
+|-----------|-------------|----------|
+| `.plugin.options.*` | User-provided plugin options | `{{ .plugin.options.token }}` |
+| `.agent.*` | Agent config fields | `{{ .agent.name }}`, `{{ .agent.runtime.cwd }}` |
+| `.generator.*` | Framework-provided values | `{{ .generator.core_version }}` |
+| `call .plugin.<fn>` | Plugin-computed functions | `{{ call .plugin.gitDescribe }}` |
+
+**Built-in template functions:** `toJSON`, `asset`, `index` (Go built-in).
+
+Dynamic service list example:
 
 ```yaml
 services:
@@ -53,6 +66,37 @@ services:
   - url: "{{ index $cfg "mcp_url" }}"
 {{- end }}
 ```
+
+## Plugin Computed Functions
+
+Plugins can declare computed functions that execute shell scripts at generate time. This is useful for injecting dynamic values (like git versions) that aren't known until generation.
+
+```yaml
+name: my-plugin
+
+functions:
+  gitDescribe:
+    script: "./scripts/git-describe.sh"
+
+options:
+  version_key:
+    type: string
+    default: "APP_VERSION"
+
+contributes:
+  runtime:
+    environment:
+      "{{ .plugin.options.version_key }}": "{{ call .plugin.gitDescribe }}"
+```
+
+**How it works:**
+1. Declare functions in `functions:` with a `script:` path (relative to plugin directory)
+2. At generate time, the framework executes each script with `sh`
+3. Scripts receive `PROJECT_DIR` and `CORE_VERSION` as environment variables
+4. Script stdout (trimmed) becomes the function's return value
+5. Access via `{{ call .plugin.<name> }}` in the contributes template
+
+If the script exits non-zero, the value defaults to `"unknown"`.
 
 ## Writing a Middleware Handler
 
