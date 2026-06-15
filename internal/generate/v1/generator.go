@@ -12,6 +12,7 @@ import (
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate/templates"
 	"github.com/donbader/agent-sandbox/internal/plugin"
+	"gopkg.in/yaml.v3"
 )
 
 // envVarRefRe matches shell-style ${VAR} or $VAR references in rendered output.
@@ -156,7 +157,7 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	resolved := make(map[string]*resolvedPlugin)
 
 	// Compute project metadata once for all plugins
-	gitDesc := g.gitDescribe()
+	funcResults := g.computeFunctions()
 
 	for _, inst := range cfg.Installations {
 		pluginDef, err := resolver.Resolve(inst.Plugin, inst.Source)
@@ -169,9 +170,8 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		}
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
-			Self:        plugin.ConfigToMap(cfg),
-			GitDescribe: gitDesc,
-			CoreVersion: g.coreVersion,
+			Self:      plugin.ConfigToMap(cfg),
+			Functions: funcResults,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
@@ -454,12 +454,56 @@ func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
 	}
 }
 
-// gitDescribe returns the git describe output for the project directory.
-func (g *Generator) gitDescribe() string {
-	cmd := exec.Command("git", "describe", "--tags", "--always")
-	cmd.Dir = g.projectDir
-	if out, err := cmd.Output(); err == nil {
-		return strings.TrimSpace(string(out))
+// computeFunctions loads the function registry and executes all scripts,
+// returning a map of function name → computed value.
+func (g *Generator) computeFunctions() map[string]string {
+	results := make(map[string]string)
+
+	// Find the functions directory in the core
+	var functionsDir string
+	if g.coreDir != "" {
+		candidate := filepath.Join(g.coreDir, "functions")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			functionsDir = candidate
+		}
 	}
-	return "unknown"
+	if functionsDir == "" {
+		return results
+	}
+
+	// Parse registry.yaml
+	registryPath := filepath.Join(functionsDir, "registry.yaml")
+	registryData, err := os.ReadFile(registryPath)
+	if err != nil {
+		return results
+	}
+
+	var registry struct {
+		Functions map[string]struct {
+			Script string `yaml:"script"`
+		} `yaml:"functions"`
+	}
+	if err := yaml.Unmarshal(registryData, &registry); err != nil {
+		return results
+	}
+
+	// Execute each function script
+	env := append(os.Environ(),
+		"PROJECT_DIR="+g.projectDir,
+		"CORE_VERSION="+g.coreVersion,
+	)
+
+	for name, fn := range registry.Functions {
+		scriptPath := filepath.Join(functionsDir, fn.Script)
+		cmd := exec.Command("sh", scriptPath)
+		cmd.Dir = g.projectDir
+		cmd.Env = env
+		if out, err := cmd.Output(); err == nil {
+			results[name] = strings.TrimSpace(string(out))
+		} else {
+			results[name] = "unknown"
+		}
+	}
+
+	return results
 }

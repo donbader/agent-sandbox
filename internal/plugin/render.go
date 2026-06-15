@@ -18,13 +18,10 @@ type RenderContext struct {
 	// Self is the full agent config, exposed as .agent in templates.
 	Self map[string]any
 
-	// GitDescribe is the output of `git describe --tags --always` from the project directory.
-	// Injected into .plugin.gitDescribe for plugins that declare "gitDescribe" in functions.
-	GitDescribe string
-
-	// CoreVersion is the resolved core binary version.
-	// Injected into .plugin.coreVersion for plugins that declare "coreVersion" in functions.
-	CoreVersion string
+	// Functions holds computed function results (name → value).
+	// Populated by the generator from the function registry scripts.
+	// Injected into .plugin.<name> for plugins that declare the function.
+	Functions map[string]string
 }
 
 // RenderContributions resolves Go templates in a plugin's contributions.
@@ -71,25 +68,13 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	pluginData := map[string]any{"options": resolvedOpts}
 
 	// Inject computed values for declared functions
-	knownFunctions := map[string]bool{"gitDescribe": true, "coreVersion": true}
 	for _, fn := range p.Functions {
-		if !knownFunctions[fn] {
-			return nil, fmt.Errorf("plugin %q declares unknown function %q (available: gitDescribe, coreVersion)", p.Name, fn)
+		val, ok := ctx.Functions[fn]
+		if !ok {
+			return nil, fmt.Errorf("plugin %q declares unknown function %q", p.Name, fn)
 		}
-		switch fn {
-		case "gitDescribe":
-			gd := ctx.GitDescribe
-			if gd == "" {
-				gd = "unknown"
-			}
-			pluginData["gitDescribe"] = func() string { return gd }
-		case "coreVersion":
-			cv := ctx.CoreVersion
-			if cv == "" {
-				cv = "unknown"
-			}
-			pluginData["coreVersion"] = func() string { return cv }
-		}
+		result := val // capture for closure
+		pluginData[fn] = func() string { return result }
 	}
 
 	data := map[string]any{
