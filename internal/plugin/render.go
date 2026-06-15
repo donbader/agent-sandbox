@@ -74,17 +74,17 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	for _, fn := range p.Functions {
 		switch fn {
 		case "gitDescribe":
-			if ctx.GitDescribe != "" {
-				pluginData["gitDescribe"] = ctx.GitDescribe
-			} else {
-				pluginData["gitDescribe"] = "unknown"
+			gd := ctx.GitDescribe
+			if gd == "" {
+				gd = "unknown"
 			}
+			pluginData["gitDescribe"] = func() string { return gd }
 		case "coreVersion":
-			if ctx.CoreVersion != "" {
-				pluginData["coreVersion"] = ctx.CoreVersion
-			} else {
-				pluginData["coreVersion"] = "unknown"
+			cv := ctx.CoreVersion
+			if cv == "" {
+				cv = "unknown"
 			}
+			pluginData["coreVersion"] = func() string { return cv }
 		}
 	}
 

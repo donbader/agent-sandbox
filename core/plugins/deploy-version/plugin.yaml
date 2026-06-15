@@ -20,5 +20,5 @@ options:
 contributes:
   runtime:
     environment:
-      "{{ .plugin.options.config_version_key }}": "{{ .plugin.gitDescribe }}"
-      "{{ .plugin.options.core_version_key }}": "{{ .plugin.coreVersion }}"
+      "{{ .plugin.options.config_version_key }}": "{{ call .plugin.gitDescribe }}"
+      "{{ .plugin.options.core_version_key }}": "{{ call .plugin.coreVersion }}"
