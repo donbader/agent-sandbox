@@ -1,16 +1,12 @@
 name: deploy-version
-description: Inject project and core version info as container environment variables (compose-level)
-
-functions:
-  gitDescribe:
-    script: "./scripts/git-describe.sh"
+description: Inject project and core version info into the agent container
 
 options:
-  config_version_key:
+  version_file:
     type: string
     required: false
-    default: "CONFIG_VERSION"
-    description: "Environment variable name for the config repo version (git describe)"
+    default: "/etc/deploy-version"
+    description: "Path where the config repo git hash is written at build time"
   core_version_key:
     type: string
     required: false
@@ -19,6 +15,9 @@ options:
 
 contributes:
   runtime:
+    extra_builds:
+      - "COPY .git /tmp/.git"
+      - "RUN git -C /tmp rev-parse --short HEAD > {{ .plugin.options.version_file }} 2>/dev/null || echo unknown > {{ .plugin.options.version_file }}"
+      - "RUN rm -rf /tmp/.git"
     environment:
-      "{{ .plugin.options.config_version_key }}": "{{ call .plugin.gitDescribe }}"
       "{{ .plugin.options.core_version_key }}": "{{ .generator.core_version }}"

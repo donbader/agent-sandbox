@@ -1,51 +1,44 @@
 # @builtin/deploy-version
 
-Injects project and core version information as container environment variables at compose level (no image rebuild needed — just restart).
+Injects project and core version information into the agent container.
+
+- **Config version** — git commit hash, computed at Docker build time (reads .git from build context)
+- **Core version** — agent-sandbox binary version, injected as compose environment variable
 
 ## Usage
 
 ```yaml
 installations:
   - plugin: "@builtin/deploy-version"
-    options:
-      config_version_key: CONFIG_VERSION   # default
-      core_version_key: CORE_VERSION       # default
 ```
 
-## What it does
+## How it works
 
-At `agent-sandbox generate` time:
+At `docker compose up --build`:
+1. The Dockerfile COPYs `.git` from the build context into a temp location
+2. Runs `git rev-parse --short HEAD` to get the commit hash
+3. Writes it to `/etc/deploy-version` (configurable)
+4. Removes `.git` from the image
 
-1. Runs `git describe --tags --always` in your config repo → `CONFIG_VERSION`
-2. Reads the resolved core binary version → `CORE_VERSION`
-
-These are injected as docker-compose environment variables (not baked into the Docker image), so updating only requires regenerate + restart.
+The core version is injected as a compose-level environment variable (`CORE_VERSION`).
 
 ## Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `config_version_key` | string | `CONFIG_VERSION` | Env var name for the config repo git version |
+| `version_file` | string | `/etc/deploy-version` | File path where git hash is written at build time |
 | `core_version_key` | string | `CORE_VERSION` | Env var name for the core binary version |
 
-## Template features used
+## Reading version in your app
 
-- `{{ call .plugin.gitDescribe }}` — plugin-scoped computed function (executes `scripts/git-describe.sh`)
-- `{{ .generator.core_version }}` — framework-provided value (always available to all plugins)
+```typescript
+import { readFileSync } from "node:fs";
 
-## Example output
-
-In the generated docker-compose.yml:
-```yaml
-environment:
-  CONFIG_VERSION: "v1.2.3"
-  CORE_VERSION: "v1.41.0"
+const configVersion = readFileSync("/etc/deploy-version", "utf-8").trim();
+const coreVersion = process.env.CORE_VERSION ?? "unknown";
 ```
 
-## Adding custom computed functions
+## Requirements
 
-This plugin demonstrates the `functions:` pattern. To add a new computed value:
-
-1. Write a shell script in `scripts/` (receives `PROJECT_DIR` and `CORE_VERSION` as env vars)
-2. Declare it in `plugin.yaml` under `functions:`
-3. Reference it via `{{ call .plugin.<name> }}` in the contributes template
+- Build context must include `.git` directory (don't exclude it in .dockerignore)
+- `git` must be available in the build image (included in `@builtin/pi` and other presets)
