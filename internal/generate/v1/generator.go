@@ -421,6 +421,13 @@ func (g *Generator) resolveAssetPaths(p *plugin.PluginDef, buildDir string) erro
 			p.AssetPaths[name] = relPath
 		}
 	}
+
+	// For bundled plugins, set BaseDir to the extracted plugin directory
+	// so relative paths (function scripts, etc.) resolve correctly.
+	if p.BaseDir == "" && len(p.Assets) > 0 {
+		p.BaseDir = filepath.Join(buildDir, "plugins", p.Name)
+	}
+
 	return nil
 }
 

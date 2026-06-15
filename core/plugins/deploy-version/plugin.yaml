@@ -1,6 +1,9 @@
 name: deploy-version
 description: Inject project and core version info as container environment variables (compose-level)
 
+assets:
+  - path: scripts/
+
 functions:
   gitDescribe:
     script: "./scripts/git-describe.sh"
