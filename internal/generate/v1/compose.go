@@ -93,6 +93,13 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 		}
 	}
 
+	// Merge plugin-contributed runtime.environment into agent service env.
+	if contribs != nil && len(contribs.Runtime.Environment) > 0 {
+		if envMap, ok := agentSvc["environment"].(map[string]string); ok {
+			maps.Copy(envMap, contribs.Runtime.Environment)
+		}
+	}
+
 	// Add healthcheck if the agent exposes ports (agent-manager listens on the first declared port).
 	if contribs != nil && len(contribs.Runtime.Ports) > 0 {
 		port := contribs.Runtime.Ports[0]

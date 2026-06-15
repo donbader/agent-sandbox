@@ -67,12 +67,13 @@ type Contributions struct {
 }
 
 type RuntimeContrib struct {
-	ExtraBuilds   []string `yaml:"extra_builds"`
-	PreEntrypoint []string `yaml:"pre_entrypoint"`
-	Ports         []string `yaml:"ports"`
-	Volumes       []string `yaml:"volumes"`
-	CapAdd        []string `yaml:"cap_add"` // validated at install time if plugin source is remote
-	SkipUserns    bool     `yaml:"skip_userns"`
+	ExtraBuilds   []string          `yaml:"extra_builds"`
+	Environment   map[string]string `yaml:"environment"`
+	PreEntrypoint []string          `yaml:"pre_entrypoint"`
+	Ports         []string          `yaml:"ports"`
+	Volumes       []string          `yaml:"volumes"`
+	CapAdd        []string          `yaml:"cap_add"` // validated at install time if plugin source is remote
+	SkipUserns    bool              `yaml:"skip_userns"`
 }
 
 type GatewayContrib struct {

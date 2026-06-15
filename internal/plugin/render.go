@@ -19,9 +19,13 @@ type RenderContext struct {
 	// Plugins can access any config field: {{ .agent.name }}, {{ .agent.runtime.image }}, etc.
 	Self map[string]any
 
-	// Project provides project-level metadata computed at generate time.
-	// Available as {{ .project.git_describe }}, {{ .project.core_version }}, etc.
-	Project map[string]any
+	// GitDescribe is the output of `git describe --tags --always` from the project directory.
+	// Available to plugins via the {{ gitDescribe }} template function.
+	GitDescribe string
+
+	// CoreVersion is the resolved core binary version.
+	// Available to plugins via the {{ coreVersion }} template function.
+	CoreVersion string
 }
 
 // RenderContributions resolves Go templates in a plugin's contributions.
@@ -57,6 +61,18 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 			}
 			return string(b), nil
 		},
+		"gitDescribe": func() string {
+			if ctx.GitDescribe != "" {
+				return ctx.GitDescribe
+			}
+			return "unknown"
+		},
+		"coreVersion": func() string {
+			if ctx.CoreVersion != "" {
+				return ctx.CoreVersion
+			}
+			return "unknown"
+		},
 	}
 
 	tmpl, err := template.New("contrib").Funcs(funcMap).Parse(contribTemplate)
@@ -65,9 +81,8 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	}
 
 	data := map[string]any{
-		"plugin":  map[string]any{"options": resolvedOpts},
-		"agent":   ctx.Self,
-		"project": ctx.Project,
+		"plugin": map[string]any{"options": resolvedOpts},
+		"agent":  ctx.Self,
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {

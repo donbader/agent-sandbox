@@ -19,12 +19,13 @@ var envVarRefRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_
 
 // Generator orchestrates v1 build artifact generation.
 type Generator struct {
-	projectDir string
-	bundledFS  fs.FS
-	gatewayFS  fs.FS
-	coreDir    string
-	templates  *templates.Loader
-	presets    map[string]*Preset
+	projectDir  string
+	bundledFS   fs.FS
+	gatewayFS   fs.FS
+	coreDir     string
+	coreVersion string
+	templates   *templates.Loader
+	presets     map[string]*Preset
 }
 
 // AgentResult holds the per-agent generation output.
@@ -91,6 +92,11 @@ func (g *Generator) SetPresets(presets map[string]*Preset) {
 	if g.presets == nil {
 		g.presets = presets
 	}
+}
+
+// SetCoreVersion sets the resolved core binary version (for plugin template functions).
+func (g *Generator) SetCoreVersion(v string) {
+	g.coreVersion = v
 }
 
 // RunProject executes the full generation pipeline for any project.
@@ -160,8 +166,9 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		}
 
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
-			Self:    plugin.ConfigToMap(cfg),
-			Project: g.projectContext(cfg),
+			Self:        plugin.ConfigToMap(cfg),
+			GitDescribe: g.gitDescribe(),
+			CoreVersion: g.coreVersion,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
@@ -446,19 +453,11 @@ func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
 
 // projectContext builds the .project template data for plugin rendering.
 // It includes git version info from the project directory and the core version.
-func (g *Generator) projectContext(cfg *config.Config) map[string]any {
-	project := map[string]any{
-		"core_version": cfg.CoreVersion,
-	}
-
-	// Run git describe in the project directory
+func (g *Generator) gitDescribe() string {
 	cmd := exec.Command("git", "describe", "--tags", "--always")
 	cmd.Dir = g.projectDir
 	if out, err := cmd.Output(); err == nil {
-		project["git_describe"] = strings.TrimSpace(string(out))
-	} else {
-		project["git_describe"] = "unknown"
+		return strings.TrimSpace(string(out))
 	}
-
-	return project
+	return "unknown"
 }
