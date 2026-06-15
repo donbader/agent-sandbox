@@ -187,3 +187,74 @@ contributes:
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "my-plugin")
 }
+
+func TestRenderContributions_Functions(t *testing.T) {
+	raw := `
+name: version-plugin
+functions:
+  gitHash:
+    script: "./scripts/git-hash.sh"
+options:
+  env_key:
+    type: string
+    default: "GIT_HASH"
+contributes:
+  runtime:
+    environment:
+      "{{ .plugin.options.env_key }}": "{{ call .plugin.gitHash }}"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	contribs, err := RenderContributions(p, map[string]any{}, RenderContext{
+		Self:      map[string]any{"name": "test-agent"},
+		Generator: map[string]any{"core_version": "v1.0.0"},
+		Functions: map[string]string{"gitHash": "abc1234"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "abc1234", contribs.Runtime.Environment["GIT_HASH"])
+}
+
+func TestRenderContributions_Functions_NotComputed(t *testing.T) {
+	raw := `
+name: broken-plugin
+functions:
+  missingFunc:
+    script: "./scripts/missing.sh"
+contributes:
+  runtime:
+    environment:
+      FOO: "{{ call .plugin.missingFunc }}"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	// Functions map doesn't include "missingFunc" — should error
+	_, err = RenderContributions(p, map[string]any{}, RenderContext{
+		Self:      map[string]any{"name": "test-agent"},
+		Generator: map[string]any{},
+		Functions: map[string]string{},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missingFunc")
+}
+
+func TestRenderContributions_GeneratorContext(t *testing.T) {
+	raw := `
+name: version-plugin
+contributes:
+  runtime:
+    environment:
+      CORE_VERSION: "{{ .generator.core_version }}"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	contribs, err := RenderContributions(p, map[string]any{}, RenderContext{
+		Self:      map[string]any{"name": "test-agent"},
+		Generator: map[string]any{"core_version": "v1.44.0"},
+		Functions: map[string]string{},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "v1.44.0", contribs.Runtime.Environment["CORE_VERSION"])
+}

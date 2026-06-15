@@ -64,3 +64,56 @@ options:
 	_, err := ParsePluginYAML([]byte(raw))
 	assert.ErrorContains(t, err, "name is required")
 }
+
+func TestParsePluginYAML_Functions(t *testing.T) {
+	raw := `
+name: deploy-version
+functions:
+  gitDescribe:
+    script: "./scripts/git-describe.sh"
+  coreVersion:
+    script: "./scripts/core-version.sh"
+options:
+  version_key:
+    type: string
+    default: "VERSION"
+contributes:
+  runtime:
+    environment:
+      "{{ .plugin.options.version_key }}": "{{ call .plugin.gitDescribe }}"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "deploy-version", p.Name)
+	assert.Len(t, p.Functions, 2)
+	assert.Contains(t, p.Functions, "gitDescribe")
+	assert.Contains(t, p.Functions, "coreVersion")
+	assert.Equal(t, "./scripts/git-describe.sh", p.Functions["gitDescribe"].Script)
+	assert.Equal(t, "./scripts/core-version.sh", p.Functions["coreVersion"].Script)
+}
+
+func TestParsePluginYAML_Functions_StructuralTemplate(t *testing.T) {
+	// Ensures functions are parsed even when contributes uses structural templates
+	// (which triggers the fallback meta-only parsing path).
+	raw := `
+name: dynamic-plugin
+functions:
+  myFunc:
+    script: "./scripts/my-func.sh"
+options:
+  providers:
+    type: object
+    required: true
+contributes:
+  runtime:
+    extra_builds:
+{{- range $name, $cfg := .plugin.options.providers }}
+      - "ENV {{ $name }}_VERSION={{ call .plugin.myFunc }}"
+{{- end }}
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "dynamic-plugin", p.Name)
+	assert.Contains(t, p.Functions, "myFunc")
+	assert.Equal(t, "./scripts/my-func.sh", p.Functions["myFunc"].Script)
+}
