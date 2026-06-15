@@ -52,6 +52,29 @@ If using a custom base image, make sure `ca-certificates` is installed and `upda
 2. Check channel manager logs: `agent-sandbox compose logs agent | grep -i telegram`
 3. Verify `allowed_users` in your config matches your Telegram username
 4. Make sure you've started a conversation with the bot first (send `/start`)
+5. Check for unresolved `${VAR}` in access control config — see "Plugin options contain literal ${VAR}" below
+
+### Plugin options contain literal `${VAR}`
+
+If `agent-sandbox generate` prints a warning like:
+
+```
+Warning: plugin "telegram" extra_builds contains ${TELEGRAM_USERNAME} which will be baked literally into the Docker image.
+```
+
+This means a `${VAR}` reference in your plugin options was not expanded. Plugin options flow through the Go template engine at **generate time**, not at Docker build or compose runtime. The `${VAR}` syntax only works in gateway `services[].headers` (resolved by Docker Compose from `.env`).
+
+**Fix:** Replace `${VAR}` with a literal value in your `fleet.yaml` or `agent.yaml`:
+
+```yaml
+# Before (broken — baked literally)
+access_control:
+  allowed_users: ["@${TELEGRAM_USERNAME}"]
+
+# After (correct)
+access_control:
+  allowed_users: ["@myusername"]
+```
 
 ### Environment variables not injected
 

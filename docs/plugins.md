@@ -217,7 +217,15 @@ installations:
       token: "${GITHUB_PAT}"
 ```
 
-**Env var expansion** — String values support `${ENV_VAR}` syntax. The CLI resolves these from the project `.env` file or shell environment before passing to the plugin.
+**Env var expansion** — String values in gateway `services[].headers` support `${ENV_VAR}` syntax, resolved at compose runtime from the `.env` file on the deployment machine.
+
+> **Important:** Plugin options used in `contributes.runtime.extra_builds` are rendered at **generate time** via Go templates. If you use `${VAR}` inside a plugin option value (e.g. in an `object`-type option), it will be baked **literally** into the Dockerfile — the shell variable will NOT be expanded at build time because:
+>
+> 1. The template engine (`toJSON`) outputs `${VAR}` as a literal string
+> 2. `RUN echo '...'` with single quotes prevents shell expansion
+> 3. Docker build doesn't have access to compose `.env` vars
+>
+> Use literal values for plugin options that get baked into the image. The CLI will emit a warning if it detects unresolved `${VAR}` patterns in rendered `extra_builds` lines.
 
 Option types: `string`, `object`, `boolean`, `integer`. The `required` and `default` fields control validation.
 

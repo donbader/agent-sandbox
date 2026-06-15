@@ -5,12 +5,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate/templates"
 	"github.com/donbader/agent-sandbox/internal/plugin"
 )
+
+// envVarRefRe matches shell-style ${VAR} or $VAR references in rendered output.
+var envVarRefRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
 
 // Generator orchestrates v1 build artifact generation.
 type Generator struct {
@@ -160,6 +164,9 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
 		}
+
+		// Warn about ${VAR} references in baked output that won't be expanded at runtime.
+		warnUnresolvedVars(inst.Plugin, rendered)
 
 		if pluginDef.BaseDir != "" {
 			for name, svc := range rendered.Sidecar.Services {
@@ -404,4 +411,33 @@ func (g *Generator) resolveAssetPaths(p *plugin.PluginDef, buildDir string) erro
 		}
 	}
 	return nil
+}
+
+// warnUnresolvedVars checks rendered plugin contributions for ${VAR} references
+// that will be baked literally into the Docker image and won't be expanded at runtime.
+// This catches a common mistake where users put env var references in plugin options
+// expecting them to be resolved, but they pass through the template engine verbatim.
+func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
+	if contribs == nil {
+		return
+	}
+
+	// Check extra_builds lines (baked into Dockerfile at generate time)
+	for _, line := range contribs.Runtime.ExtraBuilds {
+		// Skip lines that are Dockerfile ENV or ARG directives — those are intentionally
+		// setting up variables for later RUN commands within the same build stage.
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "ENV ") || strings.HasPrefix(trimmed, "ARG ") {
+			continue
+		}
+		matches := envVarRefRe.FindAllStringSubmatch(line, -1)
+		for _, m := range matches {
+			varName := m[1]
+			if varName == "" {
+				varName = m[2]
+			}
+			fmt.Fprintf(os.Stderr, "Warning: plugin %q extra_builds contains ${%s} which will be baked literally into the Docker image.\n", pluginName, varName)
+			fmt.Fprintf(os.Stderr, "  Hint: plugin options are rendered at generate time — use a literal value instead.\n")
+		}
+	}
 }

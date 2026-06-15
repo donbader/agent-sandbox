@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/donbader/agent-sandbox/internal/config"
+	"github.com/donbader/agent-sandbox/internal/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -599,4 +600,74 @@ func mustParseConfig(t *testing.T, path string) *config.Config {
 	cfg, err := config.Load(dir)
 	require.NoError(t, err)
 	return cfg
+}
+
+func TestWarnUnresolvedVars(t *testing.T) {
+	tests := []struct {
+		name        string
+		extraBuilds []string
+		wantWarns   []string
+		wantNoWarn  bool
+	}{
+		{
+			name:        "literal value - no warning",
+			extraBuilds: []string{`RUN echo '{"allowed_users":["@coreyortea"]}' > /opt/config.json`},
+			wantNoWarn:  true,
+		},
+		{
+			name:        "ENV directive - no warning",
+			extraBuilds: []string{"ENV TELEGRAM_BOT_TOKEN=dummy"},
+			wantNoWarn:  true,
+		},
+		{
+			name:        "ARG directive - no warning",
+			extraBuilds: []string{"ARG MY_BUILD_VAR"},
+			wantNoWarn:  true,
+		},
+		{
+			name:        "unresolved ${VAR} in RUN - warns",
+			extraBuilds: []string{`RUN echo '{"allowed_users":["@${TELEGRAM_USERNAME}"]}' > /opt/config.json`},
+			wantWarns:   []string{"TELEGRAM_USERNAME"},
+		},
+		{
+			name:        "unresolved $VAR without braces - warns",
+			extraBuilds: []string{`RUN echo $MY_SECRET > /opt/token`},
+			wantWarns:   []string{"MY_SECRET"},
+		},
+		{
+			name:        "multiple unresolved vars - warns for each",
+			extraBuilds: []string{`RUN echo '${FOO} ${BAR}' > /opt/cfg`},
+			wantWarns:   []string{"FOO", "BAR"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contribs := &plugin.Contributions{}
+			contribs.Runtime.ExtraBuilds = tt.extraBuilds
+
+			// Capture stderr
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			warnUnresolvedVars("test-plugin", contribs)
+
+			w.Close()
+			os.Stderr = oldStderr
+
+			var buf [4096]byte
+			n, _ := r.Read(buf[:])
+			output := string(buf[:n])
+
+			if tt.wantNoWarn {
+				assert.Empty(t, output, "expected no warning but got: %s", output)
+			} else {
+				for _, varName := range tt.wantWarns {
+					assert.Contains(t, output, fmt.Sprintf("${%s}", varName))
+					assert.Contains(t, output, "test-plugin")
+				}
+			}
+		})
+	}
 }
