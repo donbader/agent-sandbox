@@ -11,6 +11,7 @@ import (
 type PluginDef struct {
 	Name           string                  `yaml:"name"`
 	Requires       []string                `yaml:"requires"`
+	Functions      []string                `yaml:"functions"`
 	Assets         []AssetEntry            `yaml:"assets"`
 	Options        map[string]OptionSchema `yaml:"options"`
 	Contributes    Contributions           `yaml:"-"` // populated after template rendering

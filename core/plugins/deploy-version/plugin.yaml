@@ -1,6 +1,10 @@
 name: deploy-version
 description: Inject project and core version info as container environment variables (compose-level)
 
+functions:
+  - gitDescribe
+  - coreVersion
+
 options:
   config_version_key:
     type: string
@@ -16,5 +20,5 @@ options:
 contributes:
   runtime:
     environment:
-      "{{ .plugin.options.config_version_key }}": "{{ gitDescribe }}"
-      "{{ .plugin.options.core_version_key }}": "{{ coreVersion }}"
+      "{{ .plugin.options.config_version_key }}": "{{ .plugin.gitDescribe }}"
+      "{{ .plugin.options.core_version_key }}": "{{ .plugin.coreVersion }}"

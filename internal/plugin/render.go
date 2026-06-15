@@ -16,15 +16,14 @@ import (
 // here rather than extending function signatures.
 type RenderContext struct {
 	// Self is the full agent config, exposed as .agent in templates.
-	// Plugins can access any config field: {{ .agent.name }}, {{ .agent.runtime.image }}, etc.
 	Self map[string]any
 
 	// GitDescribe is the output of `git describe --tags --always` from the project directory.
-	// Available to plugins via the {{ gitDescribe }} template function.
+	// Injected into .plugin.gitDescribe for plugins that declare "gitDescribe" in functions.
 	GitDescribe string
 
 	// CoreVersion is the resolved core binary version.
-	// Available to plugins via the {{ coreVersion }} template function.
+	// Injected into .plugin.coreVersion for plugins that declare "coreVersion" in functions.
 	CoreVersion string
 }
 
@@ -61,18 +60,6 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 			}
 			return string(b), nil
 		},
-		"gitDescribe": func() string {
-			if ctx.GitDescribe != "" {
-				return ctx.GitDescribe
-			}
-			return "unknown"
-		},
-		"coreVersion": func() string {
-			if ctx.CoreVersion != "" {
-				return ctx.CoreVersion
-			}
-			return "unknown"
-		},
 	}
 
 	tmpl, err := template.New("contrib").Funcs(funcMap).Parse(contribTemplate)
@@ -80,8 +67,29 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 		return nil, fmt.Errorf("parse contributes template: %w", err)
 	}
 
+	// Build the .plugin template data with options + injected computed functions
+	pluginData := map[string]any{"options": resolvedOpts}
+
+	// Inject computed values for declared functions
+	for _, fn := range p.Functions {
+		switch fn {
+		case "gitDescribe":
+			if ctx.GitDescribe != "" {
+				pluginData["gitDescribe"] = ctx.GitDescribe
+			} else {
+				pluginData["gitDescribe"] = "unknown"
+			}
+		case "coreVersion":
+			if ctx.CoreVersion != "" {
+				pluginData["coreVersion"] = ctx.CoreVersion
+			} else {
+				pluginData["coreVersion"] = "unknown"
+			}
+		}
+	}
+
 	data := map[string]any{
-		"plugin": map[string]any{"options": resolvedOpts},
+		"plugin": pluginData,
 		"agent":  ctx.Self,
 	}
 	var buf bytes.Buffer
