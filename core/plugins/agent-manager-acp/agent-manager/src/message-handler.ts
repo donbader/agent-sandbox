@@ -35,6 +35,13 @@ export class MessageHandler {
     const intercepted = this.interceptMessage(msg, emit);
     if (intercepted) return intercepted;
 
+    // Log responses and cancel notifications for debugging
+    if (!msg.method && msg.id !== undefined) {
+      log.debug({ id: msg.id, hasResult: !!msg.result, hasError: !!msg.error }, "forwarding response to agent");
+    } else if (msg.method === "session/cancel") {
+      log.debug({ method: msg.method, params: msg.params }, "forwarding cancel notification to agent");
+    }
+
     if (!this.agent.send(msg)) {
       if (msg.id) {
         return {
