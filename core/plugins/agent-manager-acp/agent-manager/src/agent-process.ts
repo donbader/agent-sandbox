@@ -36,13 +36,13 @@ export class AgentProcess extends EventEmitter {
     const [bin, ...args] = this.cmd;
     log.info({ bin, args, cwd: this.cwd }, "spawning agent process");
 
-    this.proc = spawn(bin, args, {
+    const proc = spawn(bin, args, {
       cwd: this.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
     });
 
-    this.proc.stderr?.on("data", (chunk: Buffer) => {
+    proc.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();
       if (text) {
         log.debug({ agent_stderr: text }, "agent stderr");
@@ -50,21 +50,25 @@ export class AgentProcess extends EventEmitter {
       }
     });
 
-    this.proc.on("exit", (code, signal) => {
+    proc.on("exit", (code, signal) => {
       log.warn({ code, signal }, "agent process exited");
-      this.proc = null;
-      this.reader = null;
+      // Only clear references if this is still the current process.
+      // Prevents a stale exit event from nulling a newly-spawned process.
+      if (this.proc === proc) {
+        this.proc = null;
+        this.reader = null;
+      }
       this.emit("exit", code, signal);
     });
 
-    this.proc.on("error", (err) => {
+    proc.on("error", (err) => {
       log.error({ err }, "agent process error");
       this.emit("error", err);
     });
 
     // Read newline-delimited JSON-RPC from agent stdout
-    this.reader = createInterface({ input: this.proc.stdout! });
-    this.reader.on("line", (line) => {
+    const reader = createInterface({ input: proc.stdout! });
+    reader.on("line", (line) => {
       if (!line.trim()) return;
       try {
         const msg: JsonRpcMessage = JSON.parse(line);
@@ -74,10 +78,13 @@ export class AgentProcess extends EventEmitter {
       }
     });
 
+    this.proc = proc;
+    this.reader = reader;
+
     // Wait briefly for process to be ready (or fail fast on spawn error)
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => resolve(), 500);
-      this.proc!.on("error", (err) => {
+      proc.on("error", (err) => {
         clearTimeout(timeout);
         reject(new Error(`Failed to spawn agent: ${err.message}`));
       });
@@ -122,12 +129,25 @@ export class AgentProcess extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    if (this.proc) {
-      this.reader?.close();
-      this.proc.kill("SIGTERM");
-      this.proc = null;
-      this.reader = null;
-    }
+    const proc = this.proc;
+    if (!proc) return;
+
+    this.reader?.close();
+    this.reader = null;
+    this.proc = null;
+
+    // Send SIGTERM and wait for actual exit before returning.
+    // This prevents race conditions where a new process is spawned
+    // while the old one still holds resources (lock files, ports, etc).
+    proc.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      proc.on("exit", () => resolve());
+      // Failsafe: don't wait forever if process ignores SIGTERM
+      setTimeout(() => {
+        proc.kill("SIGKILL");
+        resolve();
+      }, 5000);
+    });
   }
 
   async restart(): Promise<void> {
