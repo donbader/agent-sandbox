@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -81,35 +82,31 @@ func (c *Cleaner) cleanupContainers(ctx context.Context, client *http.Client, ba
 
 	slog.Info("cleanup: found containers", "count", len(containers))
 
+	// Stop and remove in parallel to stay within Docker's SIGTERM grace period
+	var wg sync.WaitGroup
 	for _, container := range containers {
-		id := container.Id
-		name := ""
-		if len(container.Names) > 0 {
-			name = container.Names[0]
-		}
+		wg.Add(1)
+		go func(id string, names []string) {
+			defer wg.Done()
+			name := ""
+			if len(names) > 0 {
+				name = names[0]
+			}
 
-		// Stop (5s timeout)
-		stopURL := fmt.Sprintf("%s/containers/%s/stop?t=5", base, id)
-		req, _ := http.NewRequestWithContext(ctx, "POST", stopURL, nil)
-		stopResp, err := client.Do(req)
-		if err != nil {
-			slog.Warn("cleanup: stop container", "id", id[:min(12, len(id))], "error", err)
-		} else {
-			_ = stopResp.Body.Close()
-		}
+			// Force remove (kills + removes in one call)
+			removeURL := fmt.Sprintf("%s/containers/%s?force=true", base, id)
+			req, _ := http.NewRequestWithContext(ctx, "DELETE", removeURL, nil)
+			rmResp, err := client.Do(req)
+			if err != nil {
+				slog.Warn("cleanup: remove container", "id", id[:min(12, len(id))], "error", err)
+			} else {
+				_ = rmResp.Body.Close()
+			}
 
-		// Remove
-		removeURL := fmt.Sprintf("%s/containers/%s?force=true", base, id)
-		req, _ = http.NewRequestWithContext(ctx, "DELETE", removeURL, nil)
-		rmResp, err := client.Do(req)
-		if err != nil {
-			slog.Warn("cleanup: remove container", "id", id[:min(12, len(id))], "error", err)
-		} else {
-			_ = rmResp.Body.Close()
-		}
-
-		slog.Info("cleanup: removed container", "id", id[:min(12, len(id))], "name", name)
+			slog.Info("cleanup: removed container", "id", id[:min(12, len(id))], "name", name)
+		}(container.Id, container.Names)
 	}
+	wg.Wait()
 }
 
 func (c *Cleaner) cleanupNetworks(ctx context.Context, client *http.Client, base string) {
