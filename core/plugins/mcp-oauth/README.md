@@ -15,30 +15,30 @@ The login endpoint handles the full OAuth lifecycle including PKCE and Dynamic C
 
 ### Quick Start
 
+From inside the agent container:
+
 ```bash
-# 1. Start your agent-sandbox environment
-agent-sandbox -C <project-dir> compose up --build
-
-# 2. Discover the gateway URL (port is dynamically assigned)
-agent-sandbox -C <project-dir> gateway-url
-# http://localhost:49321
-
-# 3. Initiate login for a provider
-curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/login/<provider>
+# 1. Initiate login for a provider
+curl -s "http://<gateway-host>:8080/plugins/mcp-oauth/login/<provider>?callback_url=http://127.0.0.1/plugins/mcp-oauth/callback"
 
 # Response:
 # {"authorize_url":"https://...","provider":"<provider>","instructions":"Open the authorize_url in your browser to complete login."}
 
-# 4. Open the authorize_url in your browser and complete authorization
-#    The browser will redirect back to the gateway and show "Authorization successful"
+# 2. Open the authorize_url in your browser and authorize
+#    The browser will redirect to http://127.0.0.1/... which won't load — that's expected.
+
+# 3. Copy the full URL from the browser address bar and extract code + state params
+
+# 4. Complete the flow by calling the callback endpoint directly:
+curl -s "http://<gateway-host>:8080/plugins/mcp-oauth/callback?code=<CODE>&state=<STATE>"
 
 # 5. Done — the agent can now use the MCP provider transparently
 ```
 
-> **Note:** The gateway port is dynamically assigned to avoid conflicts when running
-> multiple agent-sandbox instances on the same host. Use `agent-sandbox gateway-url`
-> to discover the current port. If you need a fixed port, set `gateway.public_url`
-> in your `agent.yaml`.
+> **Note:** The gateway port is not exposed to the Docker host. The agent reaches
+> the gateway internally via the Docker network (e.g., `http://my-agent-gateway:8080`).
+> The `callback_url=http://127.0.0.1/...` parameter satisfies OAuth providers that
+> require loopback URIs for dynamic registration.
 
 ### How It Works
 
@@ -57,21 +57,21 @@ curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/login/
 
 ### Specifying a Custom Callback URL
 
-The login endpoint accepts an optional `callback_url` query parameter to override the derived redirect URI. Useful when calling from within the agent container where X-Forwarded headers aren't available:
+The login endpoint accepts an optional `callback_url` query parameter to override the derived redirect URI. Use a loopback address to satisfy OAuth providers that require HTTPS or loopback URIs for dynamic registration:
 
 ```bash
-curl "$(agent-sandbox gateway-url)/plugins/mcp-oauth/login/notion?callback_url=http://localhost/oauth/callback/notion"
+curl -s "http://<gateway-host>:8080/plugins/mcp-oauth/login/notion?callback_url=http://127.0.0.1/plugins/mcp-oauth/callback"
 ```
 
 ### Checking Connection Status
 
 ```bash
 # Single provider
-curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/status/notion
+curl -s http://<gateway-host>:8080/plugins/mcp-oauth/status/notion
 # {"connected":true,"expired":false}
 
 # All providers
-curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/status
+curl -s http://<gateway-host>:8080/plugins/mcp-oauth/status
 # {"notion":{"connected":true,"expired":false},"jira":{"connected":false,"expired":false}}
 ```
 
@@ -80,7 +80,7 @@ curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/status
 Revokes the token (if the provider supports RFC 7009 revocation) and clears local storage:
 
 ```bash
-curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/disconnect/notion
+curl -s http://<gateway-host>:8080/plugins/mcp-oauth/disconnect/notion
 # {"disconnected":true,"revoked":true,"provider":"notion"}
 ```
 
@@ -89,12 +89,7 @@ curl $(agent-sandbox -C <project-dir> gateway-url)/plugins/mcp-oauth/disconnect/
 ## Usage
 
 ```yaml
-# agent.yaml
-gateway:
-  public_url: "https://gateway.myagent.example.com"
-  services:
-    - url: https://mcp.notion.com
-
+# agent.yaml or fleet.yaml shared config
 installations:
   - plugin: "@builtin/mcp-oauth"
     options:
@@ -111,7 +106,6 @@ installations:
           client_id: "your-client-id"
           client_secret: "your-client-secret"
           scopes: "read_content"
-      token_dir: "/data/oauth-tokens"
 ```
 
 ## Options
@@ -158,10 +152,50 @@ Mode is auto-detected: if `client_id` is absent, dynamic mode is used.
 ## OAuth Flow
 
 ```
-1. Agent MCP client → request to notion domain
-2. Gateway middleware: no token file → returns 401 + authorize_url
-3. User clicks authorize_url → Notion login page
-4. Notion redirects → https://gateway.example.com/plugins/mcp-oauth/callback?code=X&state=notion
-5. Gateway callback handler: exchanges code → writes /data/oauth-tokens/notion.json
-6. Next request → middleware reads token → injects Bearer header → proxied to Notion
+1. Agent calls: GET /plugins/mcp-oauth/login/<provider>?callback_url=http://127.0.0.1/...
+2. Gateway performs DCR + PKCE → returns authorize_url
+3. User opens authorize_url in browser → provider login page
+4. User authorizes → browser redirects to http://127.0.0.1/... (fails to load — expected)
+5. User copies the full URL from browser address bar, pastes it back to agent
+6. Agent extracts code + state, calls: GET /plugins/mcp-oauth/callback?code=X&state=Y
+7. Gateway exchanges code for tokens → writes /data/plugins/mcp-oauth/<provider>.json
+8. Next request → middleware reads token → injects Bearer header → proxied to provider
 ```
+
+## Agent Skill (Pi)
+
+To let your agent handle OAuth connections via natural language ("connect me to Notion"), add a Pi skill:
+
+Create `~/.pi/agent/skills/mcp-oauth/SKILL.md` (or seed it into the agent's home directory):
+
+```markdown
+---
+name: mcp-oauth
+description: Connect, disconnect, and check status of MCP OAuth services. Use when the user wants to connect a service, check connection status, or fix auth errors.
+---
+
+# MCP OAuth Management
+
+## Gateway Base URL
+
+http://<gateway-service-name>:8080/plugins/mcp-oauth
+
+## Discover Providers
+
+curl -s http://<gateway-service-name>:8080/plugins/mcp-oauth/status
+
+## Connect
+
+1. curl -s "http://<gateway-service-name>:8080/plugins/mcp-oauth/login/<provider>?callback_url=http://127.0.0.1/plugins/mcp-oauth/callback"
+2. Show authorize_url to user
+3. User authorizes, browser fails to load redirect — user copies URL and pastes it back
+4. Extract code and state from pasted URL
+5. curl -s "http://<gateway-service-name>:8080/plugins/mcp-oauth/callback?code=<CODE>&state=<STATE>"
+6. Confirm with /status/<provider>
+
+## Disconnect
+
+curl -s http://<gateway-service-name>:8080/plugins/mcp-oauth/disconnect/<provider>
+```
+
+Replace `<gateway-service-name>` with your agent's gateway Docker service name (e.g., `my-agent-gateway`).
