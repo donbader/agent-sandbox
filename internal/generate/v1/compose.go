@@ -141,6 +141,7 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 			"sandbox": map[string]any{
 				"aliases": []string{p.gatewayAlias},
 			},
+			"external": map[string]any{},
 		},
 		"volumes": gatewayVolumes,
 		"healthcheck": map[string]any{
@@ -225,7 +226,15 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 	compose := composeFile{
 		Services: map[string]any{},
 		Volumes:  map[string]any{},
-		Networks: map[string]any{"sandbox": map[string]any{"driver": "bridge"}},
+		Networks: map[string]any{
+			"sandbox": map[string]any{
+				"driver":   "bridge",
+				"internal": true,
+			},
+			"external": map[string]any{
+				"driver": "bridge",
+			},
+		},
 	}
 
 	for _, agent := range agents {
