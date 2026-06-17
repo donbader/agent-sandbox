@@ -109,7 +109,11 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	p.passthrough(clientConn, hello, serverName)
 }
 
-// passthrough pipes the connection directly to the destination.
+// passthrough pipes the connection directly to the destination on port 443.
+// NOTE: Since iptables DNAT rewrites the destination, we lose the original port.
+// This means TLS on non-443 ports will be dialed on 443 instead. This is acceptable
+// because nearly all TLS traffic uses 443. Non-standard ports can be supported later
+// via SO_ORIGINAL_DST or port-specific iptables rules.
 func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName string) {
 	destAddr := net.JoinHostPort(serverName, "443")
 	serverConn, err := net.DialTimeout("tcp", destAddr, 10*time.Second)
