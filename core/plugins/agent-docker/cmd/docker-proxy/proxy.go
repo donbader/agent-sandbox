@@ -88,7 +88,8 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Cleanup stops and removes all tracked containers.
 func (dp *DockerProxy) Cleanup() {
-	// Will be implemented in cleanup.go
+	cleaner := NewCleaner(dp.cfg.SandboxID)
+	cleaner.CleanupAll(context.Background())
 }
 
 func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Request) {
