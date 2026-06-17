@@ -80,12 +80,11 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 
 	// TLS records start with 0x16 (ContentType handshake)
 	if len(hello) > 0 && hello[0] != 0x16 {
-		// Not TLS — handle as plain HTTP
-		if p.httpHandler != nil {
+		if isHTTP(hello) && p.httpHandler != nil {
 			slog.Debug("connection detected as HTTP", "remote_addr", clientConn.RemoteAddr())
 			p.httpHandler.Handle(clientConn, hello)
 		} else {
-			slog.Debug("HTTP connection dropped (no handler)", "remote_addr", clientConn.RemoteAddr())
+			slog.Debug("unknown protocol blocked", "remote_addr", clientConn.RemoteAddr(), "first_byte", fmt.Sprintf("0x%02x", hello[0]))
 		}
 		return
 	}
@@ -128,6 +127,17 @@ func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName 
 
 	// Bidirectional pipe
 	pipe(clientConn, serverConn)
+}
+
+// isHTTP checks if the initial bytes look like an HTTP request method.
+func isHTTP(data []byte) bool {
+	methods := []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH ", "CONNECT "}
+	for _, m := range methods {
+		if len(data) >= len(m) && string(data[:len(m)]) == m {
+			return true
+		}
+	}
+	return false
 }
 
 // pipe copies data bidirectionally between two connections.
