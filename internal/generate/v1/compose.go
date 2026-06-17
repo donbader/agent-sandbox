@@ -176,7 +176,7 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 			if sidecar["depends_on"] == nil {
 				sidecar["depends_on"] = map[string]any{
 					p.agentName: map[string]any{
-						"condition": "service_healthy",
+						"condition": "service_started",
 					},
 				}
 			}
@@ -296,7 +296,14 @@ func buildSidecarService(svc plugin.ComposeService, buildDir string) map[string]
 		"networks": []string{"sandbox"},
 	}
 	if svc.Build != "" {
-		relPath, err := filepath.Rel(buildDir, svc.Build)
+		buildPath := svc.Build
+		// For bundled plugins, the build path is relative to projectDir.
+		// Make it absolute so filepath.Rel works correctly.
+		if !filepath.IsAbs(buildPath) {
+			// buildDir is projectDir/.build — go up one level to get projectDir
+			buildPath = filepath.Join(filepath.Dir(buildDir), buildPath)
+		}
+		relPath, err := filepath.Rel(buildDir, buildPath)
 		if err != nil {
 			relPath = svc.Build
 		}
