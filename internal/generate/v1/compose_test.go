@@ -291,7 +291,7 @@ func TestBuildProjectCompose_SingleAgent(t *testing.T) {
 	assert.Contains(t, output, "my-agent:")
 	assert.Contains(t, output, "my-agent-gateway:")
 
-	// Gateway port always exposed
+	// Gateway port not exposed to host
 	var composed struct {
 		Services map[string]struct {
 			Ports []string `yaml:"ports"`
@@ -299,7 +299,7 @@ func TestBuildProjectCompose_SingleAgent(t *testing.T) {
 	}
 	err = yaml.Unmarshal([]byte(output), &composed)
 	require.NoError(t, err)
-	assert.Contains(t, composed.Services["my-agent-gateway"].Ports, "8080")
+	assert.NotContains(t, composed.Services["my-agent-gateway"].Ports, "8080")
 
 	// Build paths are nested
 	assert.Contains(t, output, ".build/my-agent/Dockerfile")
@@ -333,7 +333,7 @@ func TestBuildProjectCompose_MultipleAgents(t *testing.T) {
 	assert.Contains(t, output, "reviewer:")
 	assert.Contains(t, output, "reviewer-gateway:")
 
-	// Both gateways expose port
+	// Both gateways do not expose port to host
 	var composed struct {
 		Services map[string]struct {
 			Ports []string `yaml:"ports"`
@@ -341,8 +341,8 @@ func TestBuildProjectCompose_MultipleAgents(t *testing.T) {
 	}
 	err = yaml.Unmarshal([]byte(output), &composed)
 	require.NoError(t, err)
-	assert.Contains(t, composed.Services["coder-gateway"].Ports, "8080")
-	assert.Contains(t, composed.Services["reviewer-gateway"].Ports, "8080")
+	assert.NotContains(t, composed.Services["coder-gateway"].Ports, "8080")
+	assert.NotContains(t, composed.Services["reviewer-gateway"].Ports, "8080")
 }
 
 func TestBuildFleetCompose(t *testing.T) {

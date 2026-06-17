@@ -48,7 +48,6 @@ func main() {
 	root.AddCommand(composeCmd(&dir))
 	root.AddCommand(auditCmd(&dir))
 	root.AddCommand(initCmd())
-	root.AddCommand(gatewayURLCmd(&dir))
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -116,64 +115,6 @@ func composeCmd(dir *string) *cobra.Command {
 		},
 	}
 
-	return cmd
-}
-
-func gatewayURLCmd(dir *string) *cobra.Command {
-	var agentName string
-	cmd := &cobra.Command{
-		Use:   "gateway-url",
-		Short: "Print the gateway's public URL (resolves dynamic port)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			composePath := filepath.Join(*dir, ".build", "docker-compose.yml")
-			if _, err := os.Stat(composePath); os.IsNotExist(err) {
-				return fmt.Errorf("%s not found — run 'agent-sandbox generate' first", composePath)
-			}
-
-			absDir, err := filepath.Abs(*dir)
-			if err != nil {
-				return fmt.Errorf("resolve project dir: %w", err)
-			}
-			projectName := filepath.Base(absDir)
-
-			project, err := config.LoadProject(*dir)
-			if err != nil {
-				return fmt.Errorf("load project: %w", err)
-			}
-
-			agent, err := project.ResolveAgent(agentName)
-			if err != nil {
-				return err
-			}
-
-			gatewayService := agent.Name + "-gateway"
-
-			runtime := runtimeBinary(*dir)
-			c := exec.Command(runtime, "compose",
-				"-f", composePath,
-				"--project-name", projectName,
-				"port", gatewayService, "8080",
-			)
-			out, err := c.Output()
-			if err != nil {
-				return fmt.Errorf("gateway not running or port not exposed — is 'agent-sandbox compose up' running?")
-			}
-
-			hostPort := strings.TrimSpace(string(out))
-			if hostPort == "" {
-				return fmt.Errorf("could not resolve gateway port")
-			}
-
-			hostPort = strings.Replace(hostPort, "0.0.0.0:", "localhost:", 1)
-			if strings.HasPrefix(hostPort, ":::") {
-				hostPort = "localhost:" + strings.TrimPrefix(hostPort, ":::")
-			}
-
-			fmt.Printf("http://%s\n", hostPort)
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&agentName, "agent", "", "Agent name (required for multi-agent projects)")
 	return cmd
 }
 

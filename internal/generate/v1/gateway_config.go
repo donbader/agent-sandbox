@@ -18,7 +18,6 @@ import (
 type GatewayConfigOutput struct {
 	Services    []GatewayServiceOutput
 	AuthHeaders []AuthHeaderEntry // auth-header entries to bake into config.yaml
-	PublicURL   string            // gateway public URL for callbacks
 }
 
 // AuthHeaderEntry describes an auth-header middleware to generate at build time.
@@ -43,7 +42,6 @@ type gatewayRuntimeConfig struct {
 	MITMDomains []string            `yaml:"mitm_domains"`
 	AuthHeaders []authHeaderRuntime `yaml:"auth_headers,omitempty"`
 	HealthAddr  string              `yaml:"health_addr,omitempty"`
-	PublicURL   string              `yaml:"public_url,omitempty"`
 }
 
 // authHeaderRuntime is the runtime representation of an auth-header entry in config.yaml.
@@ -55,15 +53,7 @@ type authHeaderRuntime struct {
 
 // BuildGatewayConfig merges user gateway config with plugin contributions.
 func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *GatewayConfigOutput {
-	publicURL := cfg.Gateway.PublicURL
-	// Default to localhost:8080 when no public_url configured (local dev)
-	if publicURL == "" {
-		publicURL = "http://localhost:8080"
-	}
-
-	out := &GatewayConfigOutput{
-		PublicURL: publicURL,
-	}
+	out := &GatewayConfigOutput{}
 
 	// User-declared services
 	for _, svc := range cfg.Gateway.Services {
@@ -115,7 +105,6 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 	rc := gatewayRuntimeConfig{
 		Listen:    ":8443",
 		DNSListen: ":53",
-		PublicURL: gwCfg.PublicURL,
 	}
 
 	for _, svc := range gwCfg.Services {

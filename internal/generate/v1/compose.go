@@ -263,7 +263,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			},
 			sidecarPrefix: agentName,
 			buildDir:      composeDir,
-			exposeGateway: true,
+			exposeGateway: false,
 		})
 
 		maps.Copy(compose.Services, pair.services)
