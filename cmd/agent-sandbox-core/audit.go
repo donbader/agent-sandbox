@@ -92,6 +92,7 @@ func auditAgent(cfg *config.Config, projectName, dir string) []auditCheck {
 	checks = append(checks, checkCACert(agentContainer))
 	checks = append(checks, checkDNATRules(agentContainer))
 	checks = append(checks, checkDefaultRoute(agentContainer))
+	checks = append(checks, checkNoDirectEgress(agentContainer))
 
 	return checks
 }
@@ -256,8 +257,9 @@ func checkDNS(container string) auditCheck {
 	}
 }
 
-// checkCACert verifies the gateway CA is installed in the agent.
+// checkCACert verifies the gateway CA is installed and trusted by the system.
 func checkCACert(container string) auditCheck {
+	// Check 1: cert file exists
 	_, err := containerExec(container, "test", "-f", "/usr/local/share/ca-certificates/gateway-ca.crt")
 	if err != nil {
 		return auditCheck{
@@ -266,10 +268,34 @@ func checkCACert(container string) auditCheck {
 			Detail: "CA certificate not found at /usr/local/share/ca-certificates/gateway-ca.crt",
 		}
 	}
+
+	// Check 2: the cert is present in the system trust bundle.
+	// update-ca-certificates appends the cert to /etc/ssl/certs/ca-certificates.crt.
+	// Verify by comparing the PEM content.
+	out, err := containerExec(container, "sh", "-c",
+		"cat /usr/local/share/ca-certificates/gateway-ca.crt | head -2 | tail -1")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return auditCheck{
+			Name:   "Gateway CA trusted",
+			Passed: false,
+			Detail: "could not read gateway CA certificate",
+		}
+	}
+	// Check the first line of the cert body appears in the system bundle
+	certLine := strings.TrimSpace(out)
+	_, err = containerExec(container, "grep", "-q", certLine, "/etc/ssl/certs/ca-certificates.crt")
+	if err != nil {
+		return auditCheck{
+			Name:   "Gateway CA trusted",
+			Passed: false,
+			Detail: "CA file exists but not found in system trust bundle — update-ca-certificates may not have run",
+		}
+	}
+
 	return auditCheck{
 		Name:   "Gateway CA trusted",
 		Passed: true,
-		Detail: "gateway CA certificate present in trust store",
+		Detail: "gateway CA certificate present and included in system trust store",
 	}
 }
 
@@ -332,6 +358,66 @@ func checkDefaultRoute(container string) auditCheck {
 		Name:   "Default route to gateway",
 		Passed: false,
 		Detail: "no DNAT target found in iptables OUTPUT chain",
+	}
+}
+
+// checkNoDirectEgress verifies the agent cannot bypass the gateway to reach the internet.
+// Confirms that the default route goes through the gateway and no additional routes
+// provide a direct path to external networks.
+func checkNoDirectEgress(container string) auditCheck {
+	// Read /proc/net/route to verify all external traffic goes through gateway.
+	// Default route (destination 00000000) must have a non-zero gateway address.
+	out, err := containerExec(container, "cat", "/proc/net/route")
+	if err != nil {
+		return auditCheck{
+			Name:   "No direct egress bypass",
+			Passed: false,
+			Detail: fmt.Sprintf("could not read routing table: %v", err),
+		}
+	}
+
+	hasDefaultViaGateway := false
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// Default route: Destination == 00000000, Gateway != 00000000
+		if fields[1] == "00000000" && fields[2] != "00000000" {
+			hasDefaultViaGateway = true
+			break
+		}
+	}
+
+	if !hasDefaultViaGateway {
+		return auditCheck{
+			Name:   "No direct egress bypass",
+			Passed: false,
+			Detail: "no default route via gateway found — direct egress possible",
+		}
+	}
+
+	// Verify no additional default routes exist that could bypass the gateway.
+	// Count routes with destination 00000000 — there should be exactly one.
+	defaultRoutes := 0
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[1] == "00000000" {
+			defaultRoutes++
+		}
+	}
+	if defaultRoutes > 1 {
+		return auditCheck{
+			Name:   "No direct egress bypass",
+			Passed: false,
+			Detail: fmt.Sprintf("found %d default routes — multiple paths to external networks", defaultRoutes),
+		}
+	}
+
+	return auditCheck{
+		Name:   "No direct egress bypass",
+		Passed: true,
+		Detail: "single default route via gateway, no bypass paths",
 	}
 }
 
