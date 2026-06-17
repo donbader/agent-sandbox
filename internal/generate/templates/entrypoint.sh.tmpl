@@ -39,6 +39,12 @@ fi
 iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "${GATEWAY_IP}:8443"
 echo "[entrypoint] iptables: all outbound TCP (except $SANDBOX_CIDR) → ${GATEWAY_IP}:8443"
 
+# Redirect external DNS (UDP 53) to the gateway's DNS forwarder.
+# On internal networks, Docker's embedded DNS (127.0.0.11) cannot resolve external hostnames.
+# The gateway forwards to Docker DNS first (for container names), then public DNS (for internet).
+iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.0/8 -j DNAT --to-destination "${GATEWAY_IP}:53"
+echo "[entrypoint] iptables: DNS (UDP 53) → ${GATEWAY_IP}:53"
+
 # Install the gateway CA certificate so TLS verification succeeds.
 if [ -f /shared/certs/ca.crt ]; then
     cp /shared/certs/ca.crt /usr/local/share/ca-certificates/gateway-ca.crt
