@@ -44,7 +44,11 @@ if [ -f /shared/certs/ca.crt ]; then
         cat /shared/certs/ca.crt >> /etc/ssl/certs/ca-certificates.crt
     fi
     # Node.js does not use the system CA store — export for Node-based agents (Claude Code, etc).
+    # NODE_EXTRA_CA_CERTS: works on Node 7.3+ (points to a specific cert file).
+    # NODE_USE_SYSTEM_CA: works on Node 20.12+ (reads the system CA bundle directly).
+    # Both can coexist safely — older Node ignores the unknown env var.
     export NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/gateway-ca.crt
+    export NODE_USE_SYSTEM_CA=1
     echo "[entrypoint] CA certificate installed"
 else
     echo "[entrypoint] WARNING: CA cert not found at /shared/certs/ca.crt" >&2
