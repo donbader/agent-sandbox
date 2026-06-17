@@ -30,6 +30,11 @@ options:
     required: false
     default: 256
     description: "PID limit per spawned container"
+  allow_compose:
+    type: boolean
+    required: false
+    default: false
+    description: "Allow docker compose operations (network create/remove for inner sandboxes)"
 
 contributes:
   runtime:
@@ -47,3 +52,4 @@ contributes:
           MEMORY_LIMIT: "{{ .plugin.options.memory }}"
           CPU_LIMIT: "{{ .plugin.options.cpus }}"
           PID_LIMIT: "{{ .plugin.options.pids }}"
+          ALLOW_COMPOSE: "{{ .plugin.options.allow_compose }}"

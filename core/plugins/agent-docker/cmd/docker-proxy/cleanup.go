@@ -46,11 +46,19 @@ func (c *Cleaner) baseURL() string {
 	return c.dockerAddr
 }
 
-// CleanupAll stops and removes all containers labeled with this sandbox ID.
+// CleanupAll stops and removes all containers and networks labeled with this sandbox ID.
 func (c *Cleaner) CleanupAll(ctx context.Context) {
 	client := c.httpClient()
 	base := c.baseURL()
 
+	// Clean up containers first
+	c.cleanupContainers(ctx, client, base)
+
+	// Then clean up networks
+	c.cleanupNetworks(ctx, client, base)
+}
+
+func (c *Cleaner) cleanupContainers(ctx context.Context, client *http.Client, base string) {
 	filters := fmt.Sprintf(`{"label":["agent-sandbox.sandbox=%s"]}`, c.sandboxID)
 	listURL := fmt.Sprintf("%s/containers/json?all=true&filters=%s", base, filters)
 
@@ -101,5 +109,46 @@ func (c *Cleaner) CleanupAll(ctx context.Context) {
 		}
 
 		slog.Info("cleanup: removed container", "id", id[:min(12, len(id))], "name", name)
+	}
+}
+
+func (c *Cleaner) cleanupNetworks(ctx context.Context, client *http.Client, base string) {
+	filters := fmt.Sprintf(`{"label":["agent-sandbox.sandbox=%s"]}`, c.sandboxID)
+	listURL := fmt.Sprintf("%s/networks?filters=%s", base, filters)
+
+	resp, err := client.Get(listURL)
+	if err != nil {
+		slog.Error("cleanup: list networks", "error", err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(resp.Body)
+	var networks []struct {
+		Id   string `json:"Id"`
+		Name string `json:"Name"`
+	}
+	if err := json.Unmarshal(body, &networks); err != nil {
+		slog.Error("cleanup: parse network list", "error", err)
+		return
+	}
+
+	if len(networks) == 0 {
+		return
+	}
+
+	slog.Info("cleanup: found networks", "count", len(networks))
+
+	for _, network := range networks {
+		removeURL := fmt.Sprintf("%s/networks/%s", base, network.Id)
+		req, _ := http.NewRequestWithContext(ctx, "DELETE", removeURL, nil)
+		rmResp, err := client.Do(req)
+		if err != nil {
+			slog.Warn("cleanup: remove network", "id", network.Id[:min(12, len(network.Id))], "error", err)
+		} else {
+			_ = rmResp.Body.Close()
+		}
+
+		slog.Info("cleanup: removed network", "id", network.Id[:min(12, len(network.Id))], "name", network.Name)
 	}
 }

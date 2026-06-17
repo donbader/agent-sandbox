@@ -18,6 +18,7 @@ type ProxyConfig struct {
 	MemoryBytes   int64
 	NanoCPUs      int64
 	PidsLimit     int64
+	AllowCompose  bool
 }
 
 func loadConfigFromEnv() (*ProxyConfig, error) {
@@ -50,6 +51,7 @@ func loadConfigFromEnv() (*ProxyConfig, error) {
 	cfg.MemoryBytes = parseMemory(os.Getenv("MEMORY_LIMIT"))
 	cfg.NanoCPUs = parseCPUs(os.Getenv("CPU_LIMIT"))
 	cfg.PidsLimit = int64(envInt("PID_LIMIT", 256))
+	cfg.AllowCompose = os.Getenv("ALLOW_COMPOSE") == "true"
 
 	return cfg, nil
 }

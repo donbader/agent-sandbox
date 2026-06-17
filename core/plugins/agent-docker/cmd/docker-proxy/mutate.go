@@ -32,19 +32,40 @@ func (m *Mutator) MutateCreate(body map[string]any, containerName string) {
 	if !ok || hc == nil {
 		hc = map[string]any{}
 	}
-	hc["NetworkMode"] = m.cfg.NetworkName
 	hc["Memory"] = m.cfg.MemoryBytes
 	hc["NanoCpus"] = m.cfg.NanoCPUs
 	hc["PidsLimit"] = m.cfg.PidsLimit
 	hc["RestartPolicy"] = map[string]any{"Name": "no"}
-	body["HostConfig"] = hc
 
-	// Force NetworkingConfig so Docker attaches to the correct network
-	body["NetworkingConfig"] = map[string]any{
-		"EndpointsConfig": map[string]any{
-			m.cfg.NetworkName: map[string]any{},
-		},
+	if m.cfg.AllowCompose {
+		// In compose mode: keep the requested network (it's one we created),
+		// and additionally attach to the sandbox network for gateway routing.
+		existingEndpoints := map[string]any{}
+		if nc, ok := body["NetworkingConfig"].(map[string]any); ok {
+			if ec, ok := nc["EndpointsConfig"].(map[string]any); ok {
+				existingEndpoints = ec
+			}
+		}
+		// Always add sandbox network
+		existingEndpoints[m.cfg.NetworkName] = map[string]any{}
+		body["NetworkingConfig"] = map[string]any{
+			"EndpointsConfig": existingEndpoints,
+		}
+		// If no explicit NetworkMode was set, default to sandbox network
+		if _, hasNM := hc["NetworkMode"]; !hasNM {
+			hc["NetworkMode"] = m.cfg.NetworkName
+		}
+	} else {
+		// Standard mode: force everything onto sandbox network only
+		hc["NetworkMode"] = m.cfg.NetworkName
+		body["NetworkingConfig"] = map[string]any{
+			"EndpointsConfig": map[string]any{
+				m.cfg.NetworkName: map[string]any{},
+			},
+		}
 	}
+
+	body["HostConfig"] = hc
 }
 
 // NamespaceContainerName prefixes a container name with sandbox identity.

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -40,7 +43,18 @@ func TestEndpointAllowed(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			assert.Equal(t, tc.allow, isEndpointAllowed(tc.method, tc.path))
+			// Use a proxy with AllowCompose=false to test base allowlist
+			proxy, _ := NewDockerProxy(&ProxyConfig{
+				SandboxID:     "test",
+				AgentName:     "coder",
+				NetworkName:   "sandbox",
+				AllowedImages: []string{"node:*"},
+				MaxContainers: 5,
+				MemoryBytes:   2 * 1024 * 1024 * 1024,
+				NanoCPUs:      2000000000,
+				PidsLimit:     256,
+			})
+			assert.Equal(t, tc.allow, proxy.isEndpointAllowed(tc.method, tc.path))
 		})
 	}
 }
@@ -218,4 +232,95 @@ func TestDockerProxy_ContainerCreate_MaxContainers(t *testing.T) {
 
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
 	assert.Contains(t, w.Body.String(), "maximum")
+}
+
+func TestDockerProxy_AllowCompose_NetworkEndpoints(t *testing.T) {
+	// Without AllowCompose, network endpoints are blocked
+	proxyNoCompose, _ := NewDockerProxy(&ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowCompose:  false,
+	})
+	assert.False(t, proxyNoCompose.isEndpointAllowed("POST", "/networks/create"))
+	assert.False(t, proxyNoCompose.isEndpointAllowed("GET", "/networks"))
+	assert.False(t, proxyNoCompose.isEndpointAllowed("DELETE", "/networks/abc123"))
+
+	// With AllowCompose, network endpoints are allowed
+	proxyCompose, _ := NewDockerProxy(&ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowCompose:  true,
+	})
+	assert.True(t, proxyCompose.isEndpointAllowed("POST", "/networks/create"))
+	assert.True(t, proxyCompose.isEndpointAllowed("GET", "/networks"))
+	assert.True(t, proxyCompose.isEndpointAllowed("DELETE", "/networks/abc123"))
+	assert.True(t, proxyCompose.isEndpointAllowed("POST", "/networks/abc123/connect"))
+	assert.True(t, proxyCompose.isEndpointAllowed("POST", "/volumes/create"))
+	assert.True(t, proxyCompose.isEndpointAllowed("GET", "/volumes"))
+}
+
+func TestDockerProxy_AllowCompose_NetworkCreateForcesInternal(t *testing.T) {
+	mockDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Parse the body to verify Internal was forced
+		body := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(body)
+
+		var req map[string]any
+		_ = json.Unmarshal(body, &req)
+
+		assert.Equal(t, true, req["Internal"])
+		assert.Equal(t, "test-coder-mynet", req["Name"])
+
+		labels, _ := req["Labels"].(map[string]any)
+		assert.Equal(t, "test-coder", labels["agent-sandbox.sandbox"])
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"Id":"net123abc"}`))
+	}))
+	defer mockDocker.Close()
+
+	cfg := &ProxyConfig{
+		SandboxID:     "test-coder",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowCompose:  true,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+	// Override upstream to point at mock
+	proxy.upstream = &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(&url.URL{Scheme: "http", Host: mockDocker.Listener.Addr().String()})
+			r.Out.Host = r.In.Host
+		},
+	}
+
+	body := `{"Name":"mynet","Internal":false}`
+	req := httptest.NewRequest("POST", "/networks/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	// Verify network was tracked
+	proxy.mu.Lock()
+	assert.True(t, proxy.networks["net123abc"])
+	proxy.mu.Unlock()
 }

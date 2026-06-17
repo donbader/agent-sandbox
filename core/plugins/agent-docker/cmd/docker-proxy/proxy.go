@@ -25,6 +25,7 @@ type DockerProxy struct {
 	ids      map[string]bool   // container IDs owned by this sandbox (for counting)
 	tracked  map[string]bool   // all lookup keys (IDs + namespaced names) for ownership checks
 	nameMap  map[string]string // user-provided name → namespaced name
+	networks map[string]bool   // network IDs created by this sandbox (for cleanup)
 }
 
 // NewDockerProxy creates a new Docker API proxy.
@@ -53,6 +54,7 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 		ids:      make(map[string]bool),
 		tracked:  make(map[string]bool),
 		nameMap:  make(map[string]string),
+		networks: make(map[string]bool),
 	}, nil
 }
 
@@ -65,7 +67,7 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if !isEndpointAllowed(r.Method, path) {
+	if !dp.isEndpointAllowed(r.Method, path) {
 		writeError(w, http.StatusForbidden, "endpoint not allowed")
 		return
 	}
@@ -78,6 +80,14 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		dp.handleImagePull(w, r)
 	case r.Method == "GET" && path == "/containers/json":
 		dp.handleContainerList(w, r)
+	case r.Method == "POST" && path == "/networks/create":
+		dp.handleNetworkCreate(w, r)
+	case r.Method == "DELETE" && strings.HasPrefix(path, "/networks/"):
+		dp.handleNetworkRemove(w, r, path)
+	case r.Method == "GET" && path == "/networks":
+		dp.handleNetworkList(w, r)
+	case r.Method == "POST" && strings.HasPrefix(path, "/networks/") && strings.HasSuffix(path, "/connect"):
+		dp.handleNetworkConnect(w, r)
 	default:
 		// For namespace-checked endpoints, verify ownership and translate names
 		if id := extractContainerID(path); id != "" {
@@ -199,6 +209,110 @@ func (dp *DockerProxy) handleContainerList(w http.ResponseWriter, r *http.Reques
 	dp.upstream.ServeHTTP(w, r)
 }
 
+// handleNetworkCreate intercepts network creation, forces Internal=true, and namespaces the name.
+func (dp *DockerProxy) handleNetworkCreate(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	var body map[string]any
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	// Force internal: true — created networks cannot reach the internet
+	body["Internal"] = true
+
+	// Namespace the network name
+	if name, ok := body["Name"].(string); ok {
+		body["Name"] = dp.cfg.SandboxID + "-" + name
+	}
+
+	// Add sandbox label for tracking
+	labels, ok := body["Labels"].(map[string]any)
+	if !ok || labels == nil {
+		labels = map[string]any{}
+	}
+	labels["agent-sandbox.sandbox"] = dp.cfg.SandboxID
+	body["Labels"] = labels
+
+	mutatedBody, _ := json.Marshal(body)
+	newReq, _ := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), strings.NewReader(string(mutatedBody)))
+	newReq.Header = r.Header.Clone()
+	newReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(mutatedBody)))
+	newReq.ContentLength = int64(len(mutatedBody))
+
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, newReq)
+
+	if rec.code == http.StatusCreated {
+		var resp map[string]any
+		if err := json.Unmarshal(rec.body.Bytes(), &resp); err == nil {
+			if id, ok := resp["Id"].(string); ok {
+				dp.mu.Lock()
+				dp.networks[id] = true
+				dp.mu.Unlock()
+				slog.Info("network created", "id", id[:min(12, len(id))], "internal", true)
+			}
+		}
+	}
+
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(rec.body.Bytes())
+}
+
+// handleNetworkRemove only allows removing networks we created.
+func (dp *DockerProxy) handleNetworkRemove(w http.ResponseWriter, r *http.Request, path string) {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) < 2 {
+		writeError(w, http.StatusBadRequest, "invalid network path")
+		return
+	}
+	networkRef := parts[1]
+
+	// Check if we own this network
+	dp.mu.Lock()
+	owned := dp.networks[networkRef]
+	dp.mu.Unlock()
+
+	if !owned {
+		// Try prefix match (compose uses names, Docker uses IDs)
+		// Allow if it starts with our sandbox ID prefix
+		if !strings.HasPrefix(networkRef, dp.cfg.SandboxID+"-") {
+			writeError(w, http.StatusForbidden, "cannot remove networks not created by this sandbox")
+			return
+		}
+	}
+
+	dp.upstream.ServeHTTP(w, r)
+
+	dp.mu.Lock()
+	delete(dp.networks, networkRef)
+	dp.mu.Unlock()
+}
+
+// handleNetworkList filters to only show networks owned by this sandbox.
+func (dp *DockerProxy) handleNetworkList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filters := fmt.Sprintf(`{"label":["agent-sandbox.sandbox=%s"]}`, dp.cfg.SandboxID)
+	q.Set("filters", filters)
+	r.URL.RawQuery = q.Encode()
+
+	dp.upstream.ServeHTTP(w, r)
+}
+
+// handleNetworkConnect allows connecting containers to networks we own.
+func (dp *DockerProxy) handleNetworkConnect(w http.ResponseWriter, r *http.Request) {
+	dp.upstream.ServeHTTP(w, r)
+}
+
 // extractCreateRequest pulls validation-relevant fields from a Docker create body.
 func extractCreateRequest(body map[string]any) *CreateRequest {
 	req := &CreateRequest{}
@@ -260,10 +374,17 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 }
 
 // isEndpointAllowed checks if a method+path combination is in the allowlist.
-func isEndpointAllowed(method, path string) bool {
+func (dp *DockerProxy) isEndpointAllowed(method, path string) bool {
 	for _, rule := range allowedEndpoints {
 		if rule.method == method && rule.pattern.MatchString(path) {
 			return true
+		}
+	}
+	if dp.cfg.AllowCompose {
+		for _, rule := range composeEndpoints {
+			if rule.method == method && rule.pattern.MatchString(path) {
+				return true
+			}
 		}
 	}
 	return false
@@ -301,6 +422,21 @@ var allowedEndpoints = []endpointRule{
 	{"POST", regexp.MustCompile(`^/images/create$`)},
 	// Distribution (used by docker pull for manifest checks)
 	{"GET", regexp.MustCompile(`^/distribution/`)},
+}
+
+// composeEndpoints are only allowed when AllowCompose is true.
+var composeEndpoints = []endpointRule{
+	{"POST", regexp.MustCompile(`^/networks/create$`)},
+	{"DELETE", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+$`)},
+	{"GET", regexp.MustCompile(`^/networks$`)},
+	{"GET", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+$`)},
+	{"POST", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+/connect$`)},
+	{"POST", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+/disconnect$`)},
+	// Volumes (compose needs them for named volumes between inner services)
+	{"POST", regexp.MustCompile(`^/volumes/create$`)},
+	{"GET", regexp.MustCompile(`^/volumes$`)},
+	{"GET", regexp.MustCompile(`^/volumes/[a-zA-Z0-9_.-]+$`)},
+	{"DELETE", regexp.MustCompile(`^/volumes/[a-zA-Z0-9_.-]+$`)},
 }
 
 // extractContainerID pulls the container ID from paths like /containers/{id}/start.

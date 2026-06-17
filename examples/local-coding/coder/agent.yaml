@@ -20,3 +20,16 @@ installations:
       providers:
         notion:
           mcp_url: https://mcp.notion.com/mcp
+  - plugin: "@builtin/agent-docker"
+    options:
+      allowed_images:
+        - "alpine:*"
+        - "node:20-*"
+        - "python:3.12-*"
+        - "postgres:16-*"
+        - "redis:7-*"
+      max_containers: 10
+      memory: "2g"
+      cpus: "2"
+      pids: 256
+      allow_compose: true
