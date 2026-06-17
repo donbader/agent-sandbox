@@ -61,6 +61,7 @@ The proxy:
 | `memory` | string | no | "2g" | Memory limit per container (e.g. "512m", "4g") |
 | `cpus` | string | no | "2" | CPU limit per container (e.g. "0.5", "4") |
 | `pids` | number | no | 256 | PID limit per container (see [Resource Limits](#resource-limits)) |
+| `allow_compose` | boolean | no | false | Enable docker compose operations (see [Nested Sandboxes](#nested-sandboxes)) |
 
 ## Image Allowlist
 
@@ -179,7 +180,83 @@ docker run -d --name api node:20-slim node server.js
 
 - **Interactive `docker run` (without `-d`)** hangs due to stream-close timing on the attach connection. Use `docker run -d` + `docker logs`, or `docker create` + `docker start` instead.
 - **Image pulls** go through the Docker daemon's configured registries. The proxy only validates image names against the allowlist — it doesn't control where images are fetched from.
-- **No volume support** — The `/volumes/*` API is blocked because volumes persist on the host filesystem, which breaks sandbox isolation (see [Blocked API Endpoints](#blocked-api-endpoints)). Containers can share data via the sandbox network (one container serves data, another consumes it) or temporary files within the container. Since sandboxes are ephemeral by default, persistent storage is intentionally out of scope.
+- **No volume support (default mode)** — The `/volumes/*` API is blocked because volumes persist on the host filesystem, which breaks sandbox isolation (see [Blocked API Endpoints](#blocked-api-endpoints)). When `allow_compose: true`, volumes are permitted for inner service coordination. Containers can share data via the sandbox network (one container serves data, another consumes it) or temporary files within the container.
+
+## Nested Sandboxes
+
+When `allow_compose: true` is set, the agent can run `docker compose` inside the sandbox to orchestrate inner services — including running another agent-sandbox stack for self-debugging or self-improvement.
+
+### How it works
+
+```
+┌─ Outer Sandbox ─────────────────────────────────────────────────┐
+│  Agent Container (DOCKER_HOST → proxy)                           │
+│  ├─ agent-sandbox generate                                       │
+│  └─ docker compose up --build -d                                 │
+│                                                                   │
+│  Docker Proxy (allow_compose: true)                              │
+│  ├─ Allows: network create (forces Internal=true)                │
+│  ├─ Allows: volume create/list/remove                            │
+│  ├─ Namespaces: networks with sandbox ID prefix                  │
+│  └─ Dual-attaches: containers get compose net + sandbox net      │
+│                                                                   │
+│  ┌─ Inner Sandbox (compose project) ───────────────────────────┐ │
+│  │  inner-agent ←─ compose network ─→ inner-gateway             │ │
+│  │       └──── sandbox network ────→ outer gateway ──→ internet │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+Inner containers are dual-attached:
+- **Compose network** — for service discovery between inner services (agent ↔ gateway)
+- **Sandbox network** — for routing through the outer gateway to the internet
+
+### Configuration
+
+```yaml
+installations:
+  - plugin: "@builtin/agent-docker"
+    options:
+      allowed_images:
+        - "alpine:*"
+        - "node:20-*"
+      max_containers: 10
+      allow_compose: true
+```
+
+### Security invariants (still enforced)
+
+- All created networks are forced to `Internal: true` — inner containers can't bypass the outer gateway
+- Network names are namespaced with the sandbox ID to prevent collisions
+- All containers still get resource limits, labels, and policy enforcement
+- Cleanup removes inner containers AND networks on shutdown
+- Image allowlist, privileged mode blocking, and host mount blocking still apply
+
+### What the agent can do
+
+```bash
+# Inside the agent container
+git clone /workspace /tmp/inner-sandbox
+cd /tmp/inner-sandbox
+agent-sandbox generate
+docker compose -f .build/docker-compose.yml up --build -d
+docker compose -f .build/docker-compose.yml logs -f
+docker compose -f .build/docker-compose.yml down
+```
+
+### Additional endpoints unlocked
+
+When `allow_compose: true`, these endpoints become available (blocked by default):
+
+| Endpoint | Constraint |
+|----------|-----------|
+| `POST /networks/create` | Forces `Internal: true`, namespaces name, adds sandbox label |
+| `DELETE /networks/{id}` | Only networks created by this sandbox |
+| `GET /networks` | Filtered to sandbox-owned networks only |
+| `POST /networks/{id}/connect` | Allowed (compose needs it for service wiring) |
+| `POST /volumes/create` | Allowed for inter-service data sharing |
+| `GET /volumes` | Allowed |
+| `DELETE /volumes/{id}` | Allowed |
 
 ## Prerequisites
 
