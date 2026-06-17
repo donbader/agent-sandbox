@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httputil"
 	"regexp"
 	"strings"
@@ -87,19 +91,138 @@ func (dp *DockerProxy) Cleanup() {
 	// Will be implemented in cleanup.go
 }
 
-// handleContainerCreate — stub, implemented in next task.
 func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Request) {
-	dp.upstream.ServeHTTP(w, r)
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	var body map[string]any
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	createReq := extractCreateRequest(body)
+
+	dp.mu.Lock()
+	currentCount := len(dp.tracked)
+	dp.mu.Unlock()
+
+	if err := dp.policy.ValidateCreate(createReq, currentCount); err != nil {
+		if pe, ok := err.(*PolicyError); ok {
+			writeError(w, pe.Code, pe.Message)
+		} else {
+			writeError(w, http.StatusForbidden, err.Error())
+		}
+		return
+	}
+
+	containerName := r.URL.Query().Get("name")
+	namespacedName := dp.mutator.NamespaceContainerName(containerName)
+
+	dp.mutator.MutateCreate(body, namespacedName)
+
+	mutatedBody, _ := json.Marshal(body)
+
+	newURL := *r.URL
+	q := newURL.Query()
+	q.Set("name", namespacedName)
+	newURL.RawQuery = q.Encode()
+
+	newReq, _ := http.NewRequestWithContext(r.Context(), r.Method, newURL.String(), strings.NewReader(string(mutatedBody)))
+	newReq.Header = r.Header.Clone()
+	newReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(mutatedBody)))
+	newReq.ContentLength = int64(len(mutatedBody))
+
+	rec := httptest.NewRecorder()
+	dp.upstream.ServeHTTP(rec, newReq)
+
+	if rec.Code == http.StatusCreated {
+		var resp map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err == nil {
+			if id, ok := resp["Id"].(string); ok {
+				dp.trackContainer(id)
+				dp.trackContainer(namespacedName)
+				slog.Info("container created", "id", id[:min(12, len(id))], "name", namespacedName, "image", createReq.Image)
+			}
+		}
+	}
+
+	for k, v := range rec.Header() {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(rec.Code)
+	_, _ = w.Write(rec.Body.Bytes())
 }
 
-// handleImagePull — stub, implemented in next task.
 func (dp *DockerProxy) handleImagePull(w http.ResponseWriter, r *http.Request) {
+	fromImage := r.URL.Query().Get("fromImage")
+	tag := r.URL.Query().Get("tag")
+
+	image := fromImage
+	if tag != "" {
+		image = fromImage + ":" + tag
+	}
+
+	if !dp.policy.ImageAllowed(image) {
+		writeError(w, http.StatusForbidden, fmt.Sprintf("image %q not in allowlist", image))
+		return
+	}
+
 	dp.upstream.ServeHTTP(w, r)
 }
 
-// handleContainerList — stub, implemented in next task.
 func (dp *DockerProxy) handleContainerList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filters := fmt.Sprintf(`{"label":["agent-sandbox.sandbox=%s"]}`, dp.cfg.SandboxID)
+	q.Set("filters", filters)
+	r.URL.RawQuery = q.Encode()
+
 	dp.upstream.ServeHTTP(w, r)
+}
+
+// extractCreateRequest pulls validation-relevant fields from a Docker create body.
+func extractCreateRequest(body map[string]any) *CreateRequest {
+	req := &CreateRequest{}
+
+	if img, ok := body["Image"].(string); ok {
+		req.Image = img
+	}
+
+	hc, _ := body["HostConfig"].(map[string]any)
+	if hc != nil {
+		if priv, ok := hc["Privileged"].(bool); ok {
+			req.Privileged = priv
+		}
+		if nm, ok := hc["NetworkMode"].(string); ok {
+			req.NetworkMode = nm
+		}
+		if caps, ok := hc["CapAdd"].([]any); ok {
+			for _, c := range caps {
+				if s, ok := c.(string); ok {
+					req.CapAdd = append(req.CapAdd, s)
+				}
+			}
+		}
+		if pm, ok := hc["PidMode"].(string); ok {
+			req.PidMode = pm
+		}
+		if im, ok := hc["IpcMode"].(string); ok {
+			req.IpcMode = im
+		}
+		if binds, ok := hc["Binds"].([]any); ok {
+			for _, b := range binds {
+				if s, ok := b.(string); ok {
+					req.Binds = append(req.Binds, s)
+				}
+			}
+		}
+	}
+
+	return req
 }
 
 func writeError(w http.ResponseWriter, code int, msg string) {

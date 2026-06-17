@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -124,4 +125,97 @@ func TestExtractContainerID(t *testing.T) {
 			assert.Equal(t, tc.want, extractContainerID(tc.path))
 		})
 	}
+}
+
+func TestDockerProxy_ContainerCreate_PolicyViolation(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	body := `{"Image": "ubuntu:latest", "HostConfig": {}}`
+	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "not in allowlist")
+}
+
+func TestDockerProxy_ContainerCreate_Privileged(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	body := `{"Image": "node:20", "HostConfig": {"Privileged": true}}`
+	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "privileged")
+}
+
+func TestDockerProxy_ImagePull_Blocked(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	req := httptest.NewRequest("POST", "/images/create?fromImage=ubuntu&tag=latest", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "not in allowlist")
+}
+
+func TestDockerProxy_ContainerCreate_MaxContainers(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 2,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	proxy.trackContainer("existing-1")
+	proxy.trackContainer("existing-2")
+
+	body := `{"Image": "node:20", "HostConfig": {}}`
+	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Contains(t, w.Body.String(), "maximum")
 }
