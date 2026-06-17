@@ -56,13 +56,15 @@ The proxy:
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `allowed_images` | string[] | yes | — | Glob patterns for allowed images |
+| `allowed_images` | string[] | yes | — | Glob patterns for allowed images (see [Image Allowlist](#image-allowlist)) |
 | `max_containers` | number | no | 5 | Max concurrent spawned containers |
 | `memory` | string | no | "2g" | Memory limit per container (e.g. "512m", "4g") |
 | `cpus` | string | no | "2" | CPU limit per container (e.g. "0.5", "4") |
-| `pids` | number | no | 256 | PID limit per container |
+| `pids` | number | no | 256 | PID limit per container (see [Resource Limits](#resource-limits)) |
 
 ## Image Allowlist
+
+**Why this exists:** Without an allowlist, an agent could pull any image — including ones with pre-installed attack tools (network scanners, exploit kits, crypto miners). Even though spawned containers are network-isolated and resource-limited, a malicious image could still attempt local exploits like kernel vulnerabilities or container escape techniques. The allowlist reduces attack surface by restricting *what software* runs inside those constraints.
 
 Images are matched using glob patterns. The proxy normalizes Docker registry prefixes (`docker.io/library/`) so short names work naturally:
 
@@ -77,6 +79,8 @@ allowed_images:
 Images not matching any pattern are rejected with 403.
 
 ## Security Policy
+
+This plugin follows a defense-in-depth approach. No single control is the entire security story — they layer together so that if one is bypassed, others still hold.
 
 Every `docker create` request is validated. The following are **always blocked**:
 
@@ -100,16 +104,27 @@ The following are **always forced** (regardless of what the agent requests):
 | Labels | `agent-sandbox.agent`, `agent-sandbox.sandbox` |
 | RestartPolicy | `no` (prevents zombie containers) |
 
+### Resource Limits
+
+Resource limits prevent denial-of-service against the host and other sandboxes:
+
+- **Memory** — Without a cap, a single container could exhaust host RAM and trigger the OOM killer against unrelated processes (including other sandboxes and the agent itself).
+- **CPU** — Prevents a runaway process from starving other containers of compute time.
+- **PIDs** — Prevents fork bombs. Without this, a container can spawn unlimited processes until the host's global PID limit is exhausted, which is a denial-of-service against *everything* on the host. A limit of 256 is generous for normal workloads but stops exponential process spawning dead.
+- **max_containers** — Prevents resource exhaustion by limiting how many containers a single agent can run concurrently.
+
 ## Blocked API Endpoints
+
+Certain Docker API endpoints are blocked entirely because they provide capabilities that break the sandbox isolation model:
 
 | Endpoint | Reason |
 |----------|--------|
-| `/volumes/*` | Prevents host filesystem access |
-| `/networks/*` | Prevents network manipulation |
-| `/swarm/*` | Prevents cluster operations |
-| `/secrets/*` | Prevents secret access |
-| `/configs/*` | Prevents config access |
-| `/system/*` | Prevents system info leakage |
+| `/volumes/*` | Volumes persist on the host filesystem. An agent could write to host paths, persist data across sandbox restarts (violating ephemeral-by-default), or exfiltrate data between sandboxes via shared volume names. |
+| `/networks/*` | Allows creating/joining arbitrary networks, bypassing the enforced internal network isolation. |
+| `/swarm/*` | Cluster operations could affect other hosts. |
+| `/secrets/*` | Exposes Docker secrets stored on the host. |
+| `/configs/*` | Exposes Docker configs stored on the host. |
+| `/system/*` | Leaks host system information (kernel version, OS, total memory) useful for targeting exploits. |
 
 Any endpoint not explicitly allowed returns 403.
 
@@ -164,7 +179,7 @@ docker run -d --name api node:20-slim node server.js
 
 - **Interactive `docker run` (without `-d`)** hangs due to stream-close timing on the attach connection. Use `docker run -d` + `docker logs`, or `docker create` + `docker start` instead.
 - **Image pulls** go through the Docker daemon's configured registries. The proxy only validates image names against the allowlist — it doesn't control where images are fetched from.
-- **No volume support** — `/volumes/*` endpoints are blocked. Containers share data via the sandbox network or temporary files within the container.
+- **No volume support** — The `/volumes/*` API is blocked because volumes persist on the host filesystem, which breaks sandbox isolation (see [Blocked API Endpoints](#blocked-api-endpoints)). Containers can share data via the sandbox network (one container serves data, another consumes it) or temporary files within the container. Since sandboxes are ephemeral by default, persistent storage is intentionally out of scope.
 
 ## Prerequisites
 
