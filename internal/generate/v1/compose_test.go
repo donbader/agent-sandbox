@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -596,4 +597,45 @@ func TestBuildFleetCompose_SkipUserns(t *testing.T) {
 
 	// Plugin declares skip_userns on a podman engine — userns_mode must NOT appear.
 	assert.NotContains(t, output, "userns_mode")
+}
+
+func TestBuildProjectCompose_SidecarSystemEnvVars(t *testing.T) {
+	agents := []ComposeAgentEntry{{
+		Config: &config.Config{
+			Name: "coder",
+			Runtime: config.RuntimeConfig{
+				CWD: "/home/agent/workspace",
+			},
+		},
+		Contribs: &plugin.Contributions{
+			Sidecar: plugin.SidecarContrib{
+				Services: map[string]plugin.ComposeService{
+					"my-sidecar": {
+						Image: "alpine:3.20",
+					},
+				},
+			},
+		},
+		BuildDir: t.TempDir(),
+	}}
+
+	projectDir := t.TempDir()
+	output, err := BuildProjectCompose(agents, projectDir)
+	require.NoError(t, err)
+
+	var compose struct {
+		Services map[string]any `yaml:"services"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(output), &compose))
+
+	sidecar, ok := compose.Services["coder-my-sidecar"].(map[string]any)
+	require.True(t, ok, "sidecar service not found")
+
+	env, ok := sidecar["environment"].(map[string]any)
+	require.True(t, ok, "environment not found or wrong type")
+
+	projectName := filepath.Base(projectDir)
+	assert.Equal(t, "coder", env["AGENT_NAME"])
+	assert.Equal(t, projectName+"-coder", env["SANDBOX_ID"])
+	assert.Equal(t, projectName+"_sandbox", env["SANDBOX_NETWORK"])
 }

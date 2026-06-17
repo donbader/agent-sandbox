@@ -33,6 +33,7 @@ type agentPairParams struct {
 	sidecarPrefix  string
 	buildDir       string
 	exposeGateway  bool
+	projectName    string
 }
 
 // agentPairResult holds the services and volumes produced by buildAgentPair.
@@ -169,6 +170,8 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	if contribs != nil {
 		for name, svc := range contribs.Sidecar.Services {
 			sidecar := buildSidecarService(svc, p.buildDir)
+			// Inject system env vars into all sidecars.
+			injectSidecarSystemEnv(sidecar, p.cfg.Name, p.projectName)
 			// Sidecars implicitly depend on the agent service being started.
 			if sidecar["depends_on"] == nil {
 				sidecar["depends_on"] = map[string]any{
@@ -272,6 +275,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			},
 			sidecarPrefix: agentName,
 			buildDir:      composeDir,
+			projectName:   filepath.Base(projectDir),
 			exposeGateway: false,
 		})
 
@@ -411,4 +415,17 @@ func mergeCapabilities(base, contributed []string) []string {
 		}
 	}
 	return base
+}
+
+// injectSidecarSystemEnv adds well-known env vars to a sidecar service.
+// These provide the sidecar with sandbox identity and network information.
+func injectSidecarSystemEnv(sidecar map[string]any, agentName, projectName string) {
+	env, ok := sidecar["environment"].(map[string]string)
+	if !ok || env == nil {
+		env = make(map[string]string)
+	}
+	env["SANDBOX_ID"] = projectName + "-" + agentName
+	env["SANDBOX_NETWORK"] = projectName + "_sandbox"
+	env["AGENT_NAME"] = agentName
+	sidecar["environment"] = env
 }
