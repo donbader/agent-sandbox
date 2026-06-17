@@ -38,6 +38,13 @@ func (m *Mutator) MutateCreate(body map[string]any, containerName string) {
 	hc["PidsLimit"] = m.cfg.PidsLimit
 	hc["RestartPolicy"] = map[string]any{"Name": "no"}
 	body["HostConfig"] = hc
+
+	// Force NetworkingConfig so Docker attaches to the correct network
+	body["NetworkingConfig"] = map[string]any{
+		"EndpointsConfig": map[string]any{
+			m.cfg.NetworkName: map[string]any{},
+		},
+	}
 }
 
 // NamespaceContainerName prefixes a container name with sandbox identity.

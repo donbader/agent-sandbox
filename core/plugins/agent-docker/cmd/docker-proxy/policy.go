@@ -25,7 +25,13 @@ type CreateRequest struct {
 
 // ImageAllowed checks if the image matches any pattern in the allowlist.
 func (p *Policy) ImageAllowed(image string) bool {
+	// Normalize: strip default registry/library prefix
+	normalized := normalizeImage(image)
 	for _, pattern := range p.AllowedImages {
+		if matchImage(pattern, normalized) {
+			return true
+		}
+		// Also try matching the raw image (in case user specifies full paths in allowlist)
 		if matchImage(pattern, image) {
 			return true
 		}
@@ -82,4 +88,13 @@ func matchImage(pattern, image string) bool {
 		return false
 	}
 	return matched
+}
+
+// normalizeImage strips the default Docker registry prefix.
+// "docker.io/library/alpine:latest" → "alpine:latest"
+// "docker.io/myuser/myimage:tag" → "myuser/myimage:tag"
+func normalizeImage(image string) string {
+	image = strings.TrimPrefix(image, "docker.io/")
+	image = strings.TrimPrefix(image, "library/")
+	return image
 }

@@ -22,7 +22,8 @@ type DockerProxy struct {
 	cfg      *ProxyConfig
 	upstream *httputil.ReverseProxy
 	mu       sync.Mutex
-	tracked  map[string]bool // container IDs owned by this sandbox
+	tracked  map[string]bool   // container IDs/namespaced names owned by this sandbox
+	nameMap  map[string]string // user-provided name → namespaced name
 }
 
 // NewDockerProxy creates a new Docker API proxy.
@@ -49,6 +50,7 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 		cfg:      cfg,
 		upstream: upstream,
 		tracked:  make(map[string]bool),
+		nameMap:  make(map[string]string),
 	}, nil
 }
 
@@ -75,11 +77,16 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && path == "/containers/json":
 		dp.handleContainerList(w, r)
 	default:
-		// For namespace-checked endpoints, verify ownership
+		// For namespace-checked endpoints, verify ownership and translate names
 		if id := extractContainerID(path); id != "" {
-			if !dp.isOwned(id) {
+			resolvedID := dp.resolveContainerRef(id)
+			if resolvedID == "" {
 				writeError(w, http.StatusNotFound, "container not found")
 				return
+			}
+			// Rewrite path with resolved ID/name
+			if resolvedID != id {
+				r.URL.Path = strings.Replace(r.URL.Path, id, resolvedID, 1)
 			}
 		}
 		dp.upstream.ServeHTTP(w, r)
@@ -145,8 +152,7 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 		var resp map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err == nil {
 			if id, ok := resp["Id"].(string); ok {
-				dp.trackContainer(id)
-				dp.trackContainer(namespacedName)
+				dp.trackContainer(id, containerName, namespacedName)
 				slog.Info("container created", "id", id[:min(12, len(id))], "name", namespacedName, "image", createReq.Image)
 			}
 		}
@@ -248,18 +254,32 @@ type endpointRule struct {
 }
 
 var allowedEndpoints = []endpointRule{
+	// Docker CLI essentials
+	{"GET", regexp.MustCompile(`^/_ping$`)},
+	{"HEAD", regexp.MustCompile(`^/_ping$`)},
+	{"GET", regexp.MustCompile(`^/version$`)},
+	// Container lifecycle
 	{"POST", regexp.MustCompile(`^/containers/create$`)},
 	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/start$`)},
 	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/stop$`)},
 	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/kill$`)},
+	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/wait$`)},
+	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/resize$`)},
+	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/attach$`)},
 	{"DELETE", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+$`)},
 	{"GET", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/json$`)},
 	{"GET", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/logs$`)},
 	{"GET", regexp.MustCompile(`^/containers/json$`)},
+	// Exec
 	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/exec$`)},
 	{"POST", regexp.MustCompile(`^/exec/[a-zA-Z0-9_.-]+/start$`)},
+	{"GET", regexp.MustCompile(`^/exec/[a-zA-Z0-9_.-]+/json$`)},
+	// Images
 	{"GET", regexp.MustCompile(`^/images/json$`)},
+	{"GET", regexp.MustCompile(`^/images/[a-zA-Z0-9_./-]+/json$`)},
 	{"POST", regexp.MustCompile(`^/images/create$`)},
+	// Distribution (used by docker pull for manifest checks)
+	{"GET", regexp.MustCompile(`^/distribution/`)},
 }
 
 // extractContainerID pulls the container ID from paths like /containers/{id}/start.
@@ -277,10 +297,36 @@ func (dp *DockerProxy) isOwned(id string) bool {
 	return dp.tracked[id]
 }
 
-func (dp *DockerProxy) trackContainer(id string) {
+// resolveContainerRef translates a user-provided container reference to the actual
+// namespaced name/ID. Returns empty string if not owned.
+func (dp *DockerProxy) resolveContainerRef(ref string) string {
+	dp.mu.Lock()
+	defer dp.mu.Unlock()
+	// Direct match (full ID or namespaced name)
+	if dp.tracked[ref] {
+		return ref
+	}
+	// Try as user-provided name → namespaced name
+	if namespaced, ok := dp.nameMap[ref]; ok {
+		return namespaced
+	}
+	// Try prefix match on container IDs (docker allows short IDs)
+	for id := range dp.tracked {
+		if len(ref) >= 12 && strings.HasPrefix(id, ref) {
+			return id
+		}
+	}
+	return ""
+}
+
+func (dp *DockerProxy) trackContainer(id, userName, namespacedName string) {
 	dp.mu.Lock()
 	defer dp.mu.Unlock()
 	dp.tracked[id] = true
+	dp.tracked[namespacedName] = true
+	if userName != "" {
+		dp.nameMap[userName] = namespacedName
+	}
 }
 
 func (dp *DockerProxy) untrackContainer(id string) {

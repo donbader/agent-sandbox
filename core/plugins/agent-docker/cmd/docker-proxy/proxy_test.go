@@ -207,8 +207,8 @@ func TestDockerProxy_ContainerCreate_MaxContainers(t *testing.T) {
 	}
 	proxy, _ := NewDockerProxy(cfg)
 
-	proxy.trackContainer("existing-1")
-	proxy.trackContainer("existing-2")
+	proxy.trackContainer("existing-1", "", "existing-1")
+	proxy.trackContainer("existing-2", "", "existing-2")
 
 	body := `{"Image": "node:20", "HostConfig": {}}`
 	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))

@@ -27,7 +27,12 @@ func TestImageAllowed_Wildcard(t *testing.T) {
 
 	assert.True(t, p.ImageAllowed("node:20"))
 	assert.True(t, p.ImageAllowed("node:latest"))
-	assert.False(t, p.ImageAllowed("library/node:20"))
+	// library/ is Docker's official image prefix — normalizes to node:20
+	assert.True(t, p.ImageAllowed("library/node:20"))
+	// Full registry path also normalizes
+	assert.True(t, p.ImageAllowed("docker.io/library/node:20"))
+	// Non-official registry image should NOT match
+	assert.False(t, p.ImageAllowed("malicious/node:20"))
 }
 
 func TestValidateCreateRequest_Privileged(t *testing.T) {
