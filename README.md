@@ -42,7 +42,6 @@ agent-sandbox init              # interactive project scaffold
 agent-sandbox generate          # fleet.yaml → .build/<agent-name>/... (Dockerfile, entrypoint, gateway)
 agent-sandbox compose ...       # docker compose passthrough (auto-injects -f and --env-file)
 agent-sandbox audit             # verify running sandbox meets security contract
-agent-sandbox gateway-url       # print gateway's public URL (use --agent for multi-agent)
 agent-sandbox upgrade           # update the shim to latest version
 agent-sandbox version           # print shim + core versions
 ```

@@ -39,7 +39,6 @@ These are handled by `agent-sandbox-core`:
 | `agent-sandbox generate` | Read config, generate `.build/` artifacts |
 | `agent-sandbox compose ...` | Docker compose passthrough |
 | `agent-sandbox audit` | Verify running sandbox meets security contract |
-| `agent-sandbox gateway-url` | Print the gateway's public URL |
 
 ## Global Flags
 
@@ -119,19 +118,6 @@ agent-sandbox upgrade
 ```
 
 This does not change the core version used by your projects — that's controlled by `core_version` in each project's `agent.yaml`.
-
-## gateway-url
-
-Prints the gateway's public URL (useful for webhook configuration):
-
-```bash
-agent-sandbox gateway-url
-agent-sandbox gateway-url --agent coder
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--agent` | (first agent) | Target agent in a multi-agent project |
 
 ## Typical Workflow
 

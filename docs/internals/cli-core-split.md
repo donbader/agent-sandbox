@@ -42,7 +42,7 @@ This means `agent-sandbox` works offline after the first successful core downloa
 
 ## The Core Binary
 
-`agent-sandbox-core` is a self-contained Go binary that implements all real commands: `init`, `generate`, `compose`, `audit`, `gateway-url`.
+`agent-sandbox-core` is a self-contained Go binary that implements all real commands: `init`, `generate`, `compose`, `audit`.
 
 It resolves assets (presets, plugins, templates, gateway source) relative to its own directory:
 
