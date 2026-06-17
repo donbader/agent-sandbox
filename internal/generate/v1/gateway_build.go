@@ -94,6 +94,9 @@ func (g *Generator) copyGatewayBinary(gatewayDir string, buildDir string, resolv
 		destPath := filepath.Join(gatewayDir, "gateway")
 		arch := detectDockerArch()
 
+		// Remove stale binary so a failed rebuild doesn't silently use an old version
+		_ = os.Remove(destPath)
+
 		// Try building from source (dev mode)
 		srcDir := filepath.Join(g.coreDir, "..")
 		mainPkg := "./core/gateway/cmd/gateway/"
