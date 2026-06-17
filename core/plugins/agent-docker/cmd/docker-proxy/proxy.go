@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/http/httputil"
 	"regexp"
 	"strings"
@@ -22,7 +22,8 @@ type DockerProxy struct {
 	cfg      *ProxyConfig
 	upstream *httputil.ReverseProxy
 	mu       sync.Mutex
-	tracked  map[string]bool   // container IDs/namespaced names owned by this sandbox
+	ids      map[string]bool   // container IDs owned by this sandbox (for counting)
+	tracked  map[string]bool   // all lookup keys (IDs + namespaced names) for ownership checks
 	nameMap  map[string]string // user-provided name → namespaced name
 }
 
@@ -49,6 +50,7 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 		mutator:  NewMutator(cfg),
 		cfg:      cfg,
 		upstream: upstream,
+		ids:      make(map[string]bool),
 		tracked:  make(map[string]bool),
 		nameMap:  make(map[string]string),
 	}, nil
@@ -120,11 +122,11 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 
 	createReq := extractCreateRequest(body)
 
+	// Validate under lock to prevent TOCTOU race on container count
 	dp.mu.Lock()
-	currentCount := len(dp.tracked)
-	dp.mu.Unlock()
-
+	currentCount := len(dp.ids)
 	if err := dp.policy.ValidateCreate(createReq, currentCount); err != nil {
+		dp.mu.Unlock()
 		if pe, ok := err.(*PolicyError); ok {
 			writeError(w, pe.Code, pe.Message)
 		} else {
@@ -132,6 +134,7 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
+	dp.mu.Unlock()
 
 	containerName := r.URL.Query().Get("name")
 	namespacedName := dp.mutator.NamespaceContainerName(containerName)
@@ -150,12 +153,12 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 	newReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(mutatedBody)))
 	newReq.ContentLength = int64(len(mutatedBody))
 
-	rec := httptest.NewRecorder()
+	rec := &responseRecorder{header: make(http.Header)}
 	dp.upstream.ServeHTTP(rec, newReq)
 
-	if rec.Code == http.StatusCreated {
+	if rec.code == http.StatusCreated {
 		var resp map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err == nil {
+		if err := json.Unmarshal(rec.body.Bytes(), &resp); err == nil {
 			if id, ok := resp["Id"].(string); ok {
 				dp.trackContainer(id, containerName, namespacedName)
 				slog.Info("container created", "id", id[:min(12, len(id))], "name", namespacedName, "image", createReq.Image)
@@ -163,11 +166,11 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	for k, v := range rec.Header() {
+	for k, v := range rec.header {
 		w.Header()[k] = v
 	}
-	w.WriteHeader(rec.Code)
-	_, _ = w.Write(rec.Body.Bytes())
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(rec.body.Bytes())
 }
 
 func (dp *DockerProxy) handleImagePull(w http.ResponseWriter, r *http.Request) {
@@ -241,6 +244,19 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": msg})
+}
+
+// responseRecorder captures an HTTP response for inspection before forwarding.
+type responseRecorder struct {
+	header http.Header
+	body   bytes.Buffer
+	code   int
+}
+
+func (r *responseRecorder) Header() http.Header { return r.header }
+func (r *responseRecorder) WriteHeader(code int) { r.code = code }
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	return r.body.Write(b)
 }
 
 // isEndpointAllowed checks if a method+path combination is in the allowlist.
@@ -321,6 +337,7 @@ func (dp *DockerProxy) resolveContainerRef(ref string) string {
 func (dp *DockerProxy) trackContainer(id, userName, namespacedName string) {
 	dp.mu.Lock()
 	defer dp.mu.Unlock()
+	dp.ids[id] = true
 	dp.tracked[id] = true
 	dp.tracked[namespacedName] = true
 	if userName != "" {

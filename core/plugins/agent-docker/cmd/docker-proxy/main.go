@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -42,10 +44,20 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown, then cleanup
+	// Wait for shutdown signal
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
-	slog.Info("shutting down, cleaning up containers")
+	slog.Info("shutting down")
+
+	// Gracefully stop accepting new requests (5s timeout for in-flight)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		slog.Warn("server shutdown error", "error", err)
+	}
+
+	// Clean up spawned containers
+	slog.Info("cleaning up containers")
 	proxy.Cleanup()
 }
