@@ -122,32 +122,37 @@ func runtimeFromEnv() string {
 
 // checkHTTPS verifies the agent can reach an external HTTPS endpoint.
 func checkHTTPS(container string) auditCheck {
-	// Use -o /dev/null -w %{http_code} to check connectivity regardless of HTTP status.
-	// Any HTTP response (even 4xx/5xx) proves the TLS proxy chain works.
-	out, err := containerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "15", "https://httpbin.org/get")
-	if err != nil {
-		// Retry once — first request may be slow due to cold DNS + TLS
-		out, err = containerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "15", "https://httpbin.org/get")
+	// Try multiple endpoints in case one is down. Any HTTP response (even 4xx/5xx)
+	// proves the TLS proxy chain works end-to-end.
+	endpoints := []string{
+		"https://www.google.com",
+		"https://1.1.1.1",
+		"https://www.cloudflare.com",
 	}
-	if err != nil {
-		return auditCheck{
-			Name:   "Agent can reach external HTTPS",
-			Passed: false,
-			Detail: "curl to httpbin.org failed or timed out",
+
+	for _, endpoint := range endpoints {
+		out, err := containerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "10", endpoint)
+		if err != nil {
+			// Retry once — first request may be slow due to cold DNS + TLS warmup
+			out, err = containerExec(container, "curl", "-so", "/dev/null", "-w", "%{http_code}", "--max-time", "10", endpoint)
+		}
+		if err != nil {
+			continue
+		}
+		code := strings.TrimSpace(out)
+		if code != "000" && code != "" {
+			return auditCheck{
+				Name:   "Agent can reach external HTTPS",
+				Passed: true,
+				Detail: fmt.Sprintf("reached %s through gateway (HTTP %s)", endpoint, code),
+			}
 		}
 	}
-	code := strings.TrimSpace(out)
-	if code != "000" && code != "" {
-		return auditCheck{
-			Name:   "Agent can reach external HTTPS",
-			Passed: true,
-			Detail: fmt.Sprintf("reached https://httpbin.org through gateway (HTTP %s)", code),
-		}
-	}
+
 	return auditCheck{
 		Name:   "Agent can reach external HTTPS",
 		Passed: false,
-		Detail: "no HTTP response received",
+		Detail: "all HTTPS endpoints failed or timed out",
 	}
 }
 
