@@ -178,24 +178,24 @@ description: Connect, disconnect, and check status of MCP OAuth services. Use wh
 
 ## Gateway Base URL
 
-http://<gateway-service-name>:8080/plugins/mcp-oauth
+http://${GATEWAY_HOST}:8080/plugins/mcp-oauth
 
 ## Discover Providers
 
-curl -s http://<gateway-service-name>:8080/plugins/mcp-oauth/status
+curl -s "http://${GATEWAY_HOST}:8080/plugins/mcp-oauth/status"
 
 ## Connect
 
-1. curl -s "http://<gateway-service-name>:8080/plugins/mcp-oauth/login/<provider>?callback_url=http://127.0.0.1/plugins/mcp-oauth/callback"
+1. curl -s "http://${GATEWAY_HOST}:8080/plugins/mcp-oauth/login/<provider>?callback_url=http://127.0.0.1/plugins/mcp-oauth/callback"
 2. Show authorize_url to user
 3. User authorizes, browser fails to load redirect — user copies URL and pastes it back
 4. Extract code and state from pasted URL
-5. curl -s "http://<gateway-service-name>:8080/plugins/mcp-oauth/callback?code=<CODE>&state=<STATE>"
+5. curl -s "http://${GATEWAY_HOST}:8080/plugins/mcp-oauth/callback?code=<CODE>&state=<STATE>"
 6. Confirm with /status/<provider>
 
 ## Disconnect
 
-curl -s http://<gateway-service-name>:8080/plugins/mcp-oauth/disconnect/<provider>
+curl -s "http://${GATEWAY_HOST}:8080/plugins/mcp-oauth/disconnect/<provider>
 ```
 
-Replace `<gateway-service-name>` with your agent's gateway Docker service name (e.g., `my-agent-gateway`).
+The `GATEWAY_HOST` environment variable is automatically set in the agent container by agent-sandbox (points to the gateway Docker service name).
