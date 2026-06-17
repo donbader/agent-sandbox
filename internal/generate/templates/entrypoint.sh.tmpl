@@ -39,6 +39,15 @@ fi
 iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "${GATEWAY_IP}:8443"
 echo "[entrypoint] iptables: all outbound TCP (except $SANDBOX_CIDR) → ${GATEWAY_IP}:8443"
 
+# On internal networks, there is no default route — the kernel rejects connect() with
+# ENETUNREACH before DNAT can redirect the packet. Add a dummy default route via the
+# gateway so packets reach the nat OUTPUT chain. DNAT rewrites the destination to the
+# gateway regardless, so this route is never actually used for forwarding.
+if ! ip route show default >/dev/null 2>&1 || [ -z "$(ip route show default 2>/dev/null)" ]; then
+    ip route add default via "$GATEWAY_IP" 2>/dev/null || route add default gw "$GATEWAY_IP" 2>/dev/null || true
+    echo "[entrypoint] added default route via ${GATEWAY_IP} (for DNAT reachability)"
+fi
+
 # Point DNS at the gateway's DNS forwarder.
 # On internal networks, Docker's embedded DNS (127.0.0.11) cannot resolve external hostnames
 # because it can't reach upstream resolvers. The gateway is dual-networked (internal + external)
