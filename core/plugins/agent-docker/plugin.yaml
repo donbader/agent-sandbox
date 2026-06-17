@@ -1,0 +1,49 @@
+name: agent-docker
+assets:
+  - path: cmd/docker-proxy/
+    exclude: [*_test.go]
+
+options:
+  allowed_images:
+    type: array
+    items:
+      type: string
+    required: true
+    description: "Glob patterns for allowed Docker images (e.g. node:20-*, postgres:16-*)"
+  max_containers:
+    type: number
+    required: false
+    default: 5
+    description: "Maximum concurrent containers the agent can spawn"
+  memory:
+    type: string
+    required: false
+    default: "2g"
+    description: "Memory limit per spawned container (e.g. 2g, 512m)"
+  cpus:
+    type: string
+    required: false
+    default: "2"
+    description: "CPU limit per spawned container (e.g. 2, 0.5)"
+  pids:
+    type: number
+    required: false
+    default: 256
+    description: "PID limit per spawned container"
+
+contributes:
+  runtime:
+    environment:
+      DOCKER_HOST: "tcp://{{ .agent.name }}-docker-proxy:2375"
+  sidecar:
+    services:
+      {{ .agent.name }}-docker-proxy:
+        build: "{{ asset \"cmd/docker-proxy\" }}"
+        volumes:
+          - "/var/run/docker.sock:/var/run/docker.sock"
+        environment:
+          ALLOWED_IMAGES: '{{ toJSON .plugin.options.allowed_images }}'
+          MAX_CONTAINERS: "{{ .plugin.options.max_containers }}"
+          MEMORY_LIMIT: "{{ .plugin.options.memory }}"
+          CPU_LIMIT: "{{ .plugin.options.cpus }}"
+          PID_LIMIT: "{{ .plugin.options.pids }}"
