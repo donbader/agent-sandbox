@@ -263,6 +263,92 @@ func TestHTTPHandler_MissingHost_Returns400(t *testing.T) {
 	wg.Wait()
 }
 
+func TestProxy_UnknownProtocol_Blocked(t *testing.T) {
+	// Without HTTP handler — should drop
+	t.Run("no handler", func(t *testing.T) {
+		p := New(&Config{Listen: "127.0.0.1:0"})
+
+		client, server := net.Pipe()
+
+		done := make(chan struct{})
+		go func() {
+			p.handleConn(&pipeConn{server})
+			close(done)
+		}()
+
+		_, err := client.Write([]byte{0x00, 0x01, 0x02, 0x03, 0x04})
+		require.NoError(t, err)
+		_ = client.Close()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("handleConn did not return — unknown protocol was not blocked")
+		}
+	})
+
+	// With HTTP handler — unknown protocol should still be blocked, not forwarded
+	t.Run("with handler", func(t *testing.T) {
+		p := New(&Config{Listen: "127.0.0.1:0"})
+		p.RegisterHTTPHandler(NewHTTPHandler([]HTTPService{}))
+
+		client, server := net.Pipe()
+
+		done := make(chan struct{})
+		go func() {
+			p.handleConn(&pipeConn{server})
+			close(done)
+		}()
+
+		// Send random binary that isn't HTTP or TLS
+		_, err := client.Write([]byte{0x00, 0x01, 0x02, 0x03, 0x04})
+		require.NoError(t, err)
+		_ = client.Close()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("handleConn did not return — unknown protocol was not blocked")
+		}
+	})
+}
+
+func TestProxy_HTTP_StillHandled(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("handled"))
+	}))
+	defer upstream.Close()
+
+	upAddr := strings.TrimPrefix(upstream.URL, "http://")
+	host, port, _ := net.SplitHostPort(upAddr)
+
+	handler := NewHTTPHandler([]HTTPService{{Host: host, Port: port}})
+	p := New(&Config{Listen: "127.0.0.1:0"})
+	p.RegisterHTTPHandler(handler)
+
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.handleConn(&pipeConn{server})
+	}()
+
+	req := "GET / HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n"
+	_, err := client.Write([]byte(req))
+	require.NoError(t, err)
+
+	resp, err := http.ReadResponse(bufio.NewReader(client), nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+	_ = client.Close()
+	wg.Wait()
+}
+
 func TestForwarder_PipesData(t *testing.T) {
 	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

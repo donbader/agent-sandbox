@@ -80,12 +80,11 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 
 	// TLS records start with 0x16 (ContentType handshake)
 	if len(hello) > 0 && hello[0] != 0x16 {
-		// Not TLS — handle as plain HTTP
-		if p.httpHandler != nil {
+		if isHTTP(hello) && p.httpHandler != nil {
 			slog.Debug("connection detected as HTTP", "remote_addr", clientConn.RemoteAddr())
 			p.httpHandler.Handle(clientConn, hello)
 		} else {
-			slog.Debug("HTTP connection dropped (no handler)", "remote_addr", clientConn.RemoteAddr())
+			slog.Debug("unknown protocol blocked", "remote_addr", clientConn.RemoteAddr(), "first_byte", fmt.Sprintf("0x%02x", hello[0]))
 		}
 		return
 	}
@@ -110,7 +109,11 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	p.passthrough(clientConn, hello, serverName)
 }
 
-// passthrough pipes the connection directly to the destination.
+// passthrough pipes the connection directly to the destination on port 443.
+// NOTE: Since iptables DNAT rewrites the destination, we lose the original port.
+// This means TLS on non-443 ports will be dialed on 443 instead. This is acceptable
+// because nearly all TLS traffic uses 443. Non-standard ports can be supported later
+// via SO_ORIGINAL_DST or port-specific iptables rules.
 func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName string) {
 	destAddr := net.JoinHostPort(serverName, "443")
 	serverConn, err := net.DialTimeout("tcp", destAddr, 10*time.Second)
@@ -128,6 +131,17 @@ func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName 
 
 	// Bidirectional pipe
 	pipe(clientConn, serverConn)
+}
+
+// isHTTP checks if the initial bytes look like an HTTP request method.
+func isHTTP(data []byte) bool {
+	methods := []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH ", "CONNECT "}
+	for _, m := range methods {
+		if len(data) >= len(m) && string(data[:len(m)]) == m {
+			return true
+		}
+	}
+	return false
 }
 
 // pipe copies data bidirectionally between two connections.

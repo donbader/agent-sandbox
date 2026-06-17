@@ -33,6 +33,7 @@ type agentPairParams struct {
 	sidecarPrefix  string
 	buildDir       string
 	exposeGateway  bool
+	projectName    string
 }
 
 // agentPairResult holds the services and volumes produced by buildAgentPair.
@@ -141,6 +142,7 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 			"sandbox": map[string]any{
 				"aliases": []string{p.gatewayAlias},
 			},
+			"external": map[string]any{},
 		},
 		"volumes": gatewayVolumes,
 		"healthcheck": map[string]any{
@@ -168,11 +170,13 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	if contribs != nil {
 		for name, svc := range contribs.Sidecar.Services {
 			sidecar := buildSidecarService(svc, p.buildDir)
+			// Inject system env vars into all sidecars.
+			injectSidecarSystemEnv(sidecar, p.cfg.Name, p.projectName)
 			// Sidecars implicitly depend on the agent service being started.
 			if sidecar["depends_on"] == nil {
 				sidecar["depends_on"] = map[string]any{
 					p.agentName: map[string]any{
-						"condition": "service_healthy",
+						"condition": "service_started",
 					},
 				}
 			}
@@ -225,7 +229,15 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 	compose := composeFile{
 		Services: map[string]any{},
 		Volumes:  map[string]any{},
-		Networks: map[string]any{"sandbox": map[string]any{"driver": "bridge"}},
+		Networks: map[string]any{
+			"sandbox": map[string]any{
+				"driver":   "bridge",
+				"internal": true,
+			},
+			"external": map[string]any{
+				"driver": "bridge",
+			},
+		},
 	}
 
 	for _, agent := range agents {
@@ -263,6 +275,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			},
 			sidecarPrefix: agentName,
 			buildDir:      composeDir,
+			projectName:   filepath.Base(projectDir),
 			exposeGateway: false,
 		})
 
@@ -283,7 +296,14 @@ func buildSidecarService(svc plugin.ComposeService, buildDir string) map[string]
 		"networks": []string{"sandbox"},
 	}
 	if svc.Build != "" {
-		relPath, err := filepath.Rel(buildDir, svc.Build)
+		buildPath := svc.Build
+		// For bundled plugins, the build path is relative to projectDir.
+		// Make it absolute so filepath.Rel works correctly.
+		if !filepath.IsAbs(buildPath) {
+			// buildDir is projectDir/.build — go up one level to get projectDir
+			buildPath = filepath.Join(filepath.Dir(buildDir), buildPath)
+		}
+		relPath, err := filepath.Rel(buildDir, buildPath)
 		if err != nil {
 			relPath = svc.Build
 		}
@@ -402,4 +422,17 @@ func mergeCapabilities(base, contributed []string) []string {
 		}
 	}
 	return base
+}
+
+// injectSidecarSystemEnv adds well-known env vars to a sidecar service.
+// These provide the sidecar with sandbox identity and network information.
+func injectSidecarSystemEnv(sidecar map[string]any, agentName, projectName string) {
+	env, ok := sidecar["environment"].(map[string]string)
+	if !ok || env == nil {
+		env = make(map[string]string)
+	}
+	env["SANDBOX_ID"] = projectName + "-" + agentName
+	env["SANDBOX_NETWORK"] = projectName + "_sandbox"
+	env["AGENT_NAME"] = agentName
+	sidecar["environment"] = env
 }

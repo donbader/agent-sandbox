@@ -1,0 +1,326 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestEndpointAllowed(t *testing.T) {
+	cases := []struct {
+		method string
+		path   string
+		allow  bool
+	}{
+		{"POST", "/containers/create", true},
+		{"POST", "/containers/abc123/start", true},
+		{"POST", "/containers/abc123/stop", true},
+		{"POST", "/containers/abc123/kill", true},
+		{"DELETE", "/containers/abc123", true},
+		{"GET", "/containers/abc123/json", true},
+		{"GET", "/containers/abc123/logs", true},
+		{"GET", "/containers/json", true},
+		{"POST", "/containers/abc123/exec", true},
+		{"POST", "/exec/abc123/start", true},
+		{"GET", "/images/json", true},
+		{"POST", "/images/create", true},
+		// Blocked
+		{"GET", "/volumes", false},
+		{"POST", "/volumes/create", false},
+		{"GET", "/networks", false},
+		{"GET", "/swarm", false},
+		{"GET", "/secrets", false},
+		{"GET", "/configs", false},
+		{"GET", "/system/info", false},
+		{"GET", "/unknown/endpoint", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			// Use a proxy with AllowCompose=false to test base allowlist
+			proxy, _ := NewDockerProxy(&ProxyConfig{
+				SandboxID:     "test",
+				AgentName:     "coder",
+				NetworkName:   "sandbox",
+				AllowedImages: []string{"node:*"},
+				MaxContainers: 5,
+				MemoryBytes:   2 * 1024 * 1024 * 1024,
+				NanoCPUs:      2000000000,
+				PidsLimit:     256,
+			})
+			assert.Equal(t, tc.allow, proxy.isEndpointAllowed(tc.method, tc.path))
+		})
+	}
+}
+
+func TestDockerProxy_BlockedEndpoint(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	req := httptest.NewRequest("GET", "/volumes", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestDockerProxy_VersionPrefixStripped(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	// Versioned path to a blocked endpoint should still be blocked
+	req := httptest.NewRequest("GET", "/v1.43/volumes", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestDockerProxy_UnownedContainer(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	// Try to start a container we don't own
+	req := httptest.NewRequest("POST", "/containers/unknown123/start", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestExtractContainerID(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/containers/abc123/start", "abc123"},
+		{"/containers/abc123/json", "abc123"},
+		{"/containers/my-container/stop", "my-container"},
+		{"/containers/json", ""},
+		{"/containers/create", ""},
+		{"/images/json", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			assert.Equal(t, tc.want, extractContainerID(tc.path))
+		})
+	}
+}
+
+func TestDockerProxy_ContainerCreate_PolicyViolation(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	body := `{"Image": "ubuntu:latest", "HostConfig": {}}`
+	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "not in allowlist")
+}
+
+func TestDockerProxy_ContainerCreate_Privileged(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	body := `{"Image": "node:20", "HostConfig": {"Privileged": true}}`
+	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "privileged")
+}
+
+func TestDockerProxy_ImagePull_Blocked(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	req := httptest.NewRequest("POST", "/images/create?fromImage=ubuntu&tag=latest", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "not in allowlist")
+}
+
+func TestDockerProxy_ContainerCreate_MaxContainers(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 2,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	proxy.trackContainer("existing-1", "", "existing-1")
+	proxy.trackContainer("existing-2", "", "existing-2")
+
+	body := `{"Image": "node:20", "HostConfig": {}}`
+	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Contains(t, w.Body.String(), "maximum")
+}
+
+func TestDockerProxy_AllowCompose_NetworkEndpoints(t *testing.T) {
+	// Without AllowCompose, network endpoints are blocked
+	proxyNoCompose, _ := NewDockerProxy(&ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowCompose:  false,
+	})
+	assert.False(t, proxyNoCompose.isEndpointAllowed("POST", "/networks/create"))
+	assert.False(t, proxyNoCompose.isEndpointAllowed("GET", "/networks"))
+	assert.False(t, proxyNoCompose.isEndpointAllowed("DELETE", "/networks/abc123"))
+
+	// With AllowCompose, network endpoints are allowed
+	proxyCompose, _ := NewDockerProxy(&ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowCompose:  true,
+	})
+	assert.True(t, proxyCompose.isEndpointAllowed("POST", "/networks/create"))
+	assert.True(t, proxyCompose.isEndpointAllowed("GET", "/networks"))
+	assert.True(t, proxyCompose.isEndpointAllowed("DELETE", "/networks/abc123"))
+	assert.True(t, proxyCompose.isEndpointAllowed("POST", "/networks/abc123/connect"))
+	assert.True(t, proxyCompose.isEndpointAllowed("POST", "/volumes/create"))
+	assert.True(t, proxyCompose.isEndpointAllowed("GET", "/volumes"))
+}
+
+func TestDockerProxy_AllowCompose_NetworkCreateForcesInternal(t *testing.T) {
+	mockDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Parse the body to verify Internal was forced
+		body := make([]byte, r.ContentLength)
+		_, _ = r.Body.Read(body)
+
+		var req map[string]any
+		_ = json.Unmarshal(body, &req)
+
+		assert.Equal(t, true, req["Internal"])
+		assert.Equal(t, "test-coder-mynet", req["Name"])
+
+		labels, _ := req["Labels"].(map[string]any)
+		assert.Equal(t, "test-coder", labels["agent-sandbox.sandbox"])
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"Id":"net123abc"}`))
+	}))
+	defer mockDocker.Close()
+
+	cfg := &ProxyConfig{
+		SandboxID:     "test-coder",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowCompose:  true,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+	// Override upstream to point at mock
+	proxy.upstream = &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(&url.URL{Scheme: "http", Host: mockDocker.Listener.Addr().String()})
+			r.Out.Host = r.In.Host
+		},
+	}
+
+	body := `{"Name":"mynet","Internal":false}`
+	req := httptest.NewRequest("POST", "/networks/create", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	// Verify network was tracked
+	proxy.mu.Lock()
+	assert.True(t, proxy.networks["net123abc"])
+	proxy.mu.Unlock()
+}

@@ -27,10 +27,17 @@ if [ -z "$GATEWAY_IP" ]; then
 fi
 echo "[entrypoint] gateway IP: $GATEWAY_IP"
 
-# Redirect outbound HTTPS traffic to the MITM proxy.
-# Exclude traffic destined for the gateway itself to avoid loops.
-iptables -t nat -A OUTPUT -p tcp --dport 443 ! -d "$GATEWAY_IP" -j DNAT --to-destination "${GATEWAY_IP}:8443"
-echo "[entrypoint] iptables: TCP 443 → ${GATEWAY_IP}:8443"
+# Determine the sandbox network CIDR so local (east-west) traffic is not redirected.
+SANDBOX_CIDR=$(ip route | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1)
+if [ -z "$SANDBOX_CIDR" ]; then
+    # Fallback: exclude only the gateway IP
+    SANDBOX_CIDR="${GATEWAY_IP}/32"
+fi
+
+# Redirect ALL outbound TCP (except sandbox-local) to the gateway proxy.
+# This catches HTTPS (443), HTTP (80), and any other protocol.
+iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "${GATEWAY_IP}:8443"
+echo "[entrypoint] iptables: all outbound TCP (except $SANDBOX_CIDR) → ${GATEWAY_IP}:8443"
 
 # Install the gateway CA certificate so TLS verification succeeds.
 if [ -f /shared/certs/ca.crt ]; then

@@ -180,8 +180,13 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		warnUnresolvedVars(inst.Plugin, rendered)
 
 		if pluginDef.BaseDir != "" {
+			// For local plugins, svc.Build is relative to the plugin's directory.
+			// Join with BaseDir to make it relative to projectDir.
+			// For bundled plugins, asset paths are already relative to projectDir,
+			// so skip the join if the path already contains the BaseDir prefix.
+			relBaseDir, _ := filepath.Rel(g.projectDir, pluginDef.BaseDir)
 			for name, svc := range rendered.Sidecar.Services {
-				if svc.Build != "" && !filepath.IsAbs(svc.Build) {
+				if svc.Build != "" && !filepath.IsAbs(svc.Build) && !strings.HasPrefix(svc.Build, relBaseDir) {
 					svc.Build = filepath.Join(pluginDef.BaseDir, svc.Build)
 					rendered.Sidecar.Services[name] = svc
 				}
