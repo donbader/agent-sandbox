@@ -1,6 +1,10 @@
 # Binaries
 /agent-sandbox
 *.exe
+docker-proxy
+agent-sandbox-core
+core/agent-sandbox-core
+core/gateway/bin/
 
 # Build artifacts
 .build/
@@ -21,10 +25,5 @@ Thumbs.db
 
 # Environment
 .env
-channel-manager/node_modules/
 node_modules/
 .worktrees/
-.worktrees/
-agent-sandbox-core
-core/gateway/bin/
-core/agent-sandbox-core
