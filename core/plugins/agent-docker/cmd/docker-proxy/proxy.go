@@ -89,6 +89,11 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				r.URL.Path = strings.Replace(r.URL.Path, id, resolvedID, 1)
 			}
 		}
+		// Handle hijack/upgrade requests (attach, exec start)
+		if isHijackEndpoint(path) {
+			dp.handleHijack(w, r)
+			return
+		}
 		dp.upstream.ServeHTTP(w, r)
 	}
 }
@@ -333,4 +338,82 @@ func (dp *DockerProxy) untrackContainer(id string) {
 	dp.mu.Lock()
 	defer dp.mu.Unlock()
 	delete(dp.tracked, id)
+}
+
+// isHijackEndpoint returns true for endpoints that require HTTP connection upgrade.
+func isHijackEndpoint(path string) bool {
+	// /containers/{id}/attach and /exec/{id}/start use connection hijacking
+	if strings.Contains(path, "/attach") {
+		return true
+	}
+	if strings.HasPrefix(path, "/exec/") && strings.HasSuffix(path, "/start") {
+		return true
+	}
+	return false
+}
+
+// handleHijack handles Docker API endpoints that upgrade the HTTP connection
+// to a raw bidirectional TCP stream (attach, exec start).
+func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
+	slog.Debug("hijack request", "method", r.Method, "path", r.URL.Path, "upgrade", r.Header.Get("Upgrade"))
+
+	// Connect to Docker daemon
+	dockerConn, err := net.Dial("unix", "/var/run/docker.sock")
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "cannot connect to Docker daemon")
+		return
+	}
+	defer dockerConn.Close()
+
+	// Write the original HTTP request to Docker daemon
+	if err := r.Write(dockerConn); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to forward request to Docker daemon")
+		return
+	}
+
+	// Hijack the client connection
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "hijack not supported")
+		return
+	}
+
+	clientConn, clientBuf, err := hijacker.Hijack()
+	if err != nil {
+		slog.Error("hijack failed", "error", err)
+		return
+	}
+	defer clientConn.Close()
+
+	slog.Debug("hijack established", "path", r.URL.Path)
+
+	// Bidirectional pipe
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Docker daemon → client
+	go func() {
+		defer wg.Done()
+		_, _ = io.Copy(clientConn, dockerConn)
+		if tc, ok := clientConn.(*net.TCPConn); ok {
+			_ = tc.CloseWrite()
+		}
+	}()
+
+	// Client → Docker daemon (flush any buffered data first)
+	go func() {
+		defer wg.Done()
+		if clientBuf.Reader.Buffered() > 0 {
+			buffered := make([]byte, clientBuf.Reader.Buffered())
+			_, _ = clientBuf.Read(buffered)
+			_, _ = dockerConn.Write(buffered)
+		}
+		_, _ = io.Copy(dockerConn, clientConn)
+		if uc, ok := dockerConn.(*net.UnixConn); ok {
+			_ = uc.CloseWrite()
+		}
+	}()
+
+	wg.Wait()
+	slog.Debug("hijack completed", "path", r.URL.Path)
 }
