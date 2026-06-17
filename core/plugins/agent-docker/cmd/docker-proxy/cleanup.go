@@ -59,7 +59,7 @@ func (c *Cleaner) CleanupAll(ctx context.Context) {
 		slog.Error("cleanup: list containers", "error", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	var containers []struct {
@@ -87,7 +87,7 @@ func (c *Cleaner) CleanupAll(ctx context.Context) {
 		if err != nil {
 			slog.Warn("cleanup: stop container", "id", id[:min(12, len(id))], "error", err)
 		} else {
-			stopResp.Body.Close()
+			_ = stopResp.Body.Close()
 		}
 
 		// Remove
@@ -97,7 +97,7 @@ func (c *Cleaner) CleanupAll(ctx context.Context) {
 		if err != nil {
 			slog.Warn("cleanup: remove container", "id", id[:min(12, len(id))], "error", err)
 		} else {
-			rmResp.Body.Close()
+			_ = rmResp.Body.Close()
 		}
 
 		slog.Info("cleanup: removed container", "id", id[:min(12, len(id))], "name", name)

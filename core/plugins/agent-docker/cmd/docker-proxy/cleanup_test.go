@@ -23,7 +23,7 @@ func TestCleanup_ListsAndRemovesContainers(t *testing.T) {
 				{"Id": "def456full", "Names": []string{"/test-coder-app2"}},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(containers)
+			_ = json.NewEncoder(w).Encode(containers)
 		case r.Method == "POST" && (r.URL.Path == "/containers/abc123full/stop" || r.URL.Path == "/containers/def456full/stop"):
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "DELETE" && (r.URL.Path == "/containers/abc123full" || r.URL.Path == "/containers/def456full"):

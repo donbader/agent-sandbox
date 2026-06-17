@@ -110,7 +110,7 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "failed to read request body")
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	var body map[string]any
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
@@ -296,12 +296,6 @@ func extractContainerID(path string) string {
 	return ""
 }
 
-func (dp *DockerProxy) isOwned(id string) bool {
-	dp.mu.Lock()
-	defer dp.mu.Unlock()
-	return dp.tracked[id]
-}
-
 // resolveContainerRef translates a user-provided container reference to the actual
 // namespaced name/ID. Returns empty string if not owned.
 func (dp *DockerProxy) resolveContainerRef(ref string) string {
@@ -334,12 +328,6 @@ func (dp *DockerProxy) trackContainer(id, userName, namespacedName string) {
 	}
 }
 
-func (dp *DockerProxy) untrackContainer(id string) {
-	dp.mu.Lock()
-	defer dp.mu.Unlock()
-	delete(dp.tracked, id)
-}
-
 // isHijackEndpoint returns true for endpoints that require HTTP connection upgrade.
 func isHijackEndpoint(path string) bool {
 	// /containers/{id}/attach and /exec/{id}/start use connection hijacking
@@ -363,7 +351,7 @@ func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "cannot connect to Docker daemon")
 		return
 	}
-	defer dockerConn.Close()
+	defer func() { _ = dockerConn.Close() }()
 
 	// Write the original HTTP request to Docker daemon
 	if err := r.Write(dockerConn); err != nil {
@@ -383,7 +371,7 @@ func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
 		slog.Error("hijack failed", "error", err)
 		return
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	slog.Debug("hijack established", "path", r.URL.Path)
 
