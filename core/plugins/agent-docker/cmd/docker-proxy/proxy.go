@@ -244,18 +244,18 @@ func (dp *DockerProxy) resolveImageDefaults(body map[string]any) {
 	}
 
 	if len(ep) == 0 && len(imgInfo.Config.Entrypoint) > 0 {
-		ep := make([]any, len(imgInfo.Config.Entrypoint))
+		imgEP := make([]any, len(imgInfo.Config.Entrypoint))
 		for i, s := range imgInfo.Config.Entrypoint {
-			ep[i] = s
+			imgEP[i] = s
 		}
-		body["Entrypoint"] = ep
+		body["Entrypoint"] = imgEP
 	}
 	if len(cmd) == 0 && len(imgInfo.Config.Cmd) > 0 {
-		cmd := make([]any, len(imgInfo.Config.Cmd))
+		imgCmd := make([]any, len(imgInfo.Config.Cmd))
 		for i, s := range imgInfo.Config.Cmd {
-			cmd[i] = s
+			imgCmd[i] = s
 		}
-		body["Cmd"] = cmd
+		body["Cmd"] = imgCmd
 	}
 }
 
