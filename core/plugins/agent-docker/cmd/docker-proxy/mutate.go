@@ -128,6 +128,8 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 	if len(originalCmd) > 0 {
 		body["Cmd"] = originalCmd
 	} else {
-		body["Cmd"] = []any{"/bin/sh"}
+		// No explicit entrypoint/cmd in create request.
+		// Remove Cmd so Docker uses the image's default CMD as args to exec "$@".
+		delete(body, "Cmd")
 	}
 }
