@@ -8,7 +8,7 @@ Mounts a local directory from your project into the agent container as `/home/ag
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/home"
       volume: true
 ```
 
@@ -16,7 +16,7 @@ installations:
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `home_directory` | string | yes | — | Local directory to mount as `/home/agent/`. Relative to project root. |
+| `home_directory` | project-path | yes | — | Directory to mount as `/home/agent/`. Must use `@fleet/` prefix (e.g. `@fleet/home`). |
 | `volume` | boolean | no | `false` | If `true`, persist home across restarts via a named Docker volume. |
 
 ## How It Works
@@ -56,6 +56,6 @@ runtime:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/home"
       volume: true
 ```

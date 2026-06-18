@@ -16,7 +16,7 @@ installations:
   - plugin: "@builtin/ssh"
     options:
       port: 2222
-      authorized_keys: "./ssh_key.pub"
+      authorized_keys: "@fleet/ssh_key.pub"
 ```
 
 Then connect:
@@ -30,7 +30,7 @@ ssh -p 2222 agent@localhost
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | `port` | integer | no | `2222` | SSH port to expose on the host |
-| `authorized_keys` | string | yes | — | Path to public key file (relative to project root) |
+| `authorized_keys` | project-path | yes | — | Path to public key file. Must use `@fleet/` prefix (e.g. `@fleet/ssh_key.pub`). |
 
 ## What It Contributes
 
