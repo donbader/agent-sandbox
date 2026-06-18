@@ -45,6 +45,8 @@ contributes:
   runtime:
     environment:
       DOCKER_HOST: "tcp://{{ .agent.name }}-agent-docker-proxy:2375"
+    pre_entrypoint:
+      - '{{ if .plugin.options.allow_build }}rm -rf "$AGENT_HOME/.docker/buildx/instances" 2>/dev/null || true{{ end }}'
   sidecar:
     services:
       agent-docker-proxy:
