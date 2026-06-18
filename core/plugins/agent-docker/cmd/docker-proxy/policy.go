@@ -111,10 +111,11 @@ func matchImage(pattern, image string) bool {
 	return matched
 }
 
-// capAllowed checks if a capability is in the allowed list (case-insensitive).
+// capAllowed checks if a capability is in the allowed list (case-insensitive, handles CAP_ prefix).
 func (p *Policy) capAllowed(cap string) bool {
+	normalized := strings.TrimPrefix(strings.ToUpper(cap), "CAP_")
 	for _, allowed := range p.AllowedCapabilities {
-		if strings.EqualFold(allowed, cap) {
+		if strings.EqualFold(strings.TrimPrefix(allowed, "CAP_"), normalized) {
 			return true
 		}
 	}

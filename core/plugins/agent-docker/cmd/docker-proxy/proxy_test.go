@@ -558,3 +558,31 @@ func TestDockerProxy_AllowedCapabilities_CaseInsensitive(t *testing.T) {
 	}, 0)
 	assert.NoError(t, err)
 }
+
+func TestDockerProxy_AllowedCapabilities_CAPPrefix(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:       []string{"alpine:*"},
+		MaxContainers:       5,
+		AllowedCapabilities: []string{"NET_ADMIN", "SETUID"},
+	}
+	// Docker sends caps with CAP_ prefix
+	err := policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"CAP_NET_ADMIN", "CAP_SETUID"},
+	}, 0)
+	assert.NoError(t, err)
+
+	// Mixed: some with prefix, some without
+	err = policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"CAP_NET_ADMIN", "SETUID"},
+	}, 0)
+	assert.NoError(t, err)
+
+	// CAP_ prefix on disallowed cap still blocked
+	err = policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"CAP_SYS_ADMIN"},
+	}, 0)
+	assert.Error(t, err)
+}
