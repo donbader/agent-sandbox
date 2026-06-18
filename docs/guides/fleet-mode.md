@@ -80,7 +80,7 @@ shared:
   installations:
     - plugin: "@builtin/home-override"
       options:
-        home_directory: "@fleet/dorey-home"  # resolves to ../dorey-home from each agent dir
+        home_directory: "@fleet/shared-home"  # resolves to ../shared-home from each agent dir
 ```
 
 The `@fleet/` prefix resolves paths relative to the project root (where `fleet.yaml` lives), regardless of which agent directory is being generated. This avoids path traversal restrictions that block `../` in option values.
