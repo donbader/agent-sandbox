@@ -30,8 +30,7 @@ func auditCmd(dir *string) *cobra.Command {
   - Gateway CA certificate is trusted
   - Traffic interception rules are active
   - Default route goes through gateway
-
-The sandbox must be running (agent-sandbox compose up) before auditing.`,
+  - Agent is only on internal networks (network isolation)`, 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAudit(*dir)
 		},
@@ -93,6 +92,8 @@ func auditAgent(cfg *config.Config, projectName, dir string) []auditCheck {
 	checks = append(checks, checkDNATRules(agentContainer))
 	checks = append(checks, checkDefaultRoute(agentContainer))
 	checks = append(checks, checkNoDirectEgress(agentContainer))
+	checks = append(checks, checkNetworkIsolation(agentContainer, gatewayContainer))
+	checks = append(checks, checkNetworkIsolation(agentContainer, projectName))
 
 	return checks
 }
@@ -421,6 +422,122 @@ func checkNoDirectEgress(container string) auditCheck {
 		Name:   "No direct egress bypass",
 		Passed: true,
 		Detail: "single default route via gateway, no bypass paths",
+	}
+}
+
+// checkNetworkIsolation verifies ALL containers (except gateway) are only on internal networks.
+// Only the gateway should bridge to non-internal (external) networks.
+func checkNetworkIsolation(container, projectName string) auditCheck {
+	rt := runtimeFromEnv()
+
+	// List all containers in this compose project.
+	out, err := exec.Command(rt, "ps", "-a", "--filter",
+		fmt.Sprintf("label=com.docker.compose.project=%s", projectName),
+		"--format", "{{.Names}}").Output()
+	if err != nil {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: fmt.Sprintf("cannot list project containers: %v", err),
+		}
+	}
+
+	containers := strings.Fields(strings.TrimSpace(string(out)))
+	if len(containers) == 0 {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: "no containers found in project",
+		}
+	}
+
+	var violations []string
+	for _, ctr := range containers {
+		// Skip gateway containers — they're allowed on non-internal networks.
+		if strings.Contains(ctr, "-gateway-") {
+			continue
+		}
+
+		// Get networks this container is connected to.
+		netOut, err := exec.Command(rt, "inspect", "-f",
+			`{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}`, ctr).Output()
+		if err != nil {
+			continue
+		}
+
+		networks := strings.Fields(strings.TrimSpace(string(netOut)))
+		for _, net := range networks {
+			isInternal, err := exec.Command(rt, "network", "inspect", "-f", "{{.Internal}}", net).Output()
+			if err != nil {
+				continue
+			}
+			if strings.TrimSpace(string(isInternal)) != "true" {
+				violations = append(violations, fmt.Sprintf("%s on non-internal network %q", ctr, net))
+			}
+		}
+	}
+
+	if len(violations) > 0 {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: fmt.Sprintf("non-gateway containers on external networks: %s", strings.Join(violations, "; ")),
+		}
+	}
+
+	return auditCheck{
+		Name:   "Network isolation",
+		Passed: true,
+		Detail: "all non-gateway containers are on internal-only networks",
+	}
+}
+
+// checkNetworkIsolation verifies that all containers except the gateway are only
+// connected to internal Docker networks. This prevents accidental exposure of
+// agent containers to the host or external networks.
+func checkNetworkIsolation(agentContainer, gatewayContainer string) auditCheck {
+	rt := runtimeFromEnv()
+
+	// Get networks the agent is connected to.
+	// Format: {{json .NetworkSettings.Networks}} returns a JSON map of network names.
+	out, err := exec.Command(rt, "inspect", "-f", `{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}`, agentContainer).Output()
+	if err != nil {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: fmt.Sprintf("cannot inspect agent container networks: %v", err),
+		}
+	}
+
+	var nonInternalNetworks []string
+	for _, network := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if network == "" {
+			continue
+		}
+		// Check if this network is internal
+		netOut, err := exec.Command(rt, "network", "inspect", "-f", "{{.Internal}}", network).Output()
+		if err != nil {
+			// If we can't inspect, flag it as suspicious
+			nonInternalNetworks = append(nonInternalNetworks, network+" (inspect failed)")
+			continue
+		}
+		if strings.TrimSpace(string(netOut)) != "true" {
+			nonInternalNetworks = append(nonInternalNetworks, network)
+		}
+	}
+
+	if len(nonInternalNetworks) > 0 {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: fmt.Sprintf("agent is on non-internal network(s): %s — only gateway should have external access", strings.Join(nonInternalNetworks, ", ")),
+		}
+	}
+
+	return auditCheck{
+		Name:   "Network isolation",
+		Passed: true,
+		Detail: "agent is only connected to internal networks",
 	}
 }
 
