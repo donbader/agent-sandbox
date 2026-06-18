@@ -55,7 +55,7 @@ runtime:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/home"
       volume: true
 ```
 
@@ -69,6 +69,43 @@ The `shared` block merges into each agent's config automatically:
 | `shared.installations` | Prepended to per-agent installations. Same plugin → per-agent wins. |
 
 This lets you declare credentials once and override per-agent when needed.
+
+## Fleet Path Prefix (`@fleet/`)
+
+In fleet mode, agents live in subdirectories. To reference shared resources at the project root from plugin options, use the `@fleet/` prefix:
+
+```yaml
+# fleet.yaml
+shared:
+  installations:
+    - plugin: "@builtin/home-override"
+      options:
+        home_directory: "@fleet/shared-home"  # resolves to ../shared-home from each agent dir
+```
+
+The `@fleet/` prefix resolves paths relative to the project root (where `fleet.yaml` lives), regardless of which agent directory is being generated.
+
+### Option type: `project-path`
+
+Plugins that accept file/directory paths should declare their options as `type: project-path`. This **enforces** the `@fleet/` prefix at validation time — relative paths like `./home` or `../shared` are rejected.
+
+```yaml
+# plugin.yaml
+options:
+  home_directory:
+    type: project-path  # must be @fleet/...
+    required: true
+```
+
+### Resolution
+
+`@fleet/X` resolves to `X` relative to the project root. Since the Docker build context is always the project root, the resolved path is used directly in Dockerfile instructions (e.g., `COPY`).
+
+| Syntax | Resolves to | Use case |
+|--------|-------------|----------|
+| `@fleet/shared-home` | `shared-home` | Shared resource at project root |
+| `@fleet/plugins/data` | `plugins/data` | Shared plugin data |
+| `@fleet/config.yaml` | `config.yaml` | Shared config file |
 
 ## Generated Output
 

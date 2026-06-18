@@ -38,6 +38,9 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	// Apply defaults
 	resolvedOpts := applyDefaults(p.Options, opts)
 
+	// Resolve @fleet/ prefixed paths to project-root-relative paths
+	resolveFleetPaths(resolvedOpts)
+
 	// Use raw contributes template (preserved from plugin.yaml without YAML parsing)
 	contribTemplate := p.ContributesRaw
 	if contribTemplate == "" {
@@ -110,6 +113,17 @@ func validateOptions(schema map[string]OptionSchema, opts map[string]any) error 
 		}
 		if val, ok := opts[name]; ok {
 			if str, ok := val.(string); ok {
+				// Path-type options must use @fleet/ prefix.
+				if s.Type == "project-path" {
+					if !strings.HasPrefix(str, "@fleet/") {
+						return fmt.Errorf("option %q (type: project-path) must use @fleet/ prefix, got %q", name, str)
+					}
+					continue
+				}
+				// Allow @fleet/ prefixed paths in string options too.
+				if strings.HasPrefix(str, "@fleet/") {
+					continue
+				}
 				if strings.Contains(str, "..") {
 					return fmt.Errorf("option %q contains path traversal sequence", name)
 				}
@@ -128,6 +142,20 @@ func applyDefaults(schema map[string]OptionSchema, opts map[string]any) map[stri
 		}
 	}
 	return resolved
+}
+
+// resolveFleetPaths expands @fleet/ prefixed values in plugin options.
+// @fleet/X resolves to X (relative to the project root).
+// Since the Docker build context is always the project root, the resolved
+// path is used directly without further transformation.
+func resolveFleetPaths(opts map[string]any) {
+	for key, val := range opts {
+		if str, ok := val.(string); ok {
+			if strings.HasPrefix(str, "@fleet/") {
+				opts[key] = strings.TrimPrefix(str, "@fleet/")
+			}
+		}
+	}
 }
 
 // ConfigToMap converts any config struct to a map[string]any via YAML round-trip.

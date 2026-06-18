@@ -282,11 +282,70 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 		maps.Copy(compose.Volumes, pair.volumes)
 	}
 
+	// Validate network isolation: non-gateway services must only be on internal networks.
+	if err := validateNetworkIsolation(compose.Services, compose.Networks); err != nil {
+		return "", err
+	}
+
 	data, err := yaml.Marshal(compose)
 	if err != nil {
 		return "", fmt.Errorf("marshal compose: %w", err)
 	}
 	return string(data), nil
+}
+
+// validateNetworkIsolation checks that non-gateway services are only on internal networks.
+// This is a defense-in-depth check — the generator already assigns networks correctly by
+// construction, but this catches regressions or future code changes that might violate
+// the security model.
+func validateNetworkIsolation(services map[string]any, networks map[string]any) error {
+	// Build set of internal networks.
+	internalNets := map[string]bool{}
+	for name, cfg := range networks {
+		if m, ok := cfg.(map[string]any); ok {
+			if internal, _ := m["internal"].(bool); internal {
+				internalNets[name] = true
+			}
+		}
+	}
+
+	for svcName, svcDef := range services {
+		// Gateway services are allowed on any network.
+		if strings.Contains(svcName, "-gateway") {
+			continue
+		}
+
+		svc, ok := svcDef.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		// Extract network names from the service definition.
+		var netNames []string
+		switch nets := svc["networks"].(type) {
+		case []string:
+			netNames = nets
+		case []any:
+			for _, n := range nets {
+				if s, ok := n.(string); ok {
+					netNames = append(netNames, s)
+				}
+			}
+		case map[string]any:
+			for name := range nets {
+				netNames = append(netNames, name)
+			}
+		}
+
+		// Verify all networks are internal.
+		for _, net := range netNames {
+			if !internalNets[net] {
+				return fmt.Errorf("service %q is on non-internal network %q — only gateway services may use external networks", svcName, net)
+			}
+		}
+	}
+
+	return nil
 }
 
 // buildSidecarService constructs the compose service definition for a plugin sidecar.

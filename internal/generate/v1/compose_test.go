@@ -635,3 +635,72 @@ func TestBuildProjectCompose_SidecarSystemEnvVars(t *testing.T) {
 	assert.Equal(t, projectName+"-coder", env["SANDBOX_ID"])
 	assert.Equal(t, projectName+"_sandbox", env["SANDBOX_NETWORK"])
 }
+
+func TestValidateNetworkIsolation(t *testing.T) {
+	internalNetworks := map[string]any{
+		"sandbox": map[string]any{
+			"driver":   "bridge",
+			"internal": true,
+		},
+		"external": map[string]any{
+			"driver": "bridge",
+		},
+	}
+
+	t.Run("passes when all non-gateway services on internal networks", func(t *testing.T) {
+		services := map[string]any{
+			"my-agent": map[string]any{
+				"networks": map[string]any{"sandbox": map[string]any{}},
+			},
+			"my-agent-gateway": map[string]any{
+				"networks": map[string]any{"sandbox": map[string]any{}, "external": map[string]any{}},
+			},
+			"my-agent-sidecar": map[string]any{
+				"networks": []string{"sandbox"},
+			},
+		}
+		err := validateNetworkIsolation(services, internalNetworks)
+		assert.NoError(t, err)
+	})
+
+	t.Run("fails when non-gateway service on external network", func(t *testing.T) {
+		services := map[string]any{
+			"my-agent": map[string]any{
+				"networks": map[string]any{"sandbox": map[string]any{}, "external": map[string]any{}},
+			},
+			"my-agent-gateway": map[string]any{
+				"networks": map[string]any{"sandbox": map[string]any{}, "external": map[string]any{}},
+			},
+		}
+		err := validateNetworkIsolation(services, internalNetworks)
+		assert.ErrorContains(t, err, "non-internal network")
+		assert.ErrorContains(t, err, "my-agent")
+	})
+
+	t.Run("fails when sidecar on external network", func(t *testing.T) {
+		services := map[string]any{
+			"my-agent": map[string]any{
+				"networks": []string{"sandbox"},
+			},
+			"my-agent-gateway": map[string]any{
+				"networks": map[string]any{"sandbox": map[string]any{}, "external": map[string]any{}},
+			},
+			"my-agent-db-sidecar": map[string]any{
+				"networks": []string{"sandbox", "external"},
+			},
+		}
+		err := validateNetworkIsolation(services, internalNetworks)
+		assert.ErrorContains(t, err, "non-internal network")
+		assert.ErrorContains(t, err, "my-agent-db-sidecar")
+	})
+
+	t.Run("gateway allowed on any network", func(t *testing.T) {
+		services := map[string]any{
+			"my-agent-gateway": map[string]any{
+				"networks": map[string]any{"sandbox": map[string]any{}, "external": map[string]any{}, "custom": map[string]any{}},
+			},
+		}
+		err := validateNetworkIsolation(services, internalNetworks)
+		assert.NoError(t, err)
+	})
+}

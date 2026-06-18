@@ -146,7 +146,7 @@ Host APIs available: `gw.crypto`, `gw.fs`, `gw.http`, `gw.secrets`, `gw.log`.
 
 Plugin options validated at generate-time against the `options` schema in `plugin.yaml`:
 
-- Type checking (string, boolean, integer, array, object)
+- Type checking (string, boolean, integer, array, object, project-path)
 - Required field enforcement
 - Default value application
 - `${ENV_VAR}` patterns resolved from `.env` before validation

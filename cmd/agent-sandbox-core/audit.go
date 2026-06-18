@@ -30,8 +30,7 @@ func auditCmd(dir *string) *cobra.Command {
   - Gateway CA certificate is trusted
   - Traffic interception rules are active
   - Default route goes through gateway
-
-The sandbox must be running (agent-sandbox compose up) before auditing.`,
+  - Agent is only on internal networks (network isolation)`, 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAudit(*dir)
 		},
@@ -93,6 +92,7 @@ func auditAgent(cfg *config.Config, projectName, dir string) []auditCheck {
 	checks = append(checks, checkDNATRules(agentContainer))
 	checks = append(checks, checkDefaultRoute(agentContainer))
 	checks = append(checks, checkNoDirectEgress(agentContainer))
+	checks = append(checks, checkNetworkIsolation(projectName))
 
 	return checks
 }
@@ -421,6 +421,73 @@ func checkNoDirectEgress(container string) auditCheck {
 		Name:   "No direct egress bypass",
 		Passed: true,
 		Detail: "single default route via gateway, no bypass paths",
+	}
+}
+
+// checkNetworkIsolation verifies ALL containers (except gateway) are only on internal networks.
+// Only the gateway should bridge to non-internal (external) networks.
+func checkNetworkIsolation(projectName string) auditCheck {
+	rt := runtimeFromEnv()
+
+	// List all containers in this compose project.
+	out, err := exec.Command(rt, "ps", "-a", "--filter",
+		fmt.Sprintf("label=com.docker.compose.project=%s", projectName),
+		"--format", "{{.Names}}").Output()
+	if err != nil {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: fmt.Sprintf("cannot list project containers: %v", err),
+		}
+	}
+
+	containers := strings.Fields(strings.TrimSpace(string(out)))
+	if len(containers) == 0 {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: "no containers found in project",
+		}
+	}
+
+	var violations []string
+	for _, ctr := range containers {
+		// Skip gateway containers — they're allowed on non-internal networks.
+		if strings.Contains(ctr, "-gateway-") {
+			continue
+		}
+
+		// Get networks this container is connected to.
+		netOut, err := exec.Command(rt, "inspect", "-f",
+			`{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}`, ctr).Output()
+		if err != nil {
+			continue
+		}
+
+		networks := strings.Fields(strings.TrimSpace(string(netOut)))
+		for _, net := range networks {
+			isInternal, err := exec.Command(rt, "network", "inspect", "-f", "{{.Internal}}", net).Output()
+			if err != nil {
+				continue
+			}
+			if strings.TrimSpace(string(isInternal)) != "true" {
+				violations = append(violations, fmt.Sprintf("%s on non-internal network %q", ctr, net))
+			}
+		}
+	}
+
+	if len(violations) > 0 {
+		return auditCheck{
+			Name:   "Network isolation",
+			Passed: false,
+			Detail: fmt.Sprintf("non-gateway containers on external networks: %s", strings.Join(violations, "; ")),
+		}
+	}
+
+	return auditCheck{
+		Name:   "Network isolation",
+		Passed: true,
+		Detail: "all non-gateway containers are on internal-only networks",
 	}
 }
 

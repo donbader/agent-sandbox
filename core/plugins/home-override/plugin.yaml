@@ -1,9 +1,9 @@
 name: home-override
 options:
   home_directory:
-    type: string
+    type: project-path
     required: true
-    description: "Path to local directory with agent home contents (relative to project root)"
+    description: "Path to local directory with agent home contents. Must use @fleet/ prefix (e.g. @fleet/shared-home)."
   volume:
     type: boolean
     required: false

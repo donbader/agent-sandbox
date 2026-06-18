@@ -122,7 +122,7 @@ runtime:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/home"
       volume: true
 ```
 
@@ -132,7 +132,7 @@ installations:
 installations:
   - plugin: "@builtin/ssh"
     options:
-      authorized_keys: "./ssh_key.pub"
+      authorized_keys: "@fleet/ssh_key.pub"
 ```
 
 ## Next Steps

@@ -37,7 +37,16 @@ echo "--- Credential injection check ---"
 AGENT_SERVICE="sandbox-test"
 GATEWAY_SERVICE="sandbox-test-gateway"
 
-RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" curl -so- --max-time 30 https://httpbin.org/headers 2>&1 || true)
+# Retry loop: networking inside the container may take a moment after entrypoint completes.
+RESPONSE=""
+for attempt in 1 2 3 4 5; do
+  RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" curl -so- --max-time 10 https://httpbin.org/headers 2>&1 || true)
+  if echo "$RESPONSE" | grep -q "super-secret-token-12345"; then
+    break
+  fi
+  echo "  attempt $attempt: not ready, retrying in 3s..."
+  sleep 3
+done
 if echo "$RESPONSE" | grep -q "super-secret-token-12345"; then
   echo -e "  \033[32m✓\033[0m Gateway injects credentials into outbound requests"
 else

@@ -19,7 +19,7 @@ name: my-plugin
 
 options:
   token:
-    type: string          # string | object | boolean | integer
+    type: string          # string | object | boolean | integer | project-path
     required: true
     description: "Description shown in docs"
   data_dir:
@@ -271,7 +271,9 @@ installations:
 >
 > Use literal values for plugin options that get baked into the image. The CLI will emit a warning if it detects unresolved `${VAR}` patterns in rendered `extra_builds` lines.
 
-Option types: `string`, `object`, `boolean`, `integer`. The `required` and `default` fields control validation.
+Option types: `string`, `object`, `boolean`, `integer`, `project-path`. The `required` and `default` fields control validation.
+
+- `project-path` — a filesystem path within the project. Must use the `@fleet/` prefix (e.g. `@fleet/shared-home`). Resolved relative to the project root at generate time.
 
 ## Development Workflow
 

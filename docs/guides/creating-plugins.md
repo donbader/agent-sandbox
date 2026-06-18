@@ -28,7 +28,7 @@ name: my-plugin
 
 options:
   token:
-    type: string           # string | boolean | object | array
+    type: string           # string | boolean | object | array | project-path
     required: true
     description: "Env var reference, e.g. ${MY_TOKEN}"
   cache:
