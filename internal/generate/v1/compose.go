@@ -53,11 +53,13 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	cfg := p.cfg
 	contribs := p.contribs
 
-	// Agent volumes: certs + user config + plugin contributions
+	// Agent volumes: certs + namespaced volumes (auto-prefixed) + raw volumes (as-is).
 	agentVolumes := []string{p.certsVolume + ":/shared/certs"}
-	agentVolumes = append(agentVolumes, cfg.Runtime.Volumes...)
+	agentVolumes = append(agentVolumes, namespaceVolumes(p.agentName, cfg.Runtime.NamespacedVolumes)...)
+	agentVolumes = append(agentVolumes, cfg.Runtime.RawVolumes...)
 	if contribs != nil {
-		agentVolumes = append(agentVolumes, contribs.Runtime.Volumes...)
+		agentVolumes = append(agentVolumes, namespaceVolumes(p.agentName, contribs.Runtime.NamespacedVolumes)...)
+		agentVolumes = append(agentVolumes, contribs.Runtime.RawVolumes...)
 	}
 
 	// Build cap_add from base set plus plugin contributions.
@@ -132,7 +134,8 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	gatewayEnv := collectGatewayEnvVars(cfg, contribs)
 	gatewayVolumes := append([]string{}, p.gatewayVolumes...)
 	if contribs != nil {
-		gatewayVolumes = append(gatewayVolumes, contribs.Gateway.Volumes...)
+		gatewayVolumes = append(gatewayVolumes, namespaceVolumes(p.agentName, contribs.Gateway.NamespacedVolumes)...)
+		gatewayVolumes = append(gatewayVolumes, contribs.Gateway.RawVolumes...)
 	}
 	gatewaySvc := map[string]any{
 		"build":    p.gatewayBuild,
@@ -191,22 +194,37 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	// Certs volume is always present — shared between gateway (writer) and agent (reader).
 	result.volumes[p.certsVolume] = nil
 
-	// Extract named volumes from user config
-	for _, v := range cfg.Runtime.Volumes {
+	// Extract named volumes from user config (namespaced)
+	for _, v := range cfg.Runtime.NamespacedVolumes {
+		if volName := extractVolumeName(v); volName != "" {
+			result.volumes[p.agentName+"-"+volName] = nil
+		}
+	}
+	// Extract named volumes from user config (raw)
+	for _, v := range cfg.Runtime.RawVolumes {
 		if volName := extractVolumeName(v); volName != "" {
 			result.volumes[volName] = nil
 		}
 	}
 
-	// Extract named volumes from plugin runtime contributions
+	// Extract named volumes from plugin contributions
 	if contribs != nil {
-		for _, v := range contribs.Runtime.Volumes {
+		for _, v := range contribs.Runtime.NamespacedVolumes {
+			if volName := extractVolumeName(v); volName != "" {
+				result.volumes[p.agentName+"-"+volName] = nil
+			}
+		}
+		for _, v := range contribs.Runtime.RawVolumes {
 			if volName := extractVolumeName(v); volName != "" {
 				result.volumes[volName] = nil
 			}
 		}
-		// Extract named volumes from plugin gateway contributions
-		for _, v := range contribs.Gateway.Volumes {
+		for _, v := range contribs.Gateway.NamespacedVolumes {
+			if volName := extractVolumeName(v); volName != "" {
+				result.volumes[p.agentName+"-"+volName] = nil
+			}
+		}
+		for _, v := range contribs.Gateway.RawVolumes {
 			if volName := extractVolumeName(v); volName != "" {
 				result.volumes[volName] = nil
 			}
@@ -400,6 +418,35 @@ func extractVolumeName(volume string) string {
 		}
 	}
 	return ""
+}
+
+// namespaceVolume prefixes the named volume portion of a volume mount string with
+// the agent name to ensure per-agent isolation. Bind mounts (starting with . or /)
+// are returned unchanged.
+// Example: namespaceVolume("dorey-001", "oauth-tokens:/data") → "dorey-001-oauth-tokens:/data"
+func namespaceVolume(agentName, volume string) string {
+	for i, c := range volume {
+		if c == ':' {
+			name := volume[:i]
+			if len(name) > 0 && name[0] != '.' && name[0] != '/' {
+				return agentName + "-" + volume
+			}
+			return volume
+		}
+	}
+	return volume
+}
+
+// namespaceVolumes applies namespaceVolume to each entry in a slice.
+func namespaceVolumes(agentName string, volumes []string) []string {
+	if len(volumes) == 0 {
+		return volumes
+	}
+	result := make([]string, len(volumes))
+	for i, v := range volumes {
+		result[i] = namespaceVolume(agentName, v)
+	}
+	return result
 }
 
 // collectGatewayEnvVars extracts env var names referenced in gateway service headers

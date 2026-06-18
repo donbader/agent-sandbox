@@ -79,7 +79,8 @@ func (g *Generator) writeGatewayBuild(buildDir string, cfg *config.Config, contr
 	// 5. Write the Dockerfile
 	var gatewayVolumes []string
 	if contribs != nil {
-		gatewayVolumes = contribs.Gateway.Volumes
+		gatewayVolumes = append(gatewayVolumes, contribs.Gateway.NamespacedVolumes...)
+		gatewayVolumes = append(gatewayVolumes, contribs.Gateway.RawVolumes...)
 	}
 	return g.writeGatewayBuildFiles(gatewayDir, gatewayVolumes)
 }

@@ -17,5 +17,5 @@ contributes:
       - "RUN chown -R agent:agent /opt/home-seed"
     pre_entrypoint:
       - 'cp -a /opt/home-seed/. "$AGENT_HOME/"'
-    volumes:
-      - "{{ if .plugin.options.volume }}{{ .agent.name }}-home:/home/agent{{ else }}{{ .plugin.options.home_directory }}:/home/agent{{ end }}"
+    namespaced_volumes:
+      - "{{ if .plugin.options.volume }}home:/home/agent{{ end }}"

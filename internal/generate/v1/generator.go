@@ -258,8 +258,9 @@ func (g *Generator) resolveAgentPaths(contribs *plugin.Contributions, agentDir s
 	}
 
 	// Transform volume bind-mount sources that start with ./
-	for i, vol := range contribs.Runtime.Volumes {
-		contribs.Runtime.Volumes[i] = rewriteVolumePath(vol, relAgent)
+	// Only raw volumes can be bind mounts; namespaced volumes are always named.
+	for i, vol := range contribs.Runtime.RawVolumes {
+		contribs.Runtime.RawVolumes[i] = rewriteVolumePath(vol, relAgent)
 	}
 }
 

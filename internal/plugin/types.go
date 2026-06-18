@@ -73,20 +73,22 @@ type Contributions struct {
 }
 
 type RuntimeContrib struct {
-	ExtraBuilds   []string          `yaml:"extra_builds"`
-	Environment   map[string]string `yaml:"environment"`
-	PreEntrypoint []string          `yaml:"pre_entrypoint"`
-	Ports         []string          `yaml:"ports"`
-	Volumes       []string          `yaml:"volumes"`
-	CapAdd        []string          `yaml:"cap_add"` // validated at install time if plugin source is remote
-	SkipUserns    bool              `yaml:"skip_userns"`
+	ExtraBuilds       []string          `yaml:"extra_builds"`
+	Environment       map[string]string `yaml:"environment"`
+	PreEntrypoint     []string          `yaml:"pre_entrypoint"`
+	Ports             []string          `yaml:"ports"`
+	NamespacedVolumes []string          `yaml:"namespaced_volumes"` // auto-prefixed with {agentName}- at compose generation
+	RawVolumes        []string          `yaml:"raw_volumes"`        // used as-is, no agent name prefix
+	CapAdd            []string          `yaml:"cap_add"`            // validated at install time if plugin source is remote
+	SkipUserns        bool              `yaml:"skip_userns"`
 }
 
 type GatewayContrib struct {
-	Services    []GatewayService    `yaml:"services"`
-	Volumes     []string            `yaml:"volumes"`
-	Routes      []RouteEntry        `yaml:"routes"`
-	Middlewares []GatewayMiddleware `yaml:"middlewares"` // top-level TS middleware declarations
+	Services          []GatewayService    `yaml:"services"`
+	NamespacedVolumes []string            `yaml:"namespaced_volumes"` // auto-prefixed with {agentName}- at compose generation
+	RawVolumes        []string            `yaml:"raw_volumes"`        // used as-is, no agent name prefix
+	Routes            []RouteEntry        `yaml:"routes"`
+	Middlewares       []GatewayMiddleware `yaml:"middlewares"` // top-level TS middleware declarations
 }
 
 // RouteEntry declares an HTTP route handler contributed by a plugin.

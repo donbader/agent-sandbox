@@ -16,7 +16,7 @@ contributes:
 {{- range $name, $cfg := .plugin.options.providers }}
       - url: "{{ index $cfg "mcp_url" }}"
 {{- end }}
-    volumes:
+    namespaced_volumes:
       - "oauth-tokens:/data/plugins/mcp-oauth"
     middlewares:
       - script: "./src/oauth.ts"

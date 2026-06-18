@@ -15,7 +15,7 @@ func TestBuildCompose(t *testing.T) {
 	cfg := &config.Config{
 		Name: "test-agent",
 		Runtime: config.RuntimeConfig{
-			Volumes: []string{"data:/opt/data"},
+			NamespacedVolumes: []string{"data:/opt/data"},
 		},
 	}
 
@@ -40,7 +40,7 @@ func TestBuildCompose(t *testing.T) {
 
 	// Agent service uses config name
 	assert.Contains(t, output, "test-agent:")
-	assert.Contains(t, output, "data:/opt/data")
+	assert.Contains(t, output, "test-agent-data:/opt/data")
 
 	// Gateway service uses config name + "-gateway"
 	assert.Contains(t, output, "test-agent-gateway:")
@@ -277,7 +277,7 @@ func TestBuildProjectCompose_SingleAgent(t *testing.T) {
 				Name: "my-agent",
 				Runtime: config.RuntimeConfig{
 					Image:   "@builtin/codex",
-					Volumes: []string{"data:/opt/data"},
+					NamespacedVolumes: []string{"data:/opt/data"},
 				},
 			},
 			Contribs: nil,
@@ -352,8 +352,8 @@ func TestBuildFleetCompose(t *testing.T) {
 			Config: &config.Config{
 				Name: "coder",
 				Runtime: config.RuntimeConfig{
-					Image:   "@builtin/codex",
-					Volumes: []string{"coder-data:/opt/data"},
+					Image:             "@builtin/codex",
+					NamespacedVolumes: []string{"data:/opt/data"},
 				},
 			},
 			Contribs: &plugin.Contributions{
@@ -703,4 +703,101 @@ func TestValidateNetworkIsolation(t *testing.T) {
 		err := validateNetworkIsolation(services, internalNetworks)
 		assert.NoError(t, err)
 	})
+}
+
+func TestNamespaceVolume(t *testing.T) {
+	// Named volumes get prefixed with agent name
+	assert.Equal(t, "dorey-001-oauth-tokens:/data/plugins/mcp-oauth",
+		namespaceVolume("dorey-001", "oauth-tokens:/data/plugins/mcp-oauth"))
+
+	// Bind mounts (absolute path) are unchanged
+	assert.Equal(t, "/host/path:/container/path",
+		namespaceVolume("dorey-001", "/host/path:/container/path"))
+
+	// Bind mounts (relative path) are unchanged
+	assert.Equal(t, "./local:/container/path",
+		namespaceVolume("dorey-001", "./local:/container/path"))
+
+	// No colon (bare path) returned unchanged
+	assert.Equal(t, "somevolume",
+		namespaceVolume("dorey-001", "somevolume"))
+}
+
+func TestBuildProjectCompose_PluginVolumeNamespacing(t *testing.T) {
+	// Two agents with the same plugin contributing a volume named "oauth-tokens".
+	// Each agent's volume should be namespaced to prevent cross-agent sharing.
+	agents := []ComposeAgentEntry{
+		{
+			Config: &config.Config{
+				Name: "dorey-001",
+				Runtime: config.RuntimeConfig{
+					Image: "@builtin/codex",
+				},
+			},
+			Contribs: &plugin.Contributions{
+				Gateway: plugin.GatewayContrib{
+					NamespacedVolumes: []string{"oauth-tokens:/data/plugins/mcp-oauth"},
+				},
+				Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+			},
+			BuildDir: "/project/.build/dorey-001",
+		},
+		{
+			Config: &config.Config{
+				Name: "dorey-002",
+				Runtime: config.RuntimeConfig{
+					Image: "@builtin/codex",
+				},
+			},
+			Contribs: &plugin.Contributions{
+				Gateway: plugin.GatewayContrib{
+					NamespacedVolumes: []string{"oauth-tokens:/data/plugins/mcp-oauth"},
+				},
+				Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+			},
+			BuildDir: "/project/.build/dorey-002",
+		},
+	}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Plugin volumes should be namespaced per agent
+	var compose struct {
+		Volumes map[string]any `yaml:"volumes"`
+	}
+	err = yaml.Unmarshal([]byte(output), &compose)
+	require.NoError(t, err)
+
+	// Each agent gets its own namespaced volume
+	assert.Contains(t, compose.Volumes, "dorey-001-oauth-tokens")
+	assert.Contains(t, compose.Volumes, "dorey-002-oauth-tokens")
+	// The raw "oauth-tokens" must NOT appear as a top-level volume
+	assert.NotContains(t, compose.Volumes, "oauth-tokens")
+
+	// Volume mounts in the gateway service should reference the namespaced name
+	assert.Contains(t, output, "dorey-001-oauth-tokens:/data/plugins/mcp-oauth")
+	assert.Contains(t, output, "dorey-002-oauth-tokens:/data/plugins/mcp-oauth")
+}
+
+func TestBuildProjectCompose_RawVolumesNotNamespaced(t *testing.T) {
+	// raw_volumes should NOT be modified — used as-is for bind mounts or intentionally shared volumes.
+	agents := []ComposeAgentEntry{{
+		Config: &config.Config{
+			Name: "my-agent",
+			Runtime: config.RuntimeConfig{
+				Image:      "@builtin/codex",
+				RawVolumes: []string{"my-data:/opt/data"},
+			},
+		},
+		Contribs: nil,
+		BuildDir: "/project/.build/my-agent",
+	}}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Raw volume keeps its original name (not prefixed with agent name)
+	assert.Contains(t, output, "my-data:/opt/data")
+	assert.NotContains(t, output, "my-agent-my-data")
 }
