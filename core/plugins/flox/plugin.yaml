@@ -1,0 +1,19 @@
+name: flox
+options:
+  cache:
+    type: boolean
+    required: false
+    default: true
+    description: "Persist /nix store across container restarts using a named Docker volume"
+
+contributes:
+  runtime:
+    extra_builds:
+      - "ENV NIX_INSTALLER_NO_CONFIRM=1"
+      - "RUN curl -fsSL https://install.determinate.systems/nix | sh -s -- install linux --init none --no-confirm"
+      - "ENV PATH=/nix/var/nix/profiles/default/bin:$PATH"
+      - "RUN nix profile install --accept-flake-config github:flox/flox"
+    pre_entrypoint:
+      - '. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true'
+    volumes:
+      - '{{ if .plugin.options.cache }}{{ .agent.name }}-nix-store:/nix{{ end }}'
