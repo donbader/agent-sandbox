@@ -105,7 +105,7 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 	// Inline transparent proxy setup as entrypoint wrapper.
 	// Resolves gateway IP, sets up iptables DNAT, configures DNS, then execs original cmd.
 	initCmd := `GW=$(getent hosts "$SANDBOX_GATEWAY_HOST" 2>/dev/null | awk '{print $1}' | head -1); ` +
-		`if [ -z "$GW" ]; then GW=$(ping -c1 -W2 "$SANDBOX_GATEWAY_HOST" 2>/dev/null | head -1 | sed -n 's/.*\(\([0-9.]*\)\).*/\1/p'); fi; ` +
+		`if [ -z "$GW" ]; then GW=$(ping -c1 -W2 "$SANDBOX_GATEWAY_HOST" 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p'); fi; ` +
 		`if [ -n "$GW" ]; then ` +
 		`CIDR=$(ip route 2>/dev/null | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1); ` +
 		`[ -z "$CIDR" ] && CIDR="$GW/32"; ` +

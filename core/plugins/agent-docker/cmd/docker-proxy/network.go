@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// handleNetworkCreate intercepts network creation, forces Internal=true, and namespaces the name.
+// handleNetworkCreate intercepts network creation and forces Internal=true.
 func (dp *DockerProxy) handleNetworkCreate(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -80,8 +80,11 @@ func (dp *DockerProxy) handleNetworkRemove(w http.ResponseWriter, r *http.Reques
 	if !owned {
 		// Allow removal by name for compose workflows — compose creates
 		// and removes its own project-scoped networks by name.
-		// Security: networks are internal:true + labeled, so removal is safe.
-		slog.Debug("network remove by name (not tracked by ID)", "ref", networkRef)
+		// Verify via label that this network belongs to our sandbox.
+		if !dp.networkOwnedByLabel(networkRef) {
+			writeError(w, http.StatusForbidden, "cannot remove networks not created by this sandbox")
+			return
+		}
 	}
 
 	dp.upstream.ServeHTTP(w, r)
@@ -104,4 +107,28 @@ func (dp *DockerProxy) handleNetworkList(w http.ResponseWriter, r *http.Request)
 // handleNetworkConnect allows connecting containers to networks we own.
 func (dp *DockerProxy) handleNetworkConnect(w http.ResponseWriter, r *http.Request) {
 	dp.upstream.ServeHTTP(w, r)
+}
+
+// networkOwnedByLabel inspects a network and checks if it has our sandbox label.
+func (dp *DockerProxy) networkOwnedByLabel(networkRef string) bool {
+	req, err := http.NewRequest("GET", fmt.Sprintf("/networks/%s", networkRef), nil)
+	if err != nil {
+		return false
+	}
+	req.URL.Scheme = "http"
+	req.URL.Host = "docker"
+
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, req)
+	if rec.code != http.StatusOK {
+		return false
+	}
+
+	var info struct {
+		Labels map[string]string `json:"Labels"`
+	}
+	if err := json.Unmarshal(rec.body.Bytes(), &info); err != nil {
+		return false
+	}
+	return info.Labels["agent-sandbox.sandbox"] == dp.cfg.SandboxID
 }
