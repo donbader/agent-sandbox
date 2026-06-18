@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../.build/schema.json
 # Minimal agent config for sandbox integration tests.
 # Uses gateway services to trigger MITM proxy mode.
 name: sandbox-test

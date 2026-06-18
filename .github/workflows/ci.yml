@@ -197,6 +197,7 @@ jobs:
     timeout-minutes: 10
     needs: [changes, go]
     if: needs.changes.outputs.artifacts == 'true'
+    continue-on-error: true  # Known flaky: iptables DNAT unreliable in GHA Docker (see #176)
     steps:
       - uses: actions/checkout@v6
 

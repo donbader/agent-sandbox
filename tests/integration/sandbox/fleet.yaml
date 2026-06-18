@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=.build/fleet-schema.json
 # Integration test fleet config
 agents:
   - sandbox-test

@@ -6,14 +6,21 @@ services:
     image: mccutchen/go-httpbin:v2.16.0
     command: ["/bin/go-httpbin", "-port", "80"]
     networks:
-      sandbox:
+      upstream:
         aliases:
           - httpbin.org
 
   # Override gateway to forward upstream as HTTP (echo server is plain HTTP)
+  # and connect it to the upstream network where echo-httpbin lives.
   sandbox-test-gateway:
     environment:
       - GATEWAY_INSECURE_UPSTREAM=true
+    networks:
+      upstream: {}
     depends_on:
       echo-httpbin:
         condition: service_started
+
+networks:
+  upstream:
+    driver: bridge
