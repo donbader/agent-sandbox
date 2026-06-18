@@ -172,16 +172,19 @@ The agent entrypoint script polls `/health` before activating iptables DNAT, ens
 
 ### auth_headers Config (Native — No Generated Code)
 
-Simple header injection no longer generates `.go` files. Instead, `gateway.services[].headers` from `agent.yaml` are translated directly into plugin entries in `plugins.yaml` at generate time:
+Simple header injection no longer generates `.go` files. Instead, `gateway.egress[].headers` from `agent.yaml` are translated directly into plugin entries in `plugins.yaml` at generate time:
 
 ```yaml
 # agent.yaml
 gateway:
-  services:
-    - url: https://api.example.com
+  egress:
+    - hosts: ["api.example.com"]
       headers:
         Authorization: "Bearer ${MY_API_KEY}"
+    - hosts: ["*"]  # allow all other traffic
 ```
+
+> **Note:** The deprecated `gateway.services` format is still accepted and converted to equivalent egress rules internally.
 
 The CLI resolves `${MY_API_KEY}` from the environment and emits:
 
@@ -284,21 +287,26 @@ plugins:
       api_key: ${MY_API_KEY}
 ```
 
-### Via gateway.services headers (simple header injection)
+### Via gateway.egress headers (simple header injection)
 
 For straightforward header injection, just declare headers in `agent.yaml`:
 
 ```yaml
 gateway:
-  services:
-    - url: https://api.example.com
+  egress:
+    - hosts: ["api.example.com"]
       headers:
         Authorization: "Bearer ${MY_API_KEY}"
+    - hosts: ["*"]  # allow all other traffic
 ```
 
-The CLI resolves env vars and emits a plugin entry using the built-in `auth-headers.ts` handler. Template variables supported in header values:
+The CLI resolves env vars and emits a plugin entry using the built-in `auth-headers.ts` handler. Egress rules are ordered — first match wins. A `hosts: ["*"]` catch-all at the end allows remaining traffic; omit it for implicit-deny mode.
+
+Template variables supported in header values:
 - `${value}` — raw env var value
 - `${base64_basic}` — base64("x-access-token:\<value\>") for git HTTP auth
+
+> **Deprecation note:** `gateway.services` is still accepted for backward compatibility but new configs should use `gateway.egress`. See [Gateway Egress Reference](../reference/gateway-egress.md).
 
 ### Design principles
 

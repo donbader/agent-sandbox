@@ -11,13 +11,14 @@ runtime:
   image: "@builtin/codex"
 
 gateway:
-  services:
-    - url: https://api.openai.com
+  egress:
+    - hosts: ["api.openai.com"]
       headers:
-        Authorization: Bearer ${OPENAI_API_KEY}
+        Authorization: "Bearer ${OPENAI_API_KEY}"
+    - hosts: ["*"]  # allow all other traffic
 ```
 
-This is a complete, working config. The agent uses the codex preset, and the gateway injects your API key into all requests to `api.openai.com`.
+This is a complete, working config. The agent uses the codex preset, and the gateway injects your API key into all requests to `api.openai.com`. Rules are evaluated in order — first match wins. A `hosts: ["*"]` catch-all at the end allows all remaining traffic (omit it for implicit-deny mode).
 
 ## Editor Autocompletion
 
@@ -63,15 +64,19 @@ runtime:
     - "./local:/home/agent/local"
 
 gateway:
-  services:               # optional — external services proxied through the gateway
-    - url: https://api.example.com
-      network: string     # optional — compose network to attach
-      headers:            # optional — injected on every proxied request
-        Authorization: Bearer ${ENV_VAR}
+  egress:                 # optional — ordered egress rules (first match wins, no match = deny)
+    - hosts:              # required — list of host patterns to match
+        - "api.example.com"
+      headers:            # optional — injected on every proxied request (implies MITM + allow)
+        Authorization: "Bearer ${ENV_VAR}"
       middlewares:        # optional — TypeScript middleware scripts
         - script: ./path/to/middleware.ts
           domains:        # optional — list of domains this middleware applies to
             - "api.example.com"
+    - hosts: ["internal.bad.com"]
+      deny: true          # optional — explicitly block matching hosts
+    - hosts: ["*"]        # optional — catch-all allow (permissive mode)
+  # services:            # DEPRECATED — still works, but use egress instead
 
 installations:            # optional — plugins to install
   - plugin: "@builtin/github-pat"
@@ -105,25 +110,36 @@ Or set the environment variable (takes priority):
 AGENT_SANDBOX_RUNTIME=podman agent-sandbox compose up --build
 ```
 
-## Gateway Services
+## Gateway Egress Rules
 
-Services declare what external endpoints the agent can reach through the gateway:
+Egress rules declare what external endpoints the agent can reach through the gateway and how credentials are injected. Rules are evaluated in order — first match wins. If no rule matches, traffic is implicitly denied.
 
 ```yaml
 gateway:
-  services:
+  egress:
     # External HTTPS — gateway MITMs and injects credentials
-    - url: https://api.openai.com
+    - hosts: ["api.openai.com"]
       headers:
-        Authorization: Bearer ${OPENAI_API_KEY}
+        Authorization: "Bearer ${OPENAI_API_KEY}"
 
     # Internal sidecar on compose network
-    - url: sidecar:8080
+    - hosts: ["sidecar:8080"]
       headers:
-        X-Token: ${SIDECAR_TOKEN}
+        X-Token: "${SIDECAR_TOKEN}"
+
+    # Block a specific host
+    - hosts: ["evil.example.com"]
+      deny: true
+
+    # Allow everything else (omit for strict deny-by-default)
+    - hosts: ["*"]
 ```
 
-For HTTPS URLs, the gateway terminates TLS (MITM), injects headers, then forwards to the real server. The agent never sees the real credentials.
+For HTTPS hosts with `headers`, the gateway terminates TLS (MITM), injects headers, then forwards to the real server. The agent never sees the real credentials.
+
+Rules can also use `deny_paths: [...]` to block specific URL paths on otherwise-allowed hosts.
+
+> **Deprecation note:** `gateway.services` is deprecated but still supported for backward compatibility. It is converted to equivalent egress rules internally. New configs should use `gateway.egress`. See [Gateway Egress Reference](reference/gateway-egress.md) for full details.
 
 ## Plugins (installations)
 
@@ -214,10 +230,11 @@ agents:
 
 shared:
   gateway:
-    services:
-      - url: https://api.openai.com
+    egress:
+      - hosts: ["api.openai.com"]
         headers:
-          Authorization: Bearer ${OPENAI_API_KEY}
+          Authorization: "Bearer ${OPENAI_API_KEY}"
+      - hosts: ["*"]
   installations:
     - plugin: "@builtin/github-pat"
       options:
@@ -244,7 +261,7 @@ agents:
 ```
 
 **Merge rules:**
-- `shared.gateway.services` merges into each agent (same URL → per-agent wins)
+- `shared.gateway.egress` merges into each agent (shared rules prepended; per-agent rules take priority for same host)
 - `shared.installations` merges into each agent (same plugin → per-agent wins)
 - Each agent gets its own gateway container with independently loaded middleware
 

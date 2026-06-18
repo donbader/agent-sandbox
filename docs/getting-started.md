@@ -43,10 +43,11 @@ agents:
 
 shared:
   gateway:
-    services:
-      - url: https://api.openai.com
+    egress:
+      - hosts: ["api.openai.com"]
         headers:
-          Authorization: Bearer ${OPENAI_API_KEY}
+          Authorization: "Bearer ${OPENAI_API_KEY}"
+      - hosts: ["*"]  # allow all other traffic
 ```
 
 Create `coder/agent.yaml`:

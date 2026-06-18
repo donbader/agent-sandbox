@@ -30,15 +30,18 @@ agents:
 
 shared:
   gateway:
-    services:
-      - url: https://agent-gateway.stx-ai.net
+    egress:
+      - hosts: ["agent-gateway.stx-ai.net"]
         headers:
-          Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+          Authorization: "Bearer ${STX_LLM_GATEWAY_API_KEY}"
+      - hosts: ["*"]  # allow all other traffic
   installations:
     - plugin: "@builtin/github-pat"
       options:
         token: "${GITHUB_PAT}"
 ```
+
+> **Note:** `gateway.services` is deprecated. Use `gateway.egress` with ordered rules (first match wins).
 
 ### Per-agent agent.yaml
 
@@ -65,7 +68,7 @@ The `shared` block merges into each agent's config automatically:
 
 | What | Rule |
 |------|------|
-| `shared.gateway.services` | Prepended to per-agent services. Same URL → per-agent wins. |
+| `shared.gateway.egress` | Prepended to per-agent egress rules. Same host pattern → per-agent wins. |
 | `shared.installations` | Prepended to per-agent installations. Same plugin → per-agent wins. |
 
 This lets you declare credentials once and override per-agent when needed.
