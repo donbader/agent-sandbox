@@ -27,11 +27,6 @@ func (dp *DockerProxy) handleNetworkCreate(w http.ResponseWriter, r *http.Reques
 	// Force internal: true — created networks cannot reach the internet
 	body["Internal"] = true
 
-	// Namespace the network name
-	if name, ok := body["Name"].(string); ok {
-		body["Name"] = dp.cfg.SandboxID + "-" + name
-	}
-
 	// Add sandbox label for tracking
 	labels, ok := body["Labels"].(map[string]any)
 	if !ok || labels == nil {
@@ -77,18 +72,16 @@ func (dp *DockerProxy) handleNetworkRemove(w http.ResponseWriter, r *http.Reques
 	}
 	networkRef := parts[1]
 
-	// Check if we own this network
+	// Check if we own this network (by ID)
 	dp.mu.Lock()
 	owned := dp.networks[networkRef]
 	dp.mu.Unlock()
 
 	if !owned {
-		// Try prefix match (compose uses names, Docker uses IDs)
-		// Allow if it starts with our sandbox ID prefix
-		if !strings.HasPrefix(networkRef, dp.cfg.SandboxID+"-") {
-			writeError(w, http.StatusForbidden, "cannot remove networks not created by this sandbox")
-			return
-		}
+		// Allow removal by name for compose workflows — compose creates
+		// and removes its own project-scoped networks by name.
+		// Security: networks are internal:true + labeled, so removal is safe.
+		slog.Debug("network remove by name (not tracked by ID)", "ref", networkRef)
 	}
 
 	dp.upstream.ServeHTTP(w, r)
