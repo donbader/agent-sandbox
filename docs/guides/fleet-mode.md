@@ -70,6 +70,27 @@ The `shared` block merges into each agent's config automatically:
 
 This lets you declare credentials once and override per-agent when needed.
 
+## Fleet Path Prefix (`@fleet/`)
+
+In fleet mode, agents live in subdirectories. To reference shared resources at the project root from plugin options, use the `@fleet/` prefix:
+
+```yaml
+# fleet.yaml
+shared:
+  installations:
+    - plugin: "@builtin/home-override"
+      options:
+        home_directory: "@fleet/dorey-home"  # resolves to ../dorey-home from each agent dir
+```
+
+The `@fleet/` prefix resolves paths relative to the project root (where `fleet.yaml` lives), regardless of which agent directory is being generated. This avoids path traversal restrictions that block `../` in option values.
+
+| Syntax | Resolves to (from agent dir) | Use case |
+|--------|------------------------------|----------|
+| `./home` | `./home` (agent-local) | Per-agent resource in agent dir |
+| `@fleet/shared-home` | `../shared-home` | Shared resource at project root |
+| `@fleet/plugins/data` | `../plugins/data` | Shared plugin data |
+
 ## Generated Output
 
 ```

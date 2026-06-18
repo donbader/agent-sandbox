@@ -149,6 +149,10 @@ Plugin references:
 - `@builtin/name` — bundled plugins (fetched from core releases)
 - `./path` — local plugin in your project directory
 
+Path values in plugin options:
+- `./path` — relative to the agent directory
+- `@fleet/path` — relative to the project root (fleet.yaml directory). Use this in fleet mode to reference shared resources without path traversal. See [Fleet Mode](guides/fleet-mode.md#fleet-path-prefix-fleet).
+
 See [Plugins](plugins.md) for the full catalog.
 
 ## plugin.yaml Schema

@@ -167,10 +167,12 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 			return nil, fmt.Errorf("resolve assets for plugin %q: %w", inst.Plugin, err)
 		}
 
+		projectRoot, _ := filepath.Rel(agentDir, g.projectDir)
 		rendered, err := plugin.RenderContributions(pluginDef, inst.Options, plugin.RenderContext{
-			Self:      plugin.ConfigToMap(cfg),
-			Generator: map[string]any{"core_version": g.coreVersion},
-			Functions: g.computePluginFunctions(pluginDef),
+			Self:        plugin.ConfigToMap(cfg),
+			Generator:   map[string]any{"core_version": g.coreVersion},
+			Functions:   g.computePluginFunctions(pluginDef),
+			ProjectRoot: projectRoot,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render plugin %q: %w", inst.Plugin, err)
