@@ -150,8 +150,14 @@ Plugin references:
 - `./path` — local plugin in your project directory
 
 Path values in plugin options:
-- `./path` — relative to the agent directory
-- `@fleet/path` — relative to the project root (fleet.yaml directory). Use this in fleet mode to reference shared resources without path traversal. See [Fleet Mode](guides/fleet-mode.md#fleet-path-prefix-fleet).
+- `@fleet/path` — relative to the project root (fleet.yaml directory). Use this for all file/directory references in fleet mode. See [Fleet Mode](guides/fleet-mode.md#fleet-path-prefix-fleet).
+
+Plugin option types:
+- `type: string` — any string value. `@fleet/` prefix is allowed. Bare `..` is blocked.
+- `type: path` — **must** use `@fleet/` prefix. Enforced at validation time. Use this for options that reference files or directories.
+- `type: integer` — numeric value
+- `type: boolean` — true/false
+- `type: object` — nested structure
 
 See [Plugins](plugins.md) for the full catalog.
 

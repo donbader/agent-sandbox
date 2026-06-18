@@ -83,13 +83,27 @@ shared:
         home_directory: "@fleet/shared-home"  # resolves to ../shared-home from each agent dir
 ```
 
-The `@fleet/` prefix resolves paths relative to the project root (where `fleet.yaml` lives), regardless of which agent directory is being generated. This avoids path traversal restrictions that block `../` in option values.
+The `@fleet/` prefix resolves paths relative to the project root (where `fleet.yaml` lives), regardless of which agent directory is being generated.
+
+### Option type: `path`
+
+Plugins that accept file/directory paths should declare their options as `type: path`. This **enforces** the `@fleet/` prefix at validation time — relative paths like `./home` or `../shared` are rejected.
+
+```yaml
+# plugin.yaml
+options:
+  home_directory:
+    type: path          # must be @fleet/...
+    required: true
+```
+
+### Resolution examples
 
 | Syntax | Resolves to (from agent dir) | Use case |
 |--------|------------------------------|----------|
-| `./home` | `./home` (agent-local) | Per-agent resource in agent dir |
 | `@fleet/shared-home` | `../shared-home` | Shared resource at project root |
 | `@fleet/plugins/data` | `../plugins/data` | Shared plugin data |
+| `@fleet/config.yaml` | `../config.yaml` | Shared config file |
 
 ## Generated Output
 

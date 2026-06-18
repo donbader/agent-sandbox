@@ -264,7 +264,7 @@ func TestRenderContributions_PathType_RejectsRelative(t *testing.T) {
 name: home-override
 options:
   home_directory:
-    type: path
+    type: project-path
     required: true
 contributes:
   runtime:
@@ -284,7 +284,7 @@ func TestRenderContributions_PathType_RejectsBareName(t *testing.T) {
 name: home-override
 options:
   home_directory:
-    type: path
+    type: project-path
     required: true
 contributes:
   runtime:
@@ -304,7 +304,7 @@ func TestRenderContributions_PathType_RejectsTraversal(t *testing.T) {
 name: home-override
 options:
   home_directory:
-    type: path
+    type: project-path
     required: true
 contributes:
   runtime:
@@ -324,7 +324,7 @@ func TestRenderContributions_PathType_AcceptsFleet(t *testing.T) {
 name: home-override
 options:
   home_directory:
-    type: path
+    type: project-path
     required: true
 contributes:
   runtime:
@@ -423,12 +423,12 @@ contributes:
 }
 
 func TestRenderContributions_PathType_RequiresFleetPrefix(t *testing.T) {
-	// type: path options MUST use @fleet/ prefix
+	// type: project-path options MUST use @fleet/ prefix
 	raw := `
 name: home-override
 options:
   home_directory:
-    type: path
+    type: project-path
     required: true
 contributes:
   runtime:

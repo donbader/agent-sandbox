@@ -120,9 +120,9 @@ func validateOptions(schema map[string]OptionSchema, opts map[string]any) error 
 		if val, ok := opts[name]; ok {
 			if str, ok := val.(string); ok {
 				// Path-type options must use @fleet/ prefix.
-				if s.Type == "path" {
+				if s.Type == "project-path" {
 					if !strings.HasPrefix(str, "@fleet/") {
-						return fmt.Errorf("option %q (type: path) must use @fleet/ prefix, got %q", name, str)
+						return fmt.Errorf("option %q (type: project-path) must use @fleet/ prefix, got %q", name, str)
 					}
 					continue
 				}
