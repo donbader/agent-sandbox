@@ -53,7 +53,7 @@ func FormatEgressYAML(rules []EgressRule) string {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(fmt.Sprintf("%q", h))
+			fmt.Fprintf(&sb, "%q", h)
 		}
 		sb.WriteString("]\n")
 		if rule.Deny {
@@ -62,13 +62,13 @@ func FormatEgressYAML(rules []EgressRule) string {
 		if len(rule.Headers) > 0 {
 			sb.WriteString("      headers:\n")
 			for k, v := range rule.Headers {
-				sb.WriteString(fmt.Sprintf("        %s: %s\n", k, v))
+				fmt.Fprintf(&sb, "        %s: %s\n", k, v)
 			}
 		}
 		if len(rule.DenyPaths) > 0 {
 			sb.WriteString("      deny_paths:\n")
 			for _, p := range rule.DenyPaths {
-				sb.WriteString(fmt.Sprintf("        - %q\n", p))
+				fmt.Fprintf(&sb, "        - %q\n", p)
 			}
 		}
 	}

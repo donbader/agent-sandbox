@@ -49,5 +49,10 @@ func TestBuildGatewayConfig_NilContribs(t *testing.T) {
 	}
 
 	gwCfg := BuildGatewayConfig(cfg, nil)
-	require.Len(t, gwCfg.Services, 1)
+	// Service with no headers doesn't need MITM, so it's not in Services
+	assert.Empty(t, gwCfg.Services)
+	// But it's tracked in EgressRules (migrated from legacy format + catch-all)
+	require.Len(t, gwCfg.EgressRules, 2) // example.com + catch-all "*"
+	assert.Equal(t, []string{"example.com"}, gwCfg.EgressRules[0].Hosts)
+	assert.Equal(t, []string{"*"}, gwCfg.EgressRules[1].Hosts)
 }
