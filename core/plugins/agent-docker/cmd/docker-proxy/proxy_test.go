@@ -359,6 +359,7 @@ func TestDockerProxy_AllowBuild_Endpoints(t *testing.T) {
 	assert.True(t, proxyBuild.isEndpointAllowed("POST", "/build"))
 	assert.True(t, proxyBuild.isEndpointAllowed("GET", "/images/myapp/get"))
 	assert.True(t, proxyBuild.isEndpointAllowed("POST", "/images/load"))
+	assert.True(t, proxyBuild.isEndpointAllowed("POST", "/images/myapp/tag"))
 }
 
 func TestDockerProxy_AllowBuild_BuildkitImageAutoAllowed(t *testing.T) {
