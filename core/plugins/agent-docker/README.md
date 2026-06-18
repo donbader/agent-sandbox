@@ -166,14 +166,22 @@ When `allow_compose: true`, the agent can run `docker compose` to orchestrate mu
 │                                                                 │
 │  ┌─ Compose Project ──────────────────────────────────────────┐│
 │  │  service-a ←── compose network ──→ service-b               ││
-│  │       └─────── sandbox network ──→ gateway ──→ internet    ││
+│  │       │                                                     ││
+│  │       └─ iptables DNAT (init wrapper) → gateway → internet ││
 │  └────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Containers are dual-attached:
-- **Compose network** — service discovery between compose services (by name)
-- **Sandbox network** — routing through the gateway to the internet
+The proxy injects a **transparent proxy init wrapper** into each spawned container's entrypoint:
+
+1. Adds `NET_ADMIN` capability (for iptables)
+2. Inlines a shell script that resolves the gateway IP, sets up iptables DNAT, and configures DNS
+3. Resolves the image's default CMD/Entrypoint to preserve the original command
+4. Execs the original container command after proxy setup
+
+Containers keep their compose networks for service discovery. Internet-bound traffic is transparently routed through the gateway via iptables — no dual-network attachment needed.
+
+For **standalone `docker run`** (no compose networks), the container is also placed on the sandbox network directly.
 
 ### Configuration
 
@@ -194,7 +202,7 @@ installations:
 
 | Endpoint | Constraint |
 |----------|-----------|
-| `POST /networks/create` | Forces `Internal: true`, namespaces name, adds sandbox label |
+| `POST /networks/create` | Forces `Internal: true`, adds sandbox label |
 | `DELETE /networks/{id}` | Only sandbox-owned networks |
 | `GET /networks` | Filtered to sandbox-owned only |
 | `POST /networks/{id}/connect` | Allowed for service wiring |
@@ -206,7 +214,8 @@ installations:
 
 All other security controls remain active in compose mode. Additionally:
 - All created networks are forced to `Internal: true` — cannot bypass the gateway
-- Network names are namespaced with the sandbox ID
+- All spawned containers get transparent proxy (iptables DNAT to gateway)
+- `NET_ADMIN` is auto-injected by the proxy (not user-configurable, not counted against `allowed_capabilities`)
 - Cleanup removes spawned containers AND networks on shutdown
 
 ---
