@@ -310,7 +310,7 @@ No orphaned resources are left behind.
 - **Image pulls** go through the Docker daemon's registries. The proxy validates image names but doesn't control where they're fetched from.
 - **Volumes require compose mode** — `/volumes/*` is blocked by default. Enable `allow_compose: true` if services need shared data.
 - **BuildKit requires legacy builder** — The buildx `docker-container` driver creates a privileged buildkit container, which is blocked by policy. Use `DOCKER_BUILDKIT=0 docker build` (legacy builder) instead. Note: Dockerfiles using `--mount=type=cache` won't work with the legacy builder.
-- **Locally-built images** must match an `allowed_images` pattern to be run. Tag your built images with a name matching your allowlist (e.g. `docker build -t node:20-myapp .`).
+- **Locally-built images** are automatically tracked and allowed when `allow_build: true`. Images built via `docker build` or tagged via `docker tag` through the proxy are auto-allowed for `docker run` without needing to match `allowed_images` patterns.
 - **Image tagging** requires `allow_build: true` (the `POST /images/{name}/tag` endpoint is gated behind build mode).
 
 ## Prerequisites
