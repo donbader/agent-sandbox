@@ -57,8 +57,9 @@ runtime:
   entrypoint:             # optional — override container CMD
     - "my-binary"
     - "--flag"
-  volumes:                # optional — named or bind mount volumes
+  namespaced_volumes:    # optional — named volumes, auto-prefixed with {agentName}-
     - "data-vol:/home/agent/data"
+  raw_volumes:            # optional — bind mounts or volumes used as-is
     - "./local:/home/agent/local"
 
 gateway:
@@ -184,7 +185,7 @@ runtime:
   env:
     MY_VAR: "value"                 # environment variables set in agent container
 
-volumes:
+namespaced_volumes:
   - name: my-data
     mount: /data/my-plugin
 ```
@@ -199,7 +200,8 @@ volumes:
 | `routes[].handler` | string | Path to TypeScript handler file (relative to plugin dir) |
 | `routes[].method` | string | HTTP method to match |
 | `runtime.env` | map | Environment variables injected into the agent container |
-| `volumes` | list | Shared volumes between gateway and agent |
+| `namespaced_volumes` | list | Per-agent volumes (auto-prefixed with `{agentName}-`) |
+| `raw_volumes` | list | Volumes used as-is (bind mounts, fleet-shared volumes) |
 
 ## Fleet Structure (fleet.yaml)
 

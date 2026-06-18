@@ -31,7 +31,7 @@ contributes:
   gateway:
     services:                      # domains the gateway should proxy
       - url: "https://api.example.com"
-    volumes:                       # named volumes shared with the container
+    namespaced_volumes:            # auto-prefixed with {agentName}-
       - "my-data:{{ .plugin.options.data_dir }}"
     middlewares:                    # intercept proxied requests
       - script: "./src/auth.ts"
