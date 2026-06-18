@@ -19,6 +19,7 @@ type ProxyConfig struct {
 	NanoCPUs      int64
 	PidsLimit     int64
 	AllowCompose  bool
+	AllowBuild    bool
 }
 
 func loadConfigFromEnv() (*ProxyConfig, error) {
@@ -52,6 +53,7 @@ func loadConfigFromEnv() (*ProxyConfig, error) {
 	cfg.NanoCPUs = parseCPUs(os.Getenv("CPU_LIMIT"))
 	cfg.PidsLimit = int64(envInt("PID_LIMIT", 256))
 	cfg.AllowCompose = os.Getenv("ALLOW_COMPOSE") == "true"
+	cfg.AllowBuild = os.Getenv("ALLOW_BUILD") == "true"
 
 	return cfg, nil
 }

@@ -324,3 +324,83 @@ func TestDockerProxy_AllowCompose_NetworkCreateForcesInternal(t *testing.T) {
 	assert.True(t, proxy.networks["net123abc"])
 	proxy.mu.Unlock()
 }
+
+func TestDockerProxy_AllowBuild_Endpoints(t *testing.T) {
+	// Without AllowBuild, build endpoints are blocked
+	proxyNoBuild, _ := NewDockerProxy(&ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowBuild:    false,
+	})
+	assert.False(t, proxyNoBuild.isEndpointAllowed("GET", "/info"))
+	assert.False(t, proxyNoBuild.isEndpointAllowed("POST", "/build"))
+	assert.False(t, proxyNoBuild.isEndpointAllowed("GET", "/images/myapp/get"))
+	assert.False(t, proxyNoBuild.isEndpointAllowed("POST", "/images/load"))
+
+	// With AllowBuild, build endpoints are allowed
+	proxyBuild, _ := NewDockerProxy(&ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowBuild:    true,
+	})
+	assert.True(t, proxyBuild.isEndpointAllowed("GET", "/info"))
+	assert.True(t, proxyBuild.isEndpointAllowed("POST", "/build"))
+	assert.True(t, proxyBuild.isEndpointAllowed("GET", "/images/myapp/get"))
+	assert.True(t, proxyBuild.isEndpointAllowed("POST", "/images/load"))
+}
+
+func TestDockerProxy_AllowBuild_BuildkitImageAutoAllowed(t *testing.T) {
+	// Test that the policy auto-allows moby/buildkit:* when AllowBuild is true
+	policyWithBuild := &Policy{
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		AllowBuild:    true,
+	}
+	assert.True(t, policyWithBuild.ImageAllowed("moby/buildkit:latest"))
+	assert.True(t, policyWithBuild.ImageAllowed("moby/buildkit:buildx-stable-1"))
+	assert.True(t, policyWithBuild.ImageAllowed("moby/buildkit:v0.12.0"))
+	// Non-buildkit images still follow the allowlist
+	assert.False(t, policyWithBuild.ImageAllowed("ubuntu:latest"))
+	assert.True(t, policyWithBuild.ImageAllowed("node:20"))
+
+	// Without AllowBuild, moby/buildkit is blocked
+	policyNoBuild := &Policy{
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		AllowBuild:    false,
+	}
+	assert.False(t, policyNoBuild.ImageAllowed("moby/buildkit:latest"))
+}
+
+func TestDockerProxy_AllowBuild_BuildkitImageBlockedWhenDisabled(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowBuild:    false,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	// moby/buildkit should be blocked when AllowBuild is false
+	req := httptest.NewRequest("POST", "/images/create?fromImage=moby/buildkit&tag=latest", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}

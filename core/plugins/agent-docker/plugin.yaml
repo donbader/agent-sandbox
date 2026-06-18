@@ -35,6 +35,11 @@ options:
     required: false
     default: false
     description: "Allow docker compose operations (network create/remove for inner sandboxes)"
+  allow_build:
+    type: boolean
+    required: false
+    default: false
+    description: "Allow docker build operations (auto-allows buildkit image and build-related endpoints)"
 
 contributes:
   runtime:
@@ -53,3 +58,4 @@ contributes:
           CPU_LIMIT: "{{ .plugin.options.cpus }}"
           PID_LIMIT: "{{ .plugin.options.pids }}"
           ALLOW_COMPOSE: "{{ .plugin.options.allow_compose }}"
+          ALLOW_BUILD: "{{ .plugin.options.allow_build }}"

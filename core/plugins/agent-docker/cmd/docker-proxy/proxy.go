@@ -47,6 +47,7 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 		policy: &Policy{
 			AllowedImages: cfg.AllowedImages,
 			MaxContainers: cfg.MaxContainers,
+			AllowBuild:    cfg.AllowBuild,
 		},
 		mutator:  NewMutator(cfg),
 		cfg:      cfg,
@@ -283,6 +284,13 @@ func (dp *DockerProxy) isEndpointAllowed(method, path string) bool {
 			}
 		}
 	}
+	if dp.cfg.AllowBuild {
+		for _, rule := range buildEndpoints {
+			if rule.method == method && rule.pattern.MatchString(path) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -318,6 +326,14 @@ var allowedEndpoints = []endpointRule{
 	{"POST", regexp.MustCompile(`^/images/create$`)},
 	// Distribution (used by docker pull for manifest checks)
 	{"GET", regexp.MustCompile(`^/distribution/`)},
+}
+
+// buildEndpoints are only allowed when AllowBuild is true.
+var buildEndpoints = []endpointRule{
+	{"GET", regexp.MustCompile(`^/info$`)},
+	{"POST", regexp.MustCompile(`^/build$`)},
+	{"GET", regexp.MustCompile(`^/images/.+/get$`)},
+	{"POST", regexp.MustCompile(`^/images/load$`)},
 }
 
 // composeEndpoints are only allowed when AllowCompose is true.
