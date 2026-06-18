@@ -161,6 +161,11 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 	containerName := r.URL.Query().Get("name")
 	namespacedName := dp.mutator.NamespaceContainerName(containerName)
 
+	// If allow_compose, resolve image defaults so init wrapper can preserve them
+	if dp.cfg.AllowCompose {
+		dp.resolveImageDefaults(body)
+	}
+
 	dp.mutator.MutateCreate(body, namespacedName)
 
 	mutatedBody, _ := json.Marshal(body)
@@ -193,6 +198,65 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 	}
 	w.WriteHeader(rec.code)
 	_, _ = w.Write(rec.body.Bytes())
+}
+
+// resolveImageDefaults inspects the image and populates Entrypoint/Cmd in the
+// body if they are not explicitly set. This ensures the init wrapper can
+// preserve the image's default command when overriding the entrypoint.
+func (dp *DockerProxy) resolveImageDefaults(body map[string]any) {
+	image, _ := body["Image"].(string)
+	if image == "" {
+		return
+	}
+
+	// Only resolve if Entrypoint AND Cmd are both missing
+	_, hasEP := body["Entrypoint"]
+	_, hasCmd := body["Cmd"]
+	if hasEP && hasCmd {
+		return
+	}
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("/images/%s/json", image), nil)
+	if err != nil {
+		slog.Debug("resolveImageDefaults: failed to create request", "error", err)
+		return
+	}
+	req.URL.Scheme = "http"
+	req.URL.Host = "docker"
+
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, req)
+
+	if rec.code != http.StatusOK {
+		slog.Debug("resolveImageDefaults: image inspect failed", "image", image, "code", rec.code)
+		return
+	}
+
+	var imgInfo struct {
+		Config struct {
+			Entrypoint []string `json:"Entrypoint"`
+			Cmd        []string `json:"Cmd"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(rec.body.Bytes(), &imgInfo); err != nil {
+		slog.Debug("resolveImageDefaults: failed to parse image info", "error", err)
+		return
+	}
+
+	if !hasEP && len(imgInfo.Config.Entrypoint) > 0 {
+		ep := make([]any, len(imgInfo.Config.Entrypoint))
+		for i, s := range imgInfo.Config.Entrypoint {
+			ep[i] = s
+		}
+		body["Entrypoint"] = ep
+	}
+	if !hasCmd && len(imgInfo.Config.Cmd) > 0 {
+		cmd := make([]any, len(imgInfo.Config.Cmd))
+		for i, s := range imgInfo.Config.Cmd {
+			cmd[i] = s
+		}
+		body["Cmd"] = cmd
+	}
 }
 
 func (dp *DockerProxy) handleImagePull(w http.ResponseWriter, r *http.Request) {
