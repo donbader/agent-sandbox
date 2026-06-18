@@ -21,7 +21,6 @@ type ProxyConfig struct {
 	AllowCompose        bool
 	AllowBuild          bool
 	AllowedCapabilities []string
-	AllowedBindPaths    []string
 }
 
 func loadConfigFromEnv() (*ProxyConfig, error) {
@@ -61,13 +60,6 @@ func loadConfigFromEnv() (*ProxyConfig, error) {
 	if capsJSON != "" && capsJSON != "null" && capsJSON != "[]" {
 		if err := json.Unmarshal([]byte(capsJSON), &cfg.AllowedCapabilities); err != nil {
 			return nil, fmt.Errorf("parse ALLOWED_CAPABILITIES: %w", err)
-		}
-	}
-
-	pathsJSON := os.Getenv("ALLOWED_BIND_PATHS")
-	if pathsJSON != "" && pathsJSON != "null" && pathsJSON != "[]" {
-		if err := json.Unmarshal([]byte(pathsJSON), &cfg.AllowedBindPaths); err != nil {
-			return nil, fmt.Errorf("parse ALLOWED_BIND_PATHS: %w", err)
 		}
 	}
 
