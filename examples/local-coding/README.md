@@ -77,7 +77,7 @@ gateway:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "@fleet/coder/home"
+      home_directory: "@fleet/home"
       volume: true
   - plugin: "@builtin/mcp-oauth"
     options:
