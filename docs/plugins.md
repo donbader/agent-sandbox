@@ -306,3 +306,22 @@ Full OAuth lifecycle: token injection middleware, login route (PKCE), callback r
 - [`core/plugins/mcp-oauth/src/disconnect.ts`](../core/plugins/mcp-oauth/src/disconnect.ts) — disconnect route
 
 Key patterns: multiple routes + middleware, `gw.http.fetch` for token exchange, `gw.fs` for token persistence, `ctx.abort` for auth gating, `ctx.response.*` for route responses.
+
+### flox (runtime-only plugin)
+
+Installs Nix and Flox in the agent container. Pure runtime contributions — no gateway middleware or routes.
+
+- [`core/plugins/flox/plugin.yaml`](../core/plugins/flox/plugin.yaml)
+- [`core/plugins/flox/README.md`](../core/plugins/flox/README.md)
+
+Key patterns: `extra_builds` for Dockerfile commands, `pre_entrypoint` for shell setup, conditional volume mount with Go templates.
+
+### agent-docker (sidecar with Go binary)
+
+Policy-enforced Docker access via a Go proxy sidecar. Validates every Docker API call against image allowlists, resource limits, and security rules.
+
+- [`core/plugins/agent-docker/plugin.yaml`](../core/plugins/agent-docker/plugin.yaml)
+- [`core/plugins/agent-docker/README.md`](../core/plugins/agent-docker/README.md)
+- [`core/plugins/agent-docker/cmd/docker-proxy/`](../core/plugins/agent-docker/cmd/docker-proxy/) — Go sidecar binary
+
+Key patterns: `contributes.sidecar.services` for a sidecar container, `contributes.runtime.environment` for injecting DOCKER_HOST, asset bundling with `{{ asset "cmd/docker-proxy" }}`, conditional `pre_entrypoint` with Go templates.
