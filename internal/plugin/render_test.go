@@ -259,6 +259,7 @@ contributes:
 	assert.Equal(t, "v1.44.0", contribs.Runtime.Environment["CORE_VERSION"])
 }
 
+
 func TestRenderContributions_PathType_RejectsRelative(t *testing.T) {
 	raw := `
 name: home-override
@@ -274,28 +275,8 @@ contributes:
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
-	opts := map[string]any{"home_directory": "./home"}
-	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
-	assert.ErrorContains(t, err, "must use @fleet/ prefix")
-}
-
-func TestRenderContributions_PathType_RejectsBareName(t *testing.T) {
-	raw := `
-name: home-override
-options:
-  home_directory:
-    type: project-path
-    required: true
-contributes:
-  runtime:
-    extra_builds:
-      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
-`
-	p, err := ParsePluginYAML([]byte(raw))
-	require.NoError(t, err)
-
-	opts := map[string]any{"home_directory": "some-dir"}
-	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	opts := map[string]any{"home_directory": "./my-home"}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "agent-01"}})
 	assert.ErrorContains(t, err, "must use @fleet/ prefix")
 }
 
@@ -314,8 +295,8 @@ contributes:
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
-	opts := map[string]any{"home_directory": "../evil-dir"}
-	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	opts := map[string]any{"home_directory": "../evil"}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "agent-01"}})
 	assert.ErrorContains(t, err, "must use @fleet/ prefix")
 }
 
@@ -335,71 +316,15 @@ contributes:
 	require.NoError(t, err)
 
 	opts := map[string]any{"home_directory": "@fleet/shared-home"}
-	rendered, err := RenderContributions(p, opts, RenderContext{
-		Self:        map[string]any{"name": "my-agent"},
-		ProjectRoot: "..",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "COPY ../shared-home /opt/home-seed", rendered.Runtime.ExtraBuilds[0])
-}
-
-func TestRenderContributions_FleetPath(t *testing.T) {
-	raw := `
-name: home-override
-options:
-  home_directory:
-    type: string
-    required: true
-contributes:
-  runtime:
-    extra_builds:
-      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
-`
-	p, err := ParsePluginYAML([]byte(raw))
+	rendered, err := RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "agent-01"}})
 	require.NoError(t, err)
 
-	// Fleet mode: agent is in a subdirectory, projectRoot is ".."
-	opts := map[string]any{"home_directory": "@fleet/dorey-home"}
-	rendered, err := RenderContributions(p, opts, RenderContext{
-		Self:        map[string]any{"name": "dorey-001"},
-		ProjectRoot: "..",
-	})
-	require.NoError(t, err)
-
-	// @fleet/dorey-home → ../dorey-home (relative to agent dir)
-	assert.Equal(t, "COPY ../dorey-home /opt/home-seed", rendered.Runtime.ExtraBuilds[0])
-}
-
-func TestRenderContributions_FleetPath_Standalone(t *testing.T) {
-	raw := `
-name: home-override
-options:
-  home_directory:
-    type: string
-    required: true
-contributes:
-  runtime:
-    extra_builds:
-      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
-`
-	p, err := ParsePluginYAML([]byte(raw))
-	require.NoError(t, err)
-
-	// Standalone mode: agent is at project root, projectRoot is "."
-	opts := map[string]any{"home_directory": "@fleet/shared-home"}
-	rendered, err := RenderContributions(p, opts, RenderContext{
-		Self:        map[string]any{"name": "my-agent"},
-		ProjectRoot: ".",
-	})
-	require.NoError(t, err)
-
-	// @fleet/shared-home → shared-home (same directory)
+	// @fleet/shared-home → shared-home (project-root-relative)
 	assert.Equal(t, "COPY shared-home /opt/home-seed", rendered.Runtime.ExtraBuilds[0])
 }
 
-func TestRenderContributions_FleetPath_NotBlocked(t *testing.T) {
-	// @fleet/ paths should NOT trigger path traversal validation,
-	// even though they resolve to paths containing ".."
+func TestRenderContributions_FleetPath_InStringType(t *testing.T) {
+	// @fleet/ works in type: string options too
 	raw := `
 name: test-plugin
 options:
@@ -415,95 +340,70 @@ contributes:
 	require.NoError(t, err)
 
 	opts := map[string]any{"data_dir": "@fleet/shared/data"}
-	_, err = RenderContributions(p, opts, RenderContext{
-		Self:        map[string]any{"name": "agent-01"},
-		ProjectRoot: "..",
-	})
-	assert.NoError(t, err)
+	rendered, err := RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "agent-01"}})
+	require.NoError(t, err)
+
+	// @fleet/shared/data → shared/data (project-root-relative)
+	assert.Equal(t, "COPY shared/data /data", rendered.Runtime.ExtraBuilds[0])
 }
 
-func TestRenderContributions_PathType_RequiresFleetPrefix(t *testing.T) {
-	// type: project-path options MUST use @fleet/ prefix
+func TestRenderContributions_FleetPath_NotBlocked(t *testing.T) {
+	// @fleet/ paths should NOT trigger path traversal validation
 	raw := `
-name: home-override
+name: test-plugin
 options:
-  home_directory:
-    type: project-path
+  data_dir:
+    type: string
     required: true
 contributes:
   runtime:
     extra_builds:
-      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
+      - "COPY {{ .plugin.options.data_dir }} /data"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
 
-	// Relative path without @fleet/ should be rejected
-	opts := map[string]any{"home_directory": "./my-home"}
-	_, err = RenderContributions(p, opts, RenderContext{
-		Self:        map[string]any{"name": "agent-01"},
-		ProjectRoot: "..",
-	})
-	assert.ErrorContains(t, err, "must use @fleet/ prefix")
-
-	// @fleet/ prefix should work
-	opts = map[string]any{"home_directory": "@fleet/shared-home"}
-	rendered, err := RenderContributions(p, opts, RenderContext{
-		Self:        map[string]any{"name": "agent-01"},
-		ProjectRoot: "..",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "COPY ../shared-home /opt/home-seed", rendered.Runtime.ExtraBuilds[0])
+	opts := map[string]any{"data_dir": "@fleet/shared/data"}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "agent-01"}})
+	assert.NoError(t, err)
 }
 
 func TestResolveFleetPaths(t *testing.T) {
 	tests := []struct {
-		name        string
-		opts        map[string]any
-		projectRoot string
-		wantOpts    map[string]any
+		name     string
+		opts     map[string]any
+		wantOpts map[string]any
 	}{
 		{
-			name:        "fleet mode resolves to parent",
-			opts:        map[string]any{"home_directory": "@fleet/dorey-home"},
-			projectRoot: "..",
-			wantOpts:    map[string]any{"home_directory": "../dorey-home"},
+			name:     "strips @fleet/ prefix",
+			opts:     map[string]any{"home_directory": "@fleet/shared-home"},
+			wantOpts: map[string]any{"home_directory": "shared-home"},
 		},
 		{
-			name:        "standalone mode resolves to current",
-			opts:        map[string]any{"home_directory": "@fleet/home"},
-			projectRoot: ".",
-			wantOpts:    map[string]any{"home_directory": "home"},
+			name:     "nested fleet path",
+			opts:     map[string]any{"config": "@fleet/shared/config/app.yaml"},
+			wantOpts: map[string]any{"config": "shared/config/app.yaml"},
 		},
 		{
-			name:        "nested fleet path",
-			opts:        map[string]any{"config": "@fleet/shared/config/app.yaml"},
-			projectRoot: "..",
-			wantOpts:    map[string]any{"config": "../shared/config/app.yaml"},
+			name:     "non-fleet paths unchanged",
+			opts:     map[string]any{"local": "./my-dir", "abs": "/data/foo"},
+			wantOpts: map[string]any{"local": "./my-dir", "abs": "/data/foo"},
 		},
 		{
-			name:        "non-fleet paths unchanged",
-			opts:        map[string]any{"local": "./my-dir", "abs": "/data/foo"},
-			projectRoot: "..",
-			wantOpts:    map[string]any{"local": "./my-dir", "abs": "/data/foo"},
+			name:     "non-string values unchanged",
+			opts:     map[string]any{"port": 8080, "enabled": true},
+			wantOpts: map[string]any{"port": 8080, "enabled": true},
 		},
 		{
-			name:        "non-string values unchanged",
-			opts:        map[string]any{"port": 8080, "enabled": true},
-			projectRoot: "..",
-			wantOpts:    map[string]any{"port": 8080, "enabled": true},
-		},
-		{
-			name:        "empty project root defaults to dot",
-			opts:        map[string]any{"dir": "@fleet/data"},
-			projectRoot: "",
-			wantOpts:    map[string]any{"dir": "data"},
+			name:     "multiple options mixed",
+			opts:     map[string]any{"dir": "@fleet/data", "name": "my-agent", "path": "@fleet/keys/id.pub"},
+			wantOpts: map[string]any{"dir": "data", "name": "my-agent", "path": "keys/id.pub"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolveFleetPaths(tt.opts, tt.projectRoot)
+			resolveFleetPaths(tt.opts)
 			assert.Equal(t, tt.wantOpts, tt.opts)
 		})
 	}

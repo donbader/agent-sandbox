@@ -90,7 +90,7 @@ runtime:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/agent-001/home"
       volume: true
 ```
 
@@ -107,7 +107,7 @@ runtime:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/agent-002/home"
       volume: true
 ```
 

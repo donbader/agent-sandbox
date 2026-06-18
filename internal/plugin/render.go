@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -27,11 +26,6 @@ type RenderContext struct {
 	// Populated by executing plugin-declared scripts at generate time.
 	// Injected into .plugin.<name> for plugins that declare the function.
 	Functions map[string]string
-
-	// ProjectRoot is the relative path from the agent directory to the project root.
-	// Used to resolve @fleet/ prefixed paths in plugin options.
-	// For fleet mode this is ".." ; for standalone mode this is ".".
-	ProjectRoot string
 }
 
 // RenderContributions resolves Go templates in a plugin's contributions.
@@ -44,8 +38,8 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	// Apply defaults
 	resolvedOpts := applyDefaults(p.Options, opts)
 
-	// Resolve @fleet/ prefixed paths to agent-relative paths
-	resolveFleetPaths(resolvedOpts, ctx.ProjectRoot)
+	// Resolve @fleet/ prefixed paths to project-root-relative paths
+	resolveFleetPaths(resolvedOpts)
 
 	// Use raw contributes template (preserved from plugin.yaml without YAML parsing)
 	contribTemplate := p.ContributesRaw
@@ -151,18 +145,14 @@ func applyDefaults(schema map[string]OptionSchema, opts map[string]any) map[stri
 }
 
 // resolveFleetPaths expands @fleet/ prefixed values in plugin options.
-// @fleet/X resolves to <projectRoot>/X relative to the agent directory.
-// This allows fleet-level shared resources to be referenced without path traversal.
-// For example, @fleet/dorey-home becomes ../dorey-home when ProjectRoot is "..".
-func resolveFleetPaths(opts map[string]any, projectRoot string) {
-	if projectRoot == "" {
-		projectRoot = "."
-	}
+// @fleet/X resolves to X (relative to the project root).
+// Since the Docker build context is always the project root, the resolved
+// path is used directly without further transformation.
+func resolveFleetPaths(opts map[string]any) {
 	for key, val := range opts {
 		if str, ok := val.(string); ok {
 			if strings.HasPrefix(str, "@fleet/") {
-				relPath := strings.TrimPrefix(str, "@fleet/")
-				opts[key] = filepath.Join(projectRoot, relPath)
+				opts[key] = strings.TrimPrefix(str, "@fleet/")
 			}
 		}
 	}

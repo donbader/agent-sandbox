@@ -82,7 +82,7 @@ gateway:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/home"
       volume: true
 
   - plugin: "@builtin/agent-manager-acp"

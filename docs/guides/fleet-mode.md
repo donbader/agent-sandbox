@@ -55,7 +55,7 @@ runtime:
 installations:
   - plugin: "@builtin/home-override"
     options:
-      home_directory: "./home"
+      home_directory: "@fleet/home"
       volume: true
 ```
 
@@ -97,13 +97,15 @@ options:
     required: true
 ```
 
-### Resolution examples
+### Resolution
 
-| Syntax | Resolves to (from agent dir) | Use case |
-|--------|------------------------------|----------|
-| `@fleet/shared-home` | `../shared-home` | Shared resource at project root |
-| `@fleet/plugins/data` | `../plugins/data` | Shared plugin data |
-| `@fleet/config.yaml` | `../config.yaml` | Shared config file |
+`@fleet/X` resolves to `X` relative to the project root. Since the Docker build context is always the project root, the resolved path is used directly in Dockerfile instructions (e.g., `COPY`).
+
+| Syntax | Resolves to | Use case |
+|--------|-------------|----------|
+| `@fleet/shared-home` | `shared-home` | Shared resource at project root |
+| `@fleet/plugins/data` | `plugins/data` | Shared plugin data |
+| `@fleet/config.yaml` | `config.yaml` | Shared config file |
 
 ## Generated Output
 
