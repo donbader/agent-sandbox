@@ -47,13 +47,6 @@ options:
     required: false
     default: []
     description: "Linux capabilities to allow on spawned containers (e.g. NET_ADMIN, SETUID). Empty means all cap_add is blocked."
-  allowed_bind_paths:
-    type: array
-    items:
-      type: string
-    required: false
-    default: []
-    description: "Host path prefixes allowed for bind mounts (e.g. /tmp/, /home/agent/workspace/). Empty means all host mounts blocked."
 
 contributes:
   runtime:
@@ -76,4 +69,3 @@ contributes:
           ALLOW_COMPOSE: "{{ .plugin.options.allow_compose }}"
           ALLOW_BUILD: "{{ .plugin.options.allow_build }}"
           ALLOWED_CAPABILITIES: '{{ toJSON .plugin.options.allowed_capabilities }}'
-          ALLOWED_BIND_PATHS: '{{ toJSON .plugin.options.allowed_bind_paths }}'

@@ -281,7 +281,7 @@ func TestDockerProxy_AllowCompose_NetworkCreateForcesInternal(t *testing.T) {
 		_ = json.Unmarshal(body, &req)
 
 		assert.Equal(t, true, req["Internal"])
-		assert.Equal(t, "test-coder-mynet", req["Name"])
+		assert.Equal(t, "mynet", req["Name"])
 
 		labels, _ := req["Labels"].(map[string]any)
 		assert.Equal(t, "test-coder", labels["agent-sandbox.sandbox"])
@@ -559,42 +559,27 @@ func TestDockerProxy_AllowedCapabilities_CaseInsensitive(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestDockerProxy_AllowedBindPaths_Permitted(t *testing.T) {
+func TestDockerProxy_HostBindMounts_AlwaysBlocked(t *testing.T) {
 	policy := &Policy{
-		AllowedImages:    []string{"alpine:*"},
-		MaxContainers:    5,
-		AllowedBindPaths: []string{"/tmp/", "/home/agent/"},
-	}
-	err := policy.ValidateCreate(&CreateRequest{
-		Image: "alpine:latest",
-		Binds: []string{"/tmp/myproject/.build/config.yaml:/etc/config.yaml:ro"},
-	}, 0)
-	assert.NoError(t, err)
-}
-
-func TestDockerProxy_AllowedBindPaths_Blocked(t *testing.T) {
-	policy := &Policy{
-		AllowedImages:    []string{"alpine:*"},
-		MaxContainers:    5,
-		AllowedBindPaths: []string{"/tmp/"},
-	}
-	err := policy.ValidateCreate(&CreateRequest{
-		Image: "alpine:latest",
-		Binds: []string{"/etc/shadow:/etc/shadow:ro"},
-	}, 0)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "/etc/shadow")
-}
-
-func TestDockerProxy_AllowedBindPaths_EmptyBlocksAll(t *testing.T) {
-	policy := &Policy{
-		AllowedImages:    []string{"alpine:*"},
-		MaxContainers:    5,
-		AllowedBindPaths: []string{},
+		AllowedImages: []string{"alpine:*"},
+		MaxContainers: 5,
 	}
 	err := policy.ValidateCreate(&CreateRequest{
 		Image: "alpine:latest",
 		Binds: []string{"/tmp/foo:/bar"},
 	}, 0)
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "host bind mount")
+}
+
+func TestDockerProxy_NamedVolumes_Allowed(t *testing.T) {
+	policy := &Policy{
+		AllowedImages: []string{"alpine:*"},
+		MaxContainers: 5,
+	}
+	err := policy.ValidateCreate(&CreateRequest{
+		Image: "alpine:latest",
+		Binds: []string{"my-volume:/data"},
+	}, 0)
+	assert.NoError(t, err)
 }
