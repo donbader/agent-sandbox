@@ -48,10 +48,11 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 
 	return &DockerProxy{
 		policy: &Policy{
-			AllowedImages: cfg.AllowedImages,
-			MaxContainers: cfg.MaxContainers,
-			AllowBuild:    cfg.AllowBuild,
-			BuiltImages:   builtImages,
+			AllowedImages:       cfg.AllowedImages,
+			MaxContainers:       cfg.MaxContainers,
+			AllowBuild:          cfg.AllowBuild,
+			BuiltImages:         builtImages,
+			AllowedCapabilities: cfg.AllowedCapabilities,
 		},
 		mutator:     NewMutator(cfg),
 		cfg:         cfg,

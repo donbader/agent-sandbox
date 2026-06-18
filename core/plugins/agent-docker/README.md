@@ -62,6 +62,7 @@ Every request passes through the proxy, which:
 | `pids` | number | no | 256 | PID limit per container |
 | `allow_compose` | boolean | no | false | Enable `docker compose` support (unlocks network/volume APIs) |
 | `allow_build` | boolean | no | false | Enable `docker build` support (unlocks build endpoints + auto-allows buildkit image) |
+| `allowed_capabilities` | string[] | no | [] | Linux capabilities permitted on spawned containers (e.g. NET_ADMIN). Empty = all blocked. |
 
 ---
 
@@ -309,9 +310,45 @@ No orphaned resources are left behind.
 - **Interactive `docker run` (without `-d`)** hangs due to stream-close timing on the hijacked attach connection. Use `docker run -d` + `docker logs` instead.
 - **Image pulls** go through the Docker daemon's registries. The proxy validates image names but doesn't control where they're fetched from.
 - **Volumes require compose mode** — `/volumes/*` is blocked by default. Enable `allow_compose: true` if services need shared data.
-- **BuildKit requires legacy builder** — The buildx `docker-container` driver creates a privileged buildkit container, which is blocked by policy. Use `DOCKER_BUILDKIT=0 docker build` (legacy builder) instead. Note: Dockerfiles using `--mount=type=cache` won't work with the legacy builder.
+- **BuildKit requires buildx reset** — If buildx defaults to the docker-container driver (privileged), the plugin's pre-entrypoint resets it on container start. If you see "privileged mode is not allowed" during build, restart the container or run `rm -rf ~/.docker/buildx/instances`.
 - **Locally-built images** are automatically tracked and allowed when `allow_build: true`. Images built via `docker build` or tagged via `docker tag` through the proxy are auto-allowed for `docker run` without needing to match `allowed_images` patterns.
 - **Image tagging** requires `allow_build: true` (the `POST /images/{name}/tag` endpoint is gated behind build mode).
+
+---
+
+## Security: Capabilities
+
+By default, ALL `cap_add` requests are blocked. The `allowed_capabilities` option relaxes this for specific capabilities:
+
+```yaml
+allowed_capabilities:
+  - NET_ADMIN
+  - NET_BIND_SERVICE
+  - SETUID
+  - SETGID
+  - CHOWN
+  - FOWNER
+  - DAC_OVERRIDE
+```
+
+### Risk Assessment
+
+| Capability | Risk | Use Case |
+|-----------|------|----------|
+| `NET_ADMIN` | Medium | iptables routing, network config. Scoped to container's network namespace. |
+| `NET_BIND_SERVICE` | Low | Bind to ports < 1024. |
+| `SETUID` / `SETGID` | Medium | Change user/group IDs. Needed for multi-user containers. |
+| `DAC_OVERRIDE` | Medium-High | Bypass file permission checks within the container. |
+| `CHOWN` / `FOWNER` | Low-Medium | Change file ownership. Needed for setup scripts. |
+| `SYS_ADMIN` | **High** | Broad privileges, potential container escape. Avoid unless absolutely necessary. |
+| `SYS_PTRACE` | Medium-High | Debug processes, read memory. Useful for debugging but information leak risk. |
+
+### Recommendations
+
+- **Never allow** `SYS_ADMIN` unless you fully understand the implications (near-equivalent to privileged mode).
+- **Nested sandbox** (running agent-sandbox compose inside a sandbox) requires: `NET_ADMIN`, `NET_BIND_SERVICE`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `CHOWN`, `FOWNER`.
+- Keep the list as short as possible. Only add capabilities your workload actually needs.
+- `privileged: true` remains permanently blocked regardless of allowed_capabilities.
 
 ## Prerequisites
 

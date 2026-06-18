@@ -493,3 +493,68 @@ func TestDockerProxy_AllowBuild_NoTrackingWhenBuildDisabled(t *testing.T) {
 	// (the endpoint gating prevents builds from happening in the first place)
 	assert.True(t, proxy.policy.ImageAllowed("myapp:latest"))
 }
+
+func TestDockerProxy_AllowedCapabilities_Permitted(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:       []string{"alpine:*"},
+		MaxContainers:       5,
+		AllowedCapabilities: []string{"NET_ADMIN", "NET_BIND_SERVICE"},
+	}
+	// Allowed caps should pass
+	err := policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"NET_ADMIN"},
+	}, 0)
+	assert.NoError(t, err)
+
+	// Multiple allowed caps
+	err = policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"NET_ADMIN", "NET_BIND_SERVICE"},
+	}, 0)
+	assert.NoError(t, err)
+}
+
+func TestDockerProxy_AllowedCapabilities_Blocked(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:       []string{"alpine:*"},
+		MaxContainers:       5,
+		AllowedCapabilities: []string{"NET_ADMIN"},
+	}
+	// Disallowed cap should be blocked
+	err := policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"SYS_ADMIN"},
+	}, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "SYS_ADMIN")
+}
+
+func TestDockerProxy_AllowedCapabilities_EmptyBlocksAll(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:       []string{"alpine:*"},
+		MaxContainers:       5,
+		AllowedCapabilities: []string{},
+	}
+	// Any cap_add should be blocked when list is empty
+	err := policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"NET_ADMIN"},
+	}, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "adding capabilities is not allowed")
+}
+
+func TestDockerProxy_AllowedCapabilities_CaseInsensitive(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:       []string{"alpine:*"},
+		MaxContainers:       5,
+		AllowedCapabilities: []string{"NET_ADMIN"},
+	}
+	// Should match case-insensitively
+	err := policy.ValidateCreate(&CreateRequest{
+		Image:  "alpine:latest",
+		CapAdd: []string{"net_admin"},
+	}, 0)
+	assert.NoError(t, err)
+}
