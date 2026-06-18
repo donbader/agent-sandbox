@@ -152,6 +152,7 @@ func (g *Generator) RunProject(project *config.Project) error {
 // and transformed to be relative to projectDir (the Docker build context).
 func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string) (*AgentResult, error) {
 	resolver := plugin.NewResolver(agentDir, g.bundledFS)
+	resolver.SetFleetDir(g.projectDir)
 	var allContribs []*plugin.Contributions
 	resolved := make(map[string]*resolvedPlugin)
 
