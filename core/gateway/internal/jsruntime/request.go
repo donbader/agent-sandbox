@@ -34,8 +34,10 @@ func NewRequestContext(req *http.Request, w http.ResponseWriter) *RequestContext
 	}
 }
 
-// ToJSObject converts the context into a JS-accessible object.
-func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
+// ToJSObject converts the context into a native goja object.
+// All sub-objects are native *goja.Object to avoid goja reflecting Go maps/structs
+// which can lose method visibility in certain cross-compilation scenarios.
+func (rc *RequestContext) ToJSObject(vm *VM) *goja.Object {
 	headers := make(map[string]string)
 	for k, v := range rc.Request.Header {
 		if len(v) > 0 {
@@ -88,53 +90,57 @@ func (rc *RequestContext) ToJSObject(vm *VM) map[string]any {
 		_ = requestObj.DefineDataProperty(prop, requestObj.Get(prop), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
-	responseObj := map[string]any{
-		// @ts-method ctx.response.status(code: number): void
-		"status": func(call goja.FunctionCall) goja.Value {
-			rc.ResponseStatus = int(call.Argument(0).ToInteger())
-			return goja.Undefined()
-		},
-		// @ts-method ctx.response.header(key: string, value: string): void
-		"header": func(call goja.FunctionCall) goja.Value {
-			key := call.Argument(0).String()
-			val := call.Argument(1).String()
-			rc.ResponseHeaders.Set(key, val)
-			return goja.Undefined()
-		},
-		// @ts-method ctx.response.body(content: string): void
-		"body": func(call goja.FunctionCall) goja.Value {
-			rc.ResponseBody = call.Argument(0).String()
-			return goja.Undefined()
-		},
-	}
+	// Build the response object as a native goja object (not a Go map).
+	responseObj := rt.NewObject()
+	// @ts-method ctx.response.status(code: number): void
+	_ = responseObj.Set("status", func(call goja.FunctionCall) goja.Value {
+		rc.ResponseStatus = int(call.Argument(0).ToInteger())
+		return goja.Undefined()
+	})
+	// @ts-method ctx.response.header(key: string, value: string): void
+	_ = responseObj.Set("header", func(call goja.FunctionCall) goja.Value {
+		key := call.Argument(0).String()
+		val := call.Argument(1).String()
+		rc.ResponseHeaders.Set(key, val)
+		return goja.Undefined()
+	})
+	// @ts-method ctx.response.body(content: string): void
+	_ = responseObj.Set("body", func(call goja.FunctionCall) goja.Value {
+		rc.ResponseBody = call.Argument(0).String()
+		return goja.Undefined()
+	})
 
-	return map[string]any{
-		"request":  requestObj,
-		"response": responseObj,
-		// @ts-method ctx.env(key: string): string | undefined
-		"env": func(call goja.FunctionCall) goja.Value {
-			key := call.Argument(0).String()
-			val := os.Getenv(key)
-			if val == "" {
-				return goja.Undefined()
-			}
-			return rt.ToValue(val)
-		},
-		// @ts-method ctx.abort(status: number, body?: string, headers?: Record<string, string>): void
-		"abort": func(call goja.FunctionCall) goja.Value {
-			rc.AbortStatus = int(call.Argument(0).ToInteger())
-			if len(call.Arguments) > 1 {
-				rc.AbortBody = call.Argument(1).String()
-			}
-			if len(call.Arguments) > 2 {
-				headersVal := call.Argument(2).Export()
-				if m, ok := headersVal.(map[string]any); ok {
-					for k, v := range m {
-						rc.AbortHeaders.Set(k, fmt.Sprintf("%v", v))
-					}
+	// Build the top-level ctx object as a native goja object.
+	ctxObj := rt.NewObject()
+	// @ts-skip (structural wiring)
+	_ = ctxObj.Set("request", requestObj)
+	// @ts-skip (structural wiring)
+	_ = ctxObj.Set("response", responseObj)
+	// @ts-method ctx.env(key: string): string | undefined
+	_ = ctxObj.Set("env", func(call goja.FunctionCall) goja.Value {
+		key := call.Argument(0).String()
+		val := os.Getenv(key)
+		if val == "" {
+			return goja.Undefined()
+		}
+		return rt.ToValue(val)
+	})
+	// @ts-method ctx.abort(status: number, body?: string, headers?: Record<string, string>): void
+	_ = ctxObj.Set("abort", func(call goja.FunctionCall) goja.Value {
+		rc.AbortStatus = int(call.Argument(0).ToInteger())
+		if len(call.Arguments) > 1 {
+			rc.AbortBody = call.Argument(1).String()
+		}
+		if len(call.Arguments) > 2 {
+			headersVal := call.Argument(2).Export()
+			if m, ok := headersVal.(map[string]any); ok {
+				for k, v := range m {
+					rc.AbortHeaders.Set(k, fmt.Sprintf("%v", v))
 				}
 			}
-			return goja.Undefined()
-		},
-	}
+		}
+		return goja.Undefined()
+	})
+
+	return ctxObj
 }

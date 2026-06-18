@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SHIM_VERSION="1.8.0"
+SHIM_VERSION="1.9.0"
 GITHUB_REPO="donbader/agent-sandbox"
 SANDBOX_HOME="${AGENT_SANDBOX_HOME:-$HOME/.agent-sandbox}"
 CACHE_DIR="$SANDBOX_HOME/core"
@@ -162,7 +162,13 @@ if [ -n "$DEV_MODE" ]; then
     [ "$_arg" = "--dev" ] && continue
     set -- "$@" "$_arg"
   done
-  exec "$DEV_BIN" "$@"
+  # If go isn't directly on PATH (e.g. provided by flox), exec under flox
+  # so the CLI can find go for building the gateway binary from source.
+  if command -v go >/dev/null 2>&1; then
+    exec "$DEV_BIN" "$@"
+  else
+    exec flox activate -- "$DEV_BIN" "$@"
+  fi
 fi
 
 # --- Resolve core version ---

@@ -309,11 +309,14 @@ func checkDNATRules(container string) auditCheck {
 			Detail: fmt.Sprintf("cannot read iptables: %v", err),
 		}
 	}
-	if strings.Contains(out, "DNAT") && strings.Contains(out, "tcp dpt:443") {
+	// The entrypoint installs a DNAT rule redirecting all outbound TCP to the
+	// gateway's proxy port (8443). Older setups used a port-specific rule for 443,
+	// newer ones redirect all TCP. Accept either pattern.
+	if strings.Contains(out, "DNAT") && (strings.Contains(out, ":8443") || strings.Contains(out, "tcp dpt:443")) {
 		return auditCheck{
 			Name:   "Traffic interception rules",
 			Passed: true,
-			Detail: "OUTPUT DNAT rule for port 443 active",
+			Detail: "OUTPUT DNAT rule active",
 		}
 	}
 	return auditCheck{

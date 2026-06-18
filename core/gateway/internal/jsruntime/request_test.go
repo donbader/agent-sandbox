@@ -102,6 +102,115 @@ func TestRequestContext_Env(t *testing.T) {
 	assert.True(t, goja.IsUndefined(val))
 }
 
+func TestRequestContext_SetPath(t *testing.T) {
+	req, _ := http.NewRequest("POST", "https://api.telegram.org/botdummy/deleteWebhook", nil)
+	req.Host = "api.telegram.org"
+
+	vm := NewVM()
+	ctx := NewRequestContext(req, nil)
+	require.NoError(t, vm.Set("ctx", ctx.ToJSObject(vm)))
+
+	// This mirrors what telegram-token-rewrite.ts does
+	_, err := vm.RunString(`ctx.request.setPath("/botREAL_TOKEN/deleteWebhook")`)
+	require.NoError(t, err, "setPath should be callable")
+
+	assert.Equal(t, "/botREAL_TOKEN/deleteWebhook", req.URL.Path)
+	assert.Equal(t, "", req.URL.RawPath)
+}
+
+func TestRequestContext_SetPath_ViaExportDefault(t *testing.T) {
+	// Reproduce the exact execution pattern used by the gateway plugin loader:
+	// bundledJS + "\n__handler.default(ctx, options);"
+	req, _ := http.NewRequest("POST", "https://api.telegram.org/botdummy/deleteWebhook", nil)
+	req.Host = "api.telegram.org"
+
+	vm := NewVM()
+	ctx := NewRequestContext(req, nil)
+	require.NoError(t, vm.Set("ctx", ctx.ToJSObject(vm)))
+	require.NoError(t, vm.Set("options", map[string]any{"bot_token": "REAL_TOKEN"}))
+
+	// Simulate esbuild output with __handler wrapper
+	script := `
+var __handler = {default: function(ctx, options) {
+  var token = options.bot_token;
+  if (!token) return;
+  var path = ctx.request.path;
+  var rewritten = path.replace(/^\/bot[^/]*\//, "/bot" + token + "/");
+  if (rewritten !== path) {
+    ctx.request.setPath(rewritten);
+  }
+}};
+__handler.default(ctx, options);
+`
+	_, err := vm.RunString(script)
+	require.NoError(t, err, "setPath should work when called from handler pattern")
+
+	assert.Equal(t, "/botREAL_TOKEN/deleteWebhook", req.URL.Path)
+}
+
+func TestRequestContext_SetPath_FullExecMiddlewarePath(t *testing.T) {
+	// Reproduce the EXACT flow of execMiddleware: NewVM + InjectHostAPIs + real esbuild IIFE
+	req, _ := http.NewRequest("POST", "https://api.telegram.org/botdummy/deleteWebhook", nil)
+	req.Host = "api.telegram.org"
+
+	vm := NewVM()
+	hostCfg := &HostAPIConfig{DataDir: t.TempDir()}
+	InjectHostAPIs(vm, hostCfg)
+
+	reqCtx := NewRequestContext(req, nil)
+	require.NoError(t, vm.Set("ctx", reqCtx.ToJSObject(vm)))
+	require.NoError(t, vm.Set("options", map[string]any{"bot_token": "REAL_TOKEN"}))
+
+	// Real esbuild IIFE output (same format as production)
+	bundledJS := `var __handler = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+  var telegram_token_rewrite_exports = {};
+  __export(telegram_token_rewrite_exports, {
+    default: () => telegram_token_rewrite_default
+  });
+  var handler = (ctx, options) => {
+    const realToken = options.bot_token;
+    if (!realToken) return;
+    gw.secrets.register(realToken);
+    const path = ctx.request.path;
+    const idx = path.indexOf("/bot");
+    if (idx !== -1) {
+      const rest = path.substring(idx + 4);
+      const slashIdx = rest.indexOf("/");
+      if (slashIdx !== -1) {
+        const method = rest.substring(slashIdx);
+        ctx.request.setPath(path.substring(0, idx) + "/bot" + realToken + method);
+      }
+    }
+  };
+  var telegram_token_rewrite_default = handler;
+  return __toCommonJS(telegram_token_rewrite_exports);
+})();`
+
+	_, err := vm.RunString(bundledJS + "\n__handler.default(ctx, options);")
+	require.NoError(t, err, "setPath should work in full execMiddleware reproduction")
+
+	assert.Equal(t, "/botREAL_TOKEN/deleteWebhook", req.URL.Path)
+	assert.Equal(t, "", req.URL.RawPath)
+	assert.Contains(t, hostCfg.RegisteredSecrets, "REAL_TOKEN")
+}
+
 func TestRequestContext_RouteHandler(t *testing.T) {
 	req, _ := http.NewRequest("GET", "http://localhost:8080/plugins/test/hello", nil)
 	req.Host = "localhost:8080"
