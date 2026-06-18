@@ -334,6 +334,12 @@ var buildEndpoints = []endpointRule{
 	{"POST", regexp.MustCompile(`^/build$`)},
 	{"GET", regexp.MustCompile(`^/images/.+/get$`)},
 	{"POST", regexp.MustCompile(`^/images/load$`)},
+	// Tagging images (needed after docker build to assign name:tag)
+	{"POST", regexp.MustCompile(`^/images/.+/tag$`)},
+	// Deleting images (cleanup after build)
+	{"DELETE", regexp.MustCompile(`^/images/.+$`)},
+	// Build history/cache inspection
+	{"GET", regexp.MustCompile(`^/images/.+/history$`)},
 }
 
 // composeEndpoints are only allowed when AllowCompose is true.

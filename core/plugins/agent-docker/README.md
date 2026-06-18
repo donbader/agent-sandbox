@@ -61,6 +61,7 @@ Every request passes through the proxy, which:
 | `cpus` | string | no | "2" | CPU limit per container |
 | `pids` | number | no | 256 | PID limit per container |
 | `allow_compose` | boolean | no | false | Enable `docker compose` support (unlocks network/volume APIs) |
+| `allow_build` | boolean | no | false | Enable `docker build` support (unlocks build endpoints + auto-allows buildkit image) |
 
 ---
 
@@ -209,6 +210,57 @@ All other security controls remain active in compose mode. Additionally:
 
 ---
 
+## Build Mode
+
+When `allow_build: true`, the agent can build Docker images using `docker build`:
+
+```yaml
+installations:
+  - plugin: "@builtin/agent-docker"
+    options:
+      allowed_images:
+        - "node:20-*"
+      allow_build: true
+```
+
+### How it works
+
+Build mode unlocks these endpoints:
+
+| Endpoint | Purpose |
+|----------|--------|
+| `GET /info` | Capability detection (buildx uses this) |
+| `POST /build` | Legacy Docker build (sends build context to daemon) |
+| `GET /images/{name}/get` | Image export |
+| `POST /images/load` | Image import |
+| `POST /images/{name}/tag` | Image tagging |
+
+Additionally, `moby/buildkit:*` images are auto-allowed when build mode is active (needed by the buildx `docker-container` driver).
+
+### Usage
+
+```bash
+# Build using legacy builder (recommended for proxy environments)
+DOCKER_BUILDKIT=0 docker build -t node:20-myapp .
+
+# Tag the image to match your allowlist pattern
+# (so you can run it through the proxy)
+docker build -t node:20-myapp -f Dockerfile .
+docker run -d --name myapp node:20-myapp
+```
+
+### Limitations
+
+The buildx `docker-container` driver creates a **privileged** buildkit container, which the proxy blocks (privileged mode is never allowed). This means:
+
+- `docker buildx build` with the default driver won't work
+- Dockerfiles using `RUN --mount=type=cache` require BuildKit and won't work with the legacy builder
+- Use `DOCKER_BUILDKIT=0 docker build` for builds through the proxy
+
+Future work: support rootless buildkit (`--oci-worker-no-process-sandbox`) to enable full BuildKit without privileged mode.
+
+---
+
 ## Usage Patterns
 
 ### Database for testing
@@ -257,6 +309,9 @@ No orphaned resources are left behind.
 - **Interactive `docker run` (without `-d`)** hangs due to stream-close timing on the hijacked attach connection. Use `docker run -d` + `docker logs` instead.
 - **Image pulls** go through the Docker daemon's registries. The proxy validates image names but doesn't control where they're fetched from.
 - **Volumes require compose mode** — `/volumes/*` is blocked by default. Enable `allow_compose: true` if services need shared data.
+- **BuildKit requires legacy builder** — The buildx `docker-container` driver creates a privileged buildkit container, which is blocked by policy. Use `DOCKER_BUILDKIT=0 docker build` (legacy builder) instead. Note: Dockerfiles using `--mount=type=cache` won't work with the legacy builder.
+- **Locally-built images** must match an `allowed_images` pattern to be run. Tag your built images with a name matching your allowlist (e.g. `docker build -t node:20-myapp .`).
+- **Image tagging** requires `allow_build: true` (the `POST /images/{name}/tag` endpoint is gated behind build mode).
 
 ## Prerequisites
 
