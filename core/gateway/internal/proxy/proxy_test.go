@@ -53,7 +53,7 @@ func TestProxy_HTTPDetection(t *testing.T) {
 	upAddr := strings.TrimPrefix(upstream.URL, "http://")
 	host, port, _ := net.SplitHostPort(upAddr)
 
-	handler := NewHTTPHandler([]HTTPService{{Host: host, Port: port}})
+	handler := NewHTTPHandler([]HTTPService{{Host: host, Port: port}}, nil)
 	p := New(&Config{Listen: "127.0.0.1:0"})
 	p.RegisterHTTPHandler(handler)
 
@@ -177,7 +177,7 @@ func TestHTTPHandler_MiddlewareApplied(t *testing.T) {
 	defer upstream.Close()
 
 	upAddr := strings.TrimPrefix(upstream.URL, "http://")
-	handler := NewHTTPHandler([]HTTPService{})
+	handler := NewHTTPHandler([]HTTPService{}, nil)
 	handler.services["injected.local"] = upAddr
 
 	client, server := net.Pipe()
@@ -213,7 +213,7 @@ func TestHTTPHandler_UnknownHost_ForwardsWithHostHeader(t *testing.T) {
 	defer upstream.Close()
 
 	upAddr := strings.TrimPrefix(upstream.URL, "http://")
-	handler := NewHTTPHandler([]HTTPService{})
+	handler := NewHTTPHandler([]HTTPService{}, nil)
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -238,7 +238,7 @@ func TestHTTPHandler_UnknownHost_ForwardsWithHostHeader(t *testing.T) {
 }
 
 func TestHTTPHandler_MissingHost_Returns400(t *testing.T) {
-	handler := NewHTTPHandler([]HTTPService{})
+	handler := NewHTTPHandler([]HTTPService{}, nil)
 
 	client, server := net.Pipe()
 
@@ -290,7 +290,7 @@ func TestProxy_UnknownProtocol_Blocked(t *testing.T) {
 	// With HTTP handler — unknown protocol should still be blocked, not forwarded
 	t.Run("with handler", func(t *testing.T) {
 		p := New(&Config{Listen: "127.0.0.1:0"})
-		p.RegisterHTTPHandler(NewHTTPHandler([]HTTPService{}))
+		p.RegisterHTTPHandler(NewHTTPHandler([]HTTPService{}, nil))
 
 		client, server := net.Pipe()
 
@@ -323,7 +323,7 @@ func TestProxy_HTTP_StillHandled(t *testing.T) {
 	upAddr := strings.TrimPrefix(upstream.URL, "http://")
 	host, port, _ := net.SplitHostPort(upAddr)
 
-	handler := NewHTTPHandler([]HTTPService{{Host: host, Port: port}})
+	handler := NewHTTPHandler([]HTTPService{{Host: host, Port: port}}, nil)
 	p := New(&Config{Listen: "127.0.0.1:0"})
 	p.RegisterHTTPHandler(handler)
 

@@ -27,6 +27,11 @@ type Handler struct {
 	caCert         tls.Certificate
 	certCache      *CertCache
 	transportCache sync.Map // keyed by serverName → *http.Transport
+
+	// DenyPathChecker is an optional callback for egress path filtering.
+	// Returns true if the request should be blocked.
+	// Set by the gateway main.go wiring after construction.
+	DenyPathChecker func(host, method, path string) bool
 }
 
 // NewHandler creates a MITM handler for the given domains.
@@ -92,6 +97,21 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		// Log the request BEFORE rewriting to avoid leaking injected secrets.
 		originalPath := req.URL.Path
 		contentLength := req.ContentLength
+
+		// Check deny_paths before processing
+		if h.DenyPathChecker != nil && h.DenyPathChecker(serverName, req.Method, originalPath) {
+			slog.Warn("mitm: path blocked", "host", serverName, "method", req.Method, "path", originalPath)
+			blockResp := &http.Response{
+				StatusCode: http.StatusForbidden,
+				ProtoMajor: 1,
+				ProtoMinor: 1,
+				Header:     http.Header{"Content-Type": {"text/plain"}},
+				Body:       io.NopCloser(strings.NewReader("path blocked by policy")),
+			}
+			_ = blockResp.Write(tlsConn)
+			continue
+		}
+
 		ctx, rewritten := applyMiddlewareWithContext(req)
 		slog.Debug("request", "host", serverName, "method", req.Method, "path", originalPath, "rewritten", rewritten, "content_length", contentLength)
 

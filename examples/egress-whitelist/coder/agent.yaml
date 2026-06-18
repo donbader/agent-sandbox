@@ -7,10 +7,20 @@ runtime:
   entrypoint: ["sleep", "infinity"]
 gateway:
   egress:
+    # LLM gateway — inject auth header
     - hosts: ["agent-gateway.stx-ai.net"]
       headers:
         Authorization: "Bearer ${STX_LLM_GATEWAY_API_KEY}"
-    - hosts: ["*"]
+
+    # Package registries — allow without credentials
+    - hosts: ["registry.npmjs.org", "*.cloudfront.net", "pypi.org", "files.pythonhosted.org"]
+
+    # GitHub — needed for git operations
+    - hosts: ["*.github.com", "github.com"]
+
+    # Block everything else (strict whitelist)
+    # Uncomment the line below to allow all other traffic instead:
+    # - hosts: ["*"]
 installations:
   - plugin: "@builtin/home-override"
     options:

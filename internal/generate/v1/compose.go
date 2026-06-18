@@ -454,9 +454,18 @@ func namespaceVolumes(agentName string, volumes []string) []string {
 func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) []string {
 	seen := map[string]bool{}
 
-	// From user gateway config
+	// From user gateway config (legacy services)
 	for _, svc := range cfg.Gateway.Services {
 		for _, value := range svc.Headers {
+			if ev := envvar.Extract(value); ev != "" {
+				seen[ev] = true
+			}
+		}
+	}
+
+	// From egress rules (new format)
+	for _, rule := range cfg.Gateway.Egress {
+		for _, value := range rule.Headers {
 			if ev := envvar.Extract(value); ev != "" {
 				seen[ev] = true
 			}

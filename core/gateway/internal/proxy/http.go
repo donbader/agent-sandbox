@@ -16,10 +16,11 @@ import (
 // HTTPHandler proxies plain HTTP requests, applying middleware for header injection.
 type HTTPHandler struct {
 	services map[string]string // host → host:port mapping
+	egress   *EgressFilter
 }
 
 // NewHTTPHandler creates an HTTP proxy handler for the given services.
-func NewHTTPHandler(services []HTTPService) *HTTPHandler {
+func NewHTTPHandler(services []HTTPService, egress *EgressFilter) *HTTPHandler {
 	svcMap := make(map[string]string, len(services))
 	for _, s := range services {
 		port := s.Port
@@ -30,6 +31,7 @@ func NewHTTPHandler(services []HTTPService) *HTTPHandler {
 	}
 	return &HTTPHandler{
 		services: svcMap,
+		egress:   egress,
 	}
 }
 
@@ -59,8 +61,26 @@ func (h *HTTPHandler) Handle(clientConn net.Conn, initialData []byte) {
 
 		// Determine upstream target from Host header
 		host := req.Host
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
+		if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+			host = hostOnly
+		}
+
+		// Check egress rules
+		if h.egress != nil && h.egress.HasRules() {
+			decision := h.egress.AllowHost(host)
+			if !decision.Allowed {
+				slog.Warn("http: egress blocked", "host", host, "reason", "denied_by_policy")
+				sendHTTPError(clientConn, http.StatusForbidden, "egress blocked by policy")
+				return
+			}
+			// Check deny_paths if the rule has them
+			if decision.Rule != nil && len(decision.Rule.DenyPaths) > 0 {
+				if !h.egress.AllowPath(decision.Rule, req.Method, req.URL.Path) {
+					slog.Warn("http: path blocked", "host", host, "method", req.Method, "path", req.URL.Path)
+					sendHTTPError(clientConn, http.StatusForbidden, "path blocked by policy")
+					return
+				}
+			}
 		}
 
 		target, known := h.services[host]
