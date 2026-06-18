@@ -53,6 +53,7 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 			AllowBuild:          cfg.AllowBuild,
 			BuiltImages:         builtImages,
 			AllowedCapabilities: cfg.AllowedCapabilities,
+			AllowedBindPaths:    cfg.AllowedBindPaths,
 		},
 		mutator:     NewMutator(cfg),
 		cfg:         cfg,

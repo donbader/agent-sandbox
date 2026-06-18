@@ -558,3 +558,43 @@ func TestDockerProxy_AllowedCapabilities_CaseInsensitive(t *testing.T) {
 	}, 0)
 	assert.NoError(t, err)
 }
+
+func TestDockerProxy_AllowedBindPaths_Permitted(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:    []string{"alpine:*"},
+		MaxContainers:    5,
+		AllowedBindPaths: []string{"/tmp/", "/home/agent/"},
+	}
+	err := policy.ValidateCreate(&CreateRequest{
+		Image: "alpine:latest",
+		Binds: []string{"/tmp/myproject/.build/config.yaml:/etc/config.yaml:ro"},
+	}, 0)
+	assert.NoError(t, err)
+}
+
+func TestDockerProxy_AllowedBindPaths_Blocked(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:    []string{"alpine:*"},
+		MaxContainers:    5,
+		AllowedBindPaths: []string{"/tmp/"},
+	}
+	err := policy.ValidateCreate(&CreateRequest{
+		Image: "alpine:latest",
+		Binds: []string{"/etc/shadow:/etc/shadow:ro"},
+	}, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "/etc/shadow")
+}
+
+func TestDockerProxy_AllowedBindPaths_EmptyBlocksAll(t *testing.T) {
+	policy := &Policy{
+		AllowedImages:    []string{"alpine:*"},
+		MaxContainers:    5,
+		AllowedBindPaths: []string{},
+	}
+	err := policy.ValidateCreate(&CreateRequest{
+		Image: "alpine:latest",
+		Binds: []string{"/tmp/foo:/bar"},
+	}, 0)
+	assert.Error(t, err)
+}

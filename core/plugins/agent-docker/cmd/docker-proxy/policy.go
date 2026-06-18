@@ -13,6 +13,7 @@ type Policy struct {
 	AllowBuild          bool
 	BuiltImages         map[string]bool
 	AllowedCapabilities []string
+	AllowedBindPaths    []string
 }
 
 // CreateRequest is the subset of Docker container create fields we validate.
@@ -83,7 +84,9 @@ func (p *Policy) ValidateCreate(req *CreateRequest, currentCount int) error {
 	for _, bind := range req.Binds {
 		src := strings.SplitN(bind, ":", 2)[0]
 		if strings.HasPrefix(src, "/") {
-			return &PolicyError{Code: 403, Message: fmt.Sprintf("host bind mount %q is not allowed", src)}
+			if !p.bindPathAllowed(src) {
+				return &PolicyError{Code: 403, Message: fmt.Sprintf("host bind mount %q is not allowed", src)}
+			}
 		}
 	}
 	if currentCount >= p.MaxContainers {
@@ -116,6 +119,16 @@ func (p *Policy) capAllowed(cap string) bool {
 	normalized := strings.TrimPrefix(strings.ToUpper(cap), "CAP_")
 	for _, allowed := range p.AllowedCapabilities {
 		if strings.EqualFold(strings.TrimPrefix(allowed, "CAP_"), normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+// bindPathAllowed checks if a host path is under any allowed prefix.
+func (p *Policy) bindPathAllowed(path string) bool {
+	for _, prefix := range p.AllowedBindPaths {
+		if strings.HasPrefix(path, prefix) {
 			return true
 		}
 	}
