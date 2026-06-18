@@ -42,6 +42,7 @@ func LoadProject(dir string) (*Project, error) {
 
 		cfg.Installations = MergeInstallations(fleet.Shared.Installations, cfg.Installations)
 		cfg.Gateway.Services = MergeGatewayServices(fleet.Shared.Gateway.Services, cfg.Gateway.Services)
+		cfg.Gateway.Egress = MergeEgressRules(fleet.Shared.Gateway.Egress, cfg.Gateway.Egress)
 
 		agents = append(agents, Agent{
 			Name:   cfg.Name,

@@ -17,12 +17,14 @@ type Proxy struct {
 	handlers    []RequestHandler
 	httpHandler *HTTPHandler
 	listener    net.Listener
+	egress      *EgressFilter
 }
 
 // New creates a new proxy with the given config.
 func New(cfg *Config) *Proxy {
 	return &Proxy{
 		config: cfg,
+		egress: NewEgressFilter(cfg.EgressRules),
 	}
 }
 
@@ -93,6 +95,15 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	if serverName == "" {
 		slog.Debug("no SNI in connection", "remote_addr", clientConn.RemoteAddr())
 		return
+	}
+
+	// Check egress rules before processing
+	if p.egress.HasRules() {
+		decision := p.egress.AllowHost(serverName)
+		if !decision.Allowed {
+			slog.Warn("egress blocked", "sni", serverName, "reason", "denied_by_policy")
+			return
+		}
 	}
 
 	// Check if any handler wants to intercept this host

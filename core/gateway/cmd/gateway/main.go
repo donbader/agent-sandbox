@@ -114,17 +114,34 @@ func main() {
 			os.Exit(1)
 		}
 
-		handler := mitm.NewHandler(cfg.MITMDomains, caCert)
-		p.RegisterHandler(handler)
+		mitmHandler := mitm.NewHandler(cfg.MITMDomains, caCert)
+
+		// Wire deny_paths checking from egress rules into MITM handler
+		if len(cfg.EgressRules) > 0 {
+			egressFilter := proxy.NewEgressFilter(cfg.EgressRules)
+			mitmHandler.DenyPathChecker = func(host, method, path string) bool {
+				decision := egressFilter.AllowHost(host)
+				if decision.Rule != nil && len(decision.Rule.DenyPaths) > 0 {
+					return !egressFilter.AllowPath(decision.Rule, method, path)
+				}
+				return false
+			}
+		}
+
+		p.RegisterHandler(mitmHandler)
 		slog.Info("mitm enabled", "domains", cfg.MITMDomains)
 	}
 
 	// Register HTTP proxy handler (for plain HTTP services)
 	{
-		httpHandler := proxy.NewHTTPHandler(cfg.HTTPServices)
+		egressFilter := proxy.NewEgressFilter(cfg.EgressRules)
+		httpHandler := proxy.NewHTTPHandler(cfg.HTTPServices, egressFilter)
 		p.RegisterHTTPHandler(httpHandler)
 		if len(cfg.HTTPServices) > 0 {
 			slog.Info("http proxy enabled", "services", cfg.HTTPServices)
+		}
+		if len(cfg.EgressRules) > 0 {
+			slog.Info("egress rules loaded", "count", len(cfg.EgressRules))
 		}
 	}
 

@@ -69,7 +69,8 @@ type RuntimeConfig struct {
 
 // GatewayConfig holds gateway proxy configuration.
 type GatewayConfig struct {
-	Services  []GatewayServiceEntry `yaml:"services" json:"services,omitempty" jsonschema:"title=services,description=External services proxied through the gateway"`
+	Egress   []EgressRule          `yaml:"egress" json:"egress,omitempty" jsonschema:"title=egress,description=Ordered egress access control rules. First match wins. No match = deny."`
+	Services []GatewayServiceEntry `yaml:"services" json:"services,omitempty" jsonschema:"title=services,description=DEPRECATED: use gateway.egress instead. External services proxied through the gateway."`
 }
 
 // GatewayServiceEntry represents an allowed upstream service.
@@ -131,7 +132,14 @@ func (c *Config) Validate() error {
 		ve.Add(fmt.Sprintf("runtime_engine must be 'docker' or 'podman', got %q", c.RuntimeEngine))
 	}
 
-	// Validate service URLs
+	// Validate egress rules
+	if len(c.Gateway.Egress) > 0 {
+		for _, msg := range ValidateEgressRules(c.Gateway.Egress) {
+			ve.Add(msg)
+		}
+	}
+
+	// Validate service URLs (legacy format)
 	for i, svc := range c.Gateway.Services {
 		if svc.URL == "" {
 			ve.Add(fmt.Sprintf("gateway.services[%d]: url is required", i))
@@ -235,6 +243,17 @@ func MergeGatewayServices(shared, perAgent []GatewayServiceEntry) []GatewayServi
 	// Append all per-agent services
 	merged = append(merged, perAgent...)
 	return merged
+}
+
+// MergeEgressRules merges shared egress rules with per-agent egress rules.
+// Per-agent rules fully override shared rules when present (not additive).
+// Rationale: egress rules are ordered and order matters (first-match-wins),
+// so merging additively could produce surprising behavior.
+func MergeEgressRules(shared, perAgent []EgressRule) []EgressRule {
+	if len(perAgent) > 0 {
+		return perAgent
+	}
+	return shared
 }
 
 

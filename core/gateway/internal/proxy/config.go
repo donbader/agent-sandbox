@@ -16,6 +16,7 @@ type Config struct {
 	HTTPServices []HTTPService `yaml:"http_services"` // plain HTTP services to proxy
 	PortForwards []PortForward `yaml:"port_forwards"` // TCP port forwards to agent container
 	AuthHeaders  []AuthHeader  `yaml:"auth_headers"`  // header injection rules from config
+	EgressRules  []EgressRule  `yaml:"egress_rules"`  // ordered egress access control rules
 }
 
 // AuthHeader defines a header to inject on requests to a specific domain.
@@ -35,6 +36,14 @@ type HTTPService struct {
 type PortForward struct {
 	Listen string `yaml:"listen"` // listen address (e.g., ":1455")
 	Target string `yaml:"target"` // target address (e.g., "coder:1455")
+}
+
+// EgressRule defines an egress access control rule at the gateway runtime level.
+type EgressRule struct {
+	Hosts     []string          `yaml:"hosts"`                // host patterns (domain globs, CIDRs, "*")
+	Deny      bool              `yaml:"deny,omitempty"`       // if true, block matching traffic
+	Headers   map[string]string `yaml:"headers,omitempty"`    // headers to inject (implies allow + MITM)
+	DenyPaths []string          `yaml:"deny_paths,omitempty"` // URL path patterns to block
 }
 
 // RequestHandler intercepts connections to specific hosts.
