@@ -209,5 +209,6 @@ func TestInjectInitWrapper_WithEntrypointAndCmd(t *testing.T) {
 	// New entrypoint is init wrapper
 	ep, _ := body["Entrypoint"].([]any)
 	assert.Equal(t, "/bin/sh", ep[0])
-	assert.Contains(t, ep[2].(string), "exec \"$@\"")
+	initScript, _ := ep[2].(string)
+	assert.Contains(t, initScript, "exec \"$@\"")
 }
