@@ -92,8 +92,7 @@ func auditAgent(cfg *config.Config, projectName, dir string) []auditCheck {
 	checks = append(checks, checkDNATRules(agentContainer))
 	checks = append(checks, checkDefaultRoute(agentContainer))
 	checks = append(checks, checkNoDirectEgress(agentContainer))
-	checks = append(checks, checkNetworkIsolation(agentContainer, gatewayContainer))
-	checks = append(checks, checkNetworkIsolation(agentContainer, projectName))
+	checks = append(checks, checkNetworkIsolation(projectName))
 
 	return checks
 }
@@ -427,7 +426,7 @@ func checkNoDirectEgress(container string) auditCheck {
 
 // checkNetworkIsolation verifies ALL containers (except gateway) are only on internal networks.
 // Only the gateway should bridge to non-internal (external) networks.
-func checkNetworkIsolation(container, projectName string) auditCheck {
+func checkNetworkIsolation(projectName string) auditCheck {
 	rt := runtimeFromEnv()
 
 	// List all containers in this compose project.
@@ -489,55 +488,6 @@ func checkNetworkIsolation(container, projectName string) auditCheck {
 		Name:   "Network isolation",
 		Passed: true,
 		Detail: "all non-gateway containers are on internal-only networks",
-	}
-}
-
-// checkNetworkIsolation verifies that all containers except the gateway are only
-// connected to internal Docker networks. This prevents accidental exposure of
-// agent containers to the host or external networks.
-func checkNetworkIsolation(agentContainer, gatewayContainer string) auditCheck {
-	rt := runtimeFromEnv()
-
-	// Get networks the agent is connected to.
-	// Format: {{json .NetworkSettings.Networks}} returns a JSON map of network names.
-	out, err := exec.Command(rt, "inspect", "-f", `{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}`, agentContainer).Output()
-	if err != nil {
-		return auditCheck{
-			Name:   "Network isolation",
-			Passed: false,
-			Detail: fmt.Sprintf("cannot inspect agent container networks: %v", err),
-		}
-	}
-
-	var nonInternalNetworks []string
-	for _, network := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if network == "" {
-			continue
-		}
-		// Check if this network is internal
-		netOut, err := exec.Command(rt, "network", "inspect", "-f", "{{.Internal}}", network).Output()
-		if err != nil {
-			// If we can't inspect, flag it as suspicious
-			nonInternalNetworks = append(nonInternalNetworks, network+" (inspect failed)")
-			continue
-		}
-		if strings.TrimSpace(string(netOut)) != "true" {
-			nonInternalNetworks = append(nonInternalNetworks, network)
-		}
-	}
-
-	if len(nonInternalNetworks) > 0 {
-		return auditCheck{
-			Name:   "Network isolation",
-			Passed: false,
-			Detail: fmt.Sprintf("agent is on non-internal network(s): %s — only gateway should have external access", strings.Join(nonInternalNetworks, ", ")),
-		}
-	}
-
-	return auditCheck{
-		Name:   "Network isolation",
-		Passed: true,
-		Detail: "agent is only connected to internal networks",
 	}
 }
 
