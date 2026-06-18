@@ -209,10 +209,10 @@ func (dp *DockerProxy) resolveImageDefaults(body map[string]any) {
 		return
 	}
 
-	// Only resolve if Entrypoint AND Cmd are both missing
-	_, hasEP := body["Entrypoint"]
-	_, hasCmd := body["Cmd"]
-	if hasEP && hasCmd {
+	// Only resolve if Entrypoint AND Cmd are both present and non-nil
+	ep, _ := body["Entrypoint"].([]any)
+	cmd, _ := body["Cmd"].([]any)
+	if len(ep) > 0 && len(cmd) > 0 {
 		return
 	}
 
@@ -243,14 +243,14 @@ func (dp *DockerProxy) resolveImageDefaults(body map[string]any) {
 		return
 	}
 
-	if !hasEP && len(imgInfo.Config.Entrypoint) > 0 {
+	if len(ep) == 0 && len(imgInfo.Config.Entrypoint) > 0 {
 		ep := make([]any, len(imgInfo.Config.Entrypoint))
 		for i, s := range imgInfo.Config.Entrypoint {
 			ep[i] = s
 		}
 		body["Entrypoint"] = ep
 	}
-	if !hasCmd && len(imgInfo.Config.Cmd) > 0 {
+	if len(cmd) == 0 && len(imgInfo.Config.Cmd) > 0 {
 		cmd := make([]any, len(imgInfo.Config.Cmd))
 		for i, s := range imgInfo.Config.Cmd {
 			cmd[i] = s
