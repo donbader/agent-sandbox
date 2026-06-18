@@ -77,20 +77,30 @@ func handleMigration(agent config.Agent, autoMigrate bool) error {
 	cfg := agent.Config
 
 	fmt.Fprintf(os.Stderr, "\n⚠️  Agent %q uses deprecated gateway.services format.\n", cfg.Name)
-	fmt.Fprintf(os.Stderr, "   The new gateway.egress format provides whitelist/blacklist control.\n\n")
+	fmt.Fprintf(os.Stderr, "   The new gateway.egress format provides whitelist/blacklist control.\n")
+	fmt.Fprintf(os.Stderr, "   Run with --migrate to convert automatically.\n\n")
 
 	// Show what the migration would look like
 	rules := config.MigrateServicesToEgress(cfg.Gateway.Services)
+
+	if autoMigrate {
+		return applyMigration(agent, rules)
+	}
+
+	// Only prompt interactively if stdin is a terminal
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		// Not a TTY (CI, piped input) — skip migration, just warn
+		fmt.Fprintf(os.Stderr, "   (non-interactive: skipping migration)\n")
+		return nil
+	}
+
 	fmt.Fprintf(os.Stderr, "   Equivalent gateway.egress config:\n\n")
 	migrated := config.FormatEgressYAML(rules)
 	for _, line := range strings.Split(migrated, "\n") {
 		fmt.Fprintf(os.Stderr, "   %s\n", line)
 	}
 	fmt.Fprintln(os.Stderr)
-
-	if autoMigrate {
-		return applyMigration(agent, rules)
-	}
 
 	fmt.Fprintf(os.Stderr, "   Migrate %s? [Y/n] ", filepath.Join(agent.Dir, "agent.yaml"))
 	reader := bufio.NewReader(os.Stdin)
@@ -152,6 +162,11 @@ func applyMigration(agent config.Agent, rules []config.EgressRule) error {
 			// Find next line that starts at indent level <= 2 (same level as "  services:")
 			endOffset := findBlockEnd(restAfterSvc, 4) // services entries are at 4+ spaces
 			absEnd := absStart + len("  services:") + endOffset
+
+			// Bounds safety
+			if absEnd > len(content) {
+				absEnd = len(content)
+			}
 
 			newContent := content[:absStart] + sb.String() + content[absEnd:]
 			if err := os.WriteFile(agentYAML, []byte(newContent), 0644); err != nil {
