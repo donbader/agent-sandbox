@@ -314,6 +314,66 @@ When the sandbox shuts down, the proxy receives SIGTERM and:
 
 No orphaned resources are left behind.
 
+## Volume Sharing (DooD)
+
+In Docker-out-of-Docker mode, spawned containers are **sibling containers** — managed by the same host daemon. Bind mount paths resolve against the **host filesystem**, not the agent container's.
+
+The proxy solves this by automatically translating bind mounts into **volume-subpath mounts**:
+
+```
+Agent runs:  docker run -v /home/agent/workspace/src:/app myimage
+Proxy sees:  Binds=["/home/agent/workspace/src:/app"]
+Translates:  volume "agent-home" mounted at /app with subpath "workspace/src"
+```
+
+### How it works
+
+1. At startup, the proxy inspects the agent container's named volume mounts
+2. On container create, bind mounts matching a known volume are translated to volume-subpath mounts
+3. Paths not under any known volume are blocked with a clear error
+
+### What's shareable
+
+| Path | Shareable? | Why |
+|------|-----------|-----|
+| `/home/agent/*` | ✅ Yes | On named volume (home-override plugin with `volume: true`) |
+| `/nix/*` | ✅ Yes | On named volume (flox plugin with `cache: true`) |
+| Any path on a named volume | ✅ Yes | Auto-discovered |
+| `/tmp/*`, `/usr/*`, `/etc/*` | ❌ No | Container image/writable layer — not on a volume |
+
+### Compose files work transparently
+
+```yaml
+# docker-compose.yml (run by agent inside /home/agent/workspace/project/)
+services:
+  app:
+    image: node:20
+    volumes:
+      - ./src:/app           # ✅ Translated to volume mount
+      - ./config.yaml:/etc/app/config.yaml:ro  # ✅ Works
+    command: npm test
+```
+
+### Making additional paths shareable
+
+To share paths not already on a volume, mount them as named volumes in your agent's compose configuration. The `@builtin/home-override` plugin with `volume: true` already handles `/home/agent`.
+
+### Requirements
+
+- **Docker Engine 26.0+** (API 1.45+) — volume-subpath was introduced in March 2024
+- Agent container paths must be on named Docker volumes
+- The proxy returns a clear error if Docker is too old or the path isn't on a volume
+
+### If you need to share non-volume files
+
+For one-off files not on a named volume, use `docker cp`:
+
+```bash
+docker cp /etc/myconfig.yaml mycontainer:/app/config.yaml
+```
+
+---
+
 ## Known Limitations
 
 - **Interactive `docker run` (without `-d`)** hangs due to stream-close timing on the hijacked attach connection. Use `docker run -d` + `docker logs` instead.

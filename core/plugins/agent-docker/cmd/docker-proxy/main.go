@@ -31,6 +31,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize volume translator (discovers agent mounts, checks Docker version)
+	if cfg.AllowCompose {
+		proxy.volumes = proxy.NewVolumeTranslator()
+	}
+
 	server := &http.Server{
 		Addr:    ":2375",
 		Handler: proxy,

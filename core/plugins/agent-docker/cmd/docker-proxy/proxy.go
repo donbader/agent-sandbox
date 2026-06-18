@@ -21,6 +21,7 @@ type DockerProxy struct {
 	mutator  *Mutator
 	cfg      *ProxyConfig
 	upstream *httputil.ReverseProxy
+	volumes  *VolumeTranslator
 	mu       sync.Mutex
 	ids         map[string]bool   // container IDs owned by this sandbox (for counting)
 	tracked     map[string]bool   // all lookup keys (IDs + namespaced names) for ownership checks
@@ -139,6 +140,14 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+
+	// Translate host bind mounts to volume-subpath mounts (DooD support)
+	if dp.volumes != nil {
+		if err := dp.translateBindMounts(body); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 	}
 
 	createReq := extractCreateRequest(body)
