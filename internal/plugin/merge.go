@@ -18,7 +18,8 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 		merged.Runtime.ExtraBuilds = append(merged.Runtime.ExtraBuilds, c.Runtime.ExtraBuilds...)
 		merged.Runtime.PreEntrypoint = append(merged.Runtime.PreEntrypoint, c.Runtime.PreEntrypoint...)
 		merged.Runtime.Ports = append(merged.Runtime.Ports, c.Runtime.Ports...)
-		merged.Runtime.Volumes = append(merged.Runtime.Volumes, c.Runtime.Volumes...)
+		merged.Runtime.NamespacedVolumes = append(merged.Runtime.NamespacedVolumes, c.Runtime.NamespacedVolumes...)
+		merged.Runtime.RawVolumes = append(merged.Runtime.RawVolumes, c.Runtime.RawVolumes...)
 		if len(c.Runtime.Environment) > 0 {
 			if merged.Runtime.Environment == nil {
 				merged.Runtime.Environment = make(map[string]string)
@@ -35,7 +36,8 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 			merged.Runtime.SkipUserns = true
 		}
 		merged.Gateway.Services = append(merged.Gateway.Services, c.Gateway.Services...)
-		merged.Gateway.Volumes = append(merged.Gateway.Volumes, c.Gateway.Volumes...)
+		merged.Gateway.NamespacedVolumes = append(merged.Gateway.NamespacedVolumes, c.Gateway.NamespacedVolumes...)
+		merged.Gateway.RawVolumes = append(merged.Gateway.RawVolumes, c.Gateway.RawVolumes...)
 		merged.Gateway.Routes = append(merged.Gateway.Routes, c.Gateway.Routes...)
 		merged.Gateway.Middlewares = append(merged.Gateway.Middlewares, c.Gateway.Middlewares...)
 		maps.Copy(merged.Sidecar.Services, c.Sidecar.Services)

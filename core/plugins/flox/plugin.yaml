@@ -1,10 +1,10 @@
 name: flox
 options:
-  cache:
-    type: boolean
+  volume_strategy:
+    type: string
     required: false
-    default: true
-    description: "Persist /nix store across container restarts using a named Docker volume"
+    default: fleet
+    description: "Volume strategy for /nix store persistence: 'fleet' shares across agents, 'per-agent' isolates per agent, 'none' disables persistence"
 
 contributes:
   runtime:
@@ -15,5 +15,7 @@ contributes:
       - "RUN chown agent:agent /nix/store && chown -R agent:agent /nix/var"
     pre_entrypoint:
       - '. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true'
-    volumes:
-      - '{{ if .plugin.options.cache }}{{ .agent.name }}-nix-store:/nix{{ end }}'
+    namespaced_volumes:
+      - '{{ if eq .plugin.options.volume_strategy "per-agent" }}nix-store:/nix{{ end }}'
+    raw_volumes:
+      - '{{ if eq .plugin.options.volume_strategy "fleet" }}nix-store:/nix{{ end }}'

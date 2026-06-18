@@ -32,7 +32,7 @@ Use `volume: true` when the agent writes state to its home directory that should
 ## What It Contributes
 
 - **Runtime (build):** `COPY` of home directory into `/home/agent/` with ownership set to the agent user
-- **Runtime (volumes):** Named volume `<agent-name>-home` when `volume: true`
+- **Runtime (namespaced_volumes):** Named volume `home` (auto-prefixed with `{agentName}-` for fleet isolation) when `volume: true`
 
 ## Example
 

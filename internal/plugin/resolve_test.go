@@ -74,7 +74,7 @@ func TestResolve_BareName_Rejected(t *testing.T) {
 	bundled := testBundledFS()
 	resolver := NewResolver(dir, bundled)
 	_, err := resolver.Resolve("github-pat", "")
-	assert.ErrorContains(t, err, "must use @builtin/github-pat or ./<path> prefix")
+	assert.ErrorContains(t, err, "must use @builtin/github-pat, @fleet/<path>, or ./<path> prefix")
 }
 
 func testBundledFS() fs.FS {

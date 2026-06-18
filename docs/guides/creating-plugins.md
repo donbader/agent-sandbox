@@ -91,7 +91,7 @@ contributes:
 {{- range $name, $cfg := .plugin.options.providers }}
       - url: "{{ index $cfg "mcp_url" }}"
 {{- end }}
-    volumes:
+    namespaced_volumes:
       - "oauth-tokens:/data/plugins/mcp-oauth"
     middlewares:
       - script: "./src/oauth.ts"
@@ -109,7 +109,8 @@ contributes:
 | Field | Description |
 |-------|-------------|
 | `extra_builds` | Dockerfile lines appended after base install (RUN, ENV, COPY, etc.) |
-| `volumes` | Volume mounts for the agent container |
+| `namespaced_volumes` | Volumes auto-prefixed with `{agentName}-` for per-agent isolation |
+| `raw_volumes` | Volumes used as-is (bind mounts, shared across agents) |
 | `pre_entrypoint` | Commands run before the agent process starts |
 | `ports` | Exposed container ports |
 | `cap_add` | Linux capabilities (e.g. `SYS_PTRACE`) |
@@ -122,7 +123,8 @@ contributes:
 | `services` | Upstream URLs the gateway should proxy |
 | `middlewares` | TypeScript middleware scripts with optional domain filter |
 | `routes` | HTTP endpoints mounted on the gateway |
-| `volumes` | Volumes for the gateway container |
+| `namespaced_volumes` | Volumes auto-prefixed with `{agentName}-` for per-agent isolation |
+| `raw_volumes` | Volumes used as-is (no prefix) |
 
 ### Middleware entry format
 

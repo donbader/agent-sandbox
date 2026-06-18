@@ -49,8 +49,8 @@ core_version: latest
 
 runtime:
   image: "@builtin/codex"
-  volumes:
-    - "agent-001-data:/home/agent/workspace"
+  namespaced_volumes:
+    - "data:/home/agent/workspace"   # becomes agent-001-data in Docker
 
 installations:
   - plugin: "@builtin/home-override"
