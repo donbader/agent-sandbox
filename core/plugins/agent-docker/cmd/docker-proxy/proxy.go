@@ -22,10 +22,11 @@ type DockerProxy struct {
 	cfg      *ProxyConfig
 	upstream *httputil.ReverseProxy
 	mu       sync.Mutex
-	ids      map[string]bool   // container IDs owned by this sandbox (for counting)
-	tracked  map[string]bool   // all lookup keys (IDs + namespaced names) for ownership checks
-	nameMap  map[string]string // user-provided name → namespaced name
-	networks map[string]bool   // network IDs created by this sandbox (for cleanup)
+	ids         map[string]bool   // container IDs owned by this sandbox (for counting)
+	tracked     map[string]bool   // all lookup keys (IDs + namespaced names) for ownership checks
+	nameMap     map[string]string // user-provided name → namespaced name
+	networks    map[string]bool   // network IDs created by this sandbox (for cleanup)
+	builtImages map[string]bool   // image tags built through this proxy (auto-allowed)
 }
 
 // NewDockerProxy creates a new Docker API proxy.
@@ -43,19 +44,23 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 		Transport: transport,
 	}
 
+	builtImages := make(map[string]bool)
+
 	return &DockerProxy{
 		policy: &Policy{
 			AllowedImages: cfg.AllowedImages,
 			MaxContainers: cfg.MaxContainers,
 			AllowBuild:    cfg.AllowBuild,
+			BuiltImages:   builtImages,
 		},
-		mutator:  NewMutator(cfg),
-		cfg:      cfg,
-		upstream: upstream,
-		ids:      make(map[string]bool),
-		tracked:  make(map[string]bool),
-		nameMap:  make(map[string]string),
-		networks: make(map[string]bool),
+		mutator:     NewMutator(cfg),
+		cfg:         cfg,
+		upstream:    upstream,
+		ids:         make(map[string]bool),
+		tracked:     make(map[string]bool),
+		nameMap:     make(map[string]string),
+		networks:    make(map[string]bool),
+		builtImages: builtImages,
 	}, nil
 }
 
@@ -79,6 +84,10 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		dp.handleContainerCreate(w, r)
 	case r.Method == "POST" && path == "/images/create":
 		dp.handleImagePull(w, r)
+	case r.Method == "POST" && path == "/build":
+		dp.handleBuild(w, r)
+	case r.Method == "POST" && strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/tag"):
+		dp.handleImageTag(w, r, path)
 	case r.Method == "GET" && path == "/containers/json":
 		dp.handleContainerList(w, r)
 	case r.Method == "POST" && path == "/networks/create":
@@ -199,6 +208,45 @@ func (dp *DockerProxy) handleImagePull(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dp.upstream.ServeHTTP(w, r)
+}
+
+// handleBuild forwards a POST /build request and tracks the resulting image tags.
+func (dp *DockerProxy) handleBuild(w http.ResponseWriter, r *http.Request) {
+	tags := r.URL.Query()["t"]
+
+	dp.upstream.ServeHTTP(w, r)
+
+	if len(tags) > 0 && dp.cfg.AllowBuild {
+		dp.mu.Lock()
+		for _, tag := range tags {
+			if tag != "" {
+				dp.builtImages[tag] = true
+				dp.builtImages[normalizeImage(tag)] = true
+				slog.Info("tracked built image", "tag", tag)
+			}
+		}
+		dp.mu.Unlock()
+	}
+}
+
+// handleImageTag forwards a POST /images/{name}/tag request and tracks the resulting tag.
+func (dp *DockerProxy) handleImageTag(w http.ResponseWriter, r *http.Request, path string) {
+	repo := r.URL.Query().Get("repo")
+	tag := r.URL.Query().Get("tag")
+
+	dp.upstream.ServeHTTP(w, r)
+
+	if dp.cfg.AllowBuild && repo != "" {
+		result := repo
+		if tag != "" {
+			result = repo + ":" + tag
+		}
+		dp.mu.Lock()
+		dp.builtImages[result] = true
+		dp.builtImages[normalizeImage(result)] = true
+		slog.Info("tracked tagged image", "image", result)
+		dp.mu.Unlock()
+	}
 }
 
 func (dp *DockerProxy) handleContainerList(w http.ResponseWriter, r *http.Request) {

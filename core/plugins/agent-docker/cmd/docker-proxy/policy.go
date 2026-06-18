@@ -11,6 +11,7 @@ type Policy struct {
 	AllowedImages []string
 	MaxContainers int
 	AllowBuild    bool
+	BuiltImages   map[string]bool
 }
 
 // CreateRequest is the subset of Docker container create fields we validate.
@@ -31,6 +32,11 @@ func (p *Policy) ImageAllowed(image string) bool {
 
 	// When AllowBuild is enabled, auto-allow buildkit images
 	if p.AllowBuild && matchImage("moby/buildkit:*", normalized) {
+		return true
+	}
+
+	// Check if locally built
+	if p.BuiltImages != nil && (p.BuiltImages[image] || p.BuiltImages[normalized]) {
 		return true
 	}
 

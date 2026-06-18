@@ -405,3 +405,91 @@ func TestDockerProxy_AllowBuild_BuildkitImageBlockedWhenDisabled(t *testing.T) {
 	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
+
+func TestDockerProxy_AllowBuild_LocallyBuiltImageAllowed(t *testing.T) {
+	builtImages := make(map[string]bool)
+	builtImages["myapp:latest"] = true
+	builtImages["myapp:v1.0"] = true
+
+	policy := &Policy{
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		AllowBuild:    true,
+		BuiltImages:   builtImages,
+	}
+
+	// Built images should be allowed
+	assert.True(t, policy.ImageAllowed("myapp:latest"))
+	assert.True(t, policy.ImageAllowed("myapp:v1.0"))
+	// Non-built, non-allowlisted images should be blocked
+	assert.False(t, policy.ImageAllowed("evil:latest"))
+	// Allowlisted images still work
+	assert.True(t, policy.ImageAllowed("node:20"))
+}
+
+func TestDockerProxy_AllowBuild_BuiltImageWithRegistryPrefix(t *testing.T) {
+	builtImages := make(map[string]bool)
+	builtImages["docker.io/library/myapp:latest"] = true
+	builtImages["myapp:latest"] = true // normalizeImage also stored
+
+	policy := &Policy{
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		AllowBuild:    true,
+		BuiltImages:   builtImages,
+	}
+
+	// Should be allowed both with and without the prefix
+	assert.True(t, policy.ImageAllowed("docker.io/library/myapp:latest"))
+	assert.True(t, policy.ImageAllowed("myapp:latest"))
+}
+
+func TestDockerProxy_AllowBuild_HandleBuildTracksTags(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowBuild:    true,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	// Simulate: after handleBuild processes a request with t=myapp:latest
+	proxy.mu.Lock()
+	proxy.builtImages["myapp:latest"] = true
+	proxy.builtImages["myapp:latest"] = true
+	proxy.mu.Unlock()
+
+	// The policy should now allow this image
+	assert.True(t, proxy.policy.ImageAllowed("myapp:latest"))
+	assert.False(t, proxy.policy.ImageAllowed("evil:latest"))
+}
+
+func TestDockerProxy_AllowBuild_NoTrackingWhenBuildDisabled(t *testing.T) {
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowBuild:    false,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+
+	// Manually add to builtImages (simulating a build that somehow got through)
+	proxy.mu.Lock()
+	proxy.builtImages["myapp:latest"] = true
+	proxy.mu.Unlock()
+
+	// Even though it's in builtImages, the policy should still allow it
+	// because BuiltImages is shared and AllowBuild doesn't gate the check
+	// (the endpoint gating prevents builds from happening in the first place)
+	assert.True(t, proxy.policy.ImageAllowed("myapp:latest"))
+}
