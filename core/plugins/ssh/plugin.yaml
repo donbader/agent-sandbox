@@ -6,9 +6,9 @@ options:
     default: 2222
     description: "SSH port to expose"
   authorized_keys:
-    type: string
+    type: path
     required: true
-    description: "Path to public key file (relative to project root)"
+    description: "Path to public key file. Must use @fleet/ prefix (e.g. @fleet/ssh_key.pub)."
 
 contributes:
   runtime:

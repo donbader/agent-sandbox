@@ -259,6 +259,90 @@ contributes:
 	assert.Equal(t, "v1.44.0", contribs.Runtime.Environment["CORE_VERSION"])
 }
 
+func TestRenderContributions_PathType_RejectsRelative(t *testing.T) {
+	raw := `
+name: home-override
+options:
+  home_directory:
+    type: path
+    required: true
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{"home_directory": "./home"}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	assert.ErrorContains(t, err, "must use @fleet/ prefix")
+}
+
+func TestRenderContributions_PathType_RejectsBareName(t *testing.T) {
+	raw := `
+name: home-override
+options:
+  home_directory:
+    type: path
+    required: true
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{"home_directory": "some-dir"}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	assert.ErrorContains(t, err, "must use @fleet/ prefix")
+}
+
+func TestRenderContributions_PathType_RejectsTraversal(t *testing.T) {
+	raw := `
+name: home-override
+options:
+  home_directory:
+    type: path
+    required: true
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{"home_directory": "../evil-dir"}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	assert.ErrorContains(t, err, "must use @fleet/ prefix")
+}
+
+func TestRenderContributions_PathType_AcceptsFleet(t *testing.T) {
+	raw := `
+name: home-override
+options:
+  home_directory:
+    type: path
+    required: true
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{"home_directory": "@fleet/shared-home"}
+	rendered, err := RenderContributions(p, opts, RenderContext{
+		Self:        map[string]any{"name": "my-agent"},
+		ProjectRoot: "..",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "COPY ../shared-home /opt/home-seed", rendered.Runtime.ExtraBuilds[0])
+}
+
 func TestRenderContributions_FleetPath(t *testing.T) {
 	raw := `
 name: home-override
@@ -336,6 +420,40 @@ contributes:
 		ProjectRoot: "..",
 	})
 	assert.NoError(t, err)
+}
+
+func TestRenderContributions_PathType_RequiresFleetPrefix(t *testing.T) {
+	// type: path options MUST use @fleet/ prefix
+	raw := `
+name: home-override
+options:
+  home_directory:
+    type: path
+    required: true
+contributes:
+  runtime:
+    extra_builds:
+      - "COPY {{ .plugin.options.home_directory }} /opt/home-seed"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	// Relative path without @fleet/ should be rejected
+	opts := map[string]any{"home_directory": "./my-home"}
+	_, err = RenderContributions(p, opts, RenderContext{
+		Self:        map[string]any{"name": "agent-01"},
+		ProjectRoot: "..",
+	})
+	assert.ErrorContains(t, err, "must use @fleet/ prefix")
+
+	// @fleet/ prefix should work
+	opts = map[string]any{"home_directory": "@fleet/shared-home"}
+	rendered, err := RenderContributions(p, opts, RenderContext{
+		Self:        map[string]any{"name": "agent-01"},
+		ProjectRoot: "..",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "COPY ../shared-home /opt/home-seed", rendered.Runtime.ExtraBuilds[0])
 }
 
 func TestResolveFleetPaths(t *testing.T) {

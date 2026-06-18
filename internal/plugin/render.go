@@ -119,7 +119,14 @@ func validateOptions(schema map[string]OptionSchema, opts map[string]any) error 
 		}
 		if val, ok := opts[name]; ok {
 			if str, ok := val.(string); ok {
-				// Allow @fleet/ prefixed paths — they are resolved separately.
+				// Path-type options must use @fleet/ prefix.
+				if s.Type == "path" {
+					if !strings.HasPrefix(str, "@fleet/") {
+						return fmt.Errorf("option %q (type: path) must use @fleet/ prefix, got %q", name, str)
+					}
+					continue
+				}
+				// Allow @fleet/ prefixed paths in string options too.
 				if strings.HasPrefix(str, "@fleet/") {
 					continue
 				}
