@@ -12,7 +12,7 @@ contributes:
       - "RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install linux --extra-conf \"sandbox = false\" --init none --no-confirm"
       - "ENV PATH=/nix/var/nix/profiles/default/bin:$PATH"
       - "RUN nix profile install --accept-flake-config github:flox/flox"
-      - "RUN chown -R agent:agent /nix"
+      - "RUN chown agent:agent /nix/store && chown -R agent:agent /nix/var"
     pre_entrypoint:
       - '. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true'
     volumes:
