@@ -389,10 +389,6 @@ func TestBuildFleetCompose(t *testing.T) {
 	assert.Contains(t, output, ".build/coder/Dockerfile")
 	assert.Contains(t, output, ".build/reviewer/Dockerfile")
 
-	// Per-agent gateway config mount
-	assert.Contains(t, output, "./coder/config.yaml:/etc/gateway/config.yaml:ro")
-	assert.Contains(t, output, "./reviewer/config.yaml:/etc/gateway/config.yaml:ro")
-
 	// Shared network
 	assert.Contains(t, output, "sandbox:")
 

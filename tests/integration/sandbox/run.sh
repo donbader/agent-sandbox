@@ -37,7 +37,7 @@ echo "--- Credential injection check ---"
 AGENT_SERVICE="sandbox-test"
 GATEWAY_SERVICE="sandbox-test-gateway"
 
-RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose exec "$AGENT_SERVICE" curl -so- --max-time 30 https://httpbin.org/headers 2>&1 || true)
+RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" curl -so- --max-time 30 https://httpbin.org/headers 2>&1 || true)
 if echo "$RESPONSE" | grep -q "super-secret-token-12345"; then
   echo -e "  \033[32m✓\033[0m Gateway injects credentials into outbound requests"
 else
@@ -45,10 +45,10 @@ else
   echo "    Response: $RESPONSE"
   echo ""
   echo "--- Container logs (agent) ---"
-  "$CLI" -C "$SCRIPT_DIR" compose logs "$AGENT_SERVICE" 2>&1 | tail -30
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" logs "$AGENT_SERVICE" 2>&1 | tail -30
   echo ""
   echo "--- Container logs (gateway) ---"
-  "$CLI" -C "$SCRIPT_DIR" compose logs "$GATEWAY_SERVICE" 2>&1 | tail -20
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" logs "$GATEWAY_SERVICE" 2>&1 | tail -20
   exit 1
 fi
 

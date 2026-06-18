@@ -271,7 +271,6 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			},
 			gatewayVolumes: []string{
 				certsVolume + ":/shared/certs",
-				fmt.Sprintf("./%s/config.yaml:/etc/gateway/config.yaml:ro", relBuildDir),
 			},
 			sidecarPrefix: agentName,
 			buildDir:      composeDir,
