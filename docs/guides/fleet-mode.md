@@ -85,15 +85,15 @@ shared:
 
 The `@fleet/` prefix resolves paths relative to the project root (where `fleet.yaml` lives), regardless of which agent directory is being generated.
 
-### Option type: `path`
+### Option type: `project-path`
 
-Plugins that accept file/directory paths should declare their options as `type: path`. This **enforces** the `@fleet/` prefix at validation time — relative paths like `./home` or `../shared` are rejected.
+Plugins that accept file/directory paths should declare their options as `type: project-path`. This **enforces** the `@fleet/` prefix at validation time — relative paths like `./home` or `../shared` are rejected.
 
 ```yaml
 # plugin.yaml
 options:
   home_directory:
-    type: path          # must be @fleet/...
+    type: project-path  # must be @fleet/...
     required: true
 ```
 

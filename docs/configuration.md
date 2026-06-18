@@ -154,7 +154,7 @@ Path values in plugin options:
 
 Plugin option types:
 - `type: string` — any string value. `@fleet/` prefix is allowed. Bare `..` is blocked.
-- `type: path` — **must** use `@fleet/` prefix. Enforced at validation time. Use this for options that reference files or directories.
+- `type: project-path` — **must** use `@fleet/` prefix. Enforced at validation time. Use this for options that reference files or directories within the project.
 - `type: integer` — numeric value
 - `type: boolean` — true/false
 - `type: object` — nested structure
