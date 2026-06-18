@@ -9,10 +9,10 @@ options:
 contributes:
   runtime:
     extra_builds:
-      - "ENV NIX_INSTALLER_NO_CONFIRM=1"
-      - "RUN curl -fsSL https://install.determinate.systems/nix | sh -s -- install linux --init none --no-confirm"
+      - "RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install linux --extra-conf \"sandbox = false\" --init none --no-confirm"
       - "ENV PATH=/nix/var/nix/profiles/default/bin:$PATH"
       - "RUN nix profile install --accept-flake-config github:flox/flox"
+      - "RUN chown -R agent:agent /nix"
     pre_entrypoint:
       - '. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true'
     volumes:
