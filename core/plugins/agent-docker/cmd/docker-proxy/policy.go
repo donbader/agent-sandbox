@@ -8,10 +8,11 @@ import (
 
 // Policy defines the security rules for container creation.
 type Policy struct {
-	AllowedImages []string
-	MaxContainers int
-	AllowBuild    bool
-	BuiltImages   map[string]bool
+	AllowedImages       []string
+	MaxContainers       int
+	AllowBuild          bool
+	BuiltImages         map[string]bool
+	AllowedCapabilities []string
 }
 
 // CreateRequest is the subset of Docker container create fields we validate.
@@ -64,7 +65,14 @@ func (p *Policy) ValidateCreate(req *CreateRequest, currentCount int) error {
 		return &PolicyError{Code: 403, Message: "host network mode is not allowed"}
 	}
 	if len(req.CapAdd) > 0 {
-		return &PolicyError{Code: 403, Message: "adding capabilities is not allowed"}
+		if len(p.AllowedCapabilities) == 0 {
+			return &PolicyError{Code: 403, Message: "adding capabilities is not allowed"}
+		}
+		for _, cap := range req.CapAdd {
+			if !p.capAllowed(cap) {
+				return &PolicyError{Code: 403, Message: fmt.Sprintf("capability %q is not allowed", cap)}
+			}
+		}
 	}
 	if req.PidMode == "host" {
 		return &PolicyError{Code: 403, Message: "host PID mode is not allowed"}
@@ -101,6 +109,16 @@ func matchImage(pattern, image string) bool {
 		return false
 	}
 	return matched
+}
+
+// capAllowed checks if a capability is in the allowed list (case-insensitive).
+func (p *Policy) capAllowed(cap string) bool {
+	for _, allowed := range p.AllowedCapabilities {
+		if strings.EqualFold(allowed, cap) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeImage strips the default Docker registry prefix.

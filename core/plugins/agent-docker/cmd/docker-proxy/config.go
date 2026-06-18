@@ -18,8 +18,9 @@ type ProxyConfig struct {
 	MemoryBytes   int64
 	NanoCPUs      int64
 	PidsLimit     int64
-	AllowCompose  bool
-	AllowBuild    bool
+	AllowCompose        bool
+	AllowBuild          bool
+	AllowedCapabilities []string
 }
 
 func loadConfigFromEnv() (*ProxyConfig, error) {
@@ -54,6 +55,13 @@ func loadConfigFromEnv() (*ProxyConfig, error) {
 	cfg.PidsLimit = int64(envInt("PID_LIMIT", 256))
 	cfg.AllowCompose = os.Getenv("ALLOW_COMPOSE") == "true"
 	cfg.AllowBuild = os.Getenv("ALLOW_BUILD") == "true"
+
+	capsJSON := os.Getenv("ALLOWED_CAPABILITIES")
+	if capsJSON != "" && capsJSON != "null" && capsJSON != "[]" {
+		if err := json.Unmarshal([]byte(capsJSON), &cfg.AllowedCapabilities); err != nil {
+			return nil, fmt.Errorf("parse ALLOWED_CAPABILITIES: %w", err)
+		}
+	}
 
 	return cfg, nil
 }

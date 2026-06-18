@@ -40,6 +40,13 @@ options:
     required: false
     default: false
     description: "Allow docker build operations (auto-allows buildkit image and build-related endpoints)"
+  allowed_capabilities:
+    type: array
+    items:
+      type: string
+    required: false
+    default: []
+    description: "Linux capabilities to allow on spawned containers (e.g. NET_ADMIN, SETUID). Empty means all cap_add is blocked."
 
 contributes:
   runtime:
@@ -61,3 +68,4 @@ contributes:
           PID_LIMIT: "{{ .plugin.options.pids }}"
           ALLOW_COMPOSE: "{{ .plugin.options.allow_compose }}"
           ALLOW_BUILD: "{{ .plugin.options.allow_build }}"
+          ALLOWED_CAPABILITIES: '{{ toJSON .plugin.options.allowed_capabilities }}'
