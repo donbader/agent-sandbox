@@ -1,7 +1,7 @@
 # Binaries
 /agent-sandbox
 *.exe
-docker-proxy
+/docker-proxy
 agent-sandbox-core
 core/agent-sandbox-core
 core/gateway/bin/
