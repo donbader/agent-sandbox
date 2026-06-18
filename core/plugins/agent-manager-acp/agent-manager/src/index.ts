@@ -5,9 +5,41 @@ import { StdioRelay } from "./stdio-relay.js";
 
 const log = createLogger("agent-manager");
 
+const RESPAWN_DELAY_MS = 3000;
+
 interface ManagerConfig {
   acp_command: string[];
   cwd: string;
+}
+
+/** Perform the ACP initialize + auth handshake. Returns the init result. */
+async function handshake(agent: AgentProcess): Promise<unknown> {
+  const initResp = await agent.sendAndWait({
+    jsonrpc: "2.0", id: -1, method: "initialize",
+    params: { protocolVersion: 1, clientCapabilities: {} },
+  });
+  if (initResp.error) {
+    throw new Error(`agent initialize failed: ${initResp.error.message}`);
+  }
+  log.info("agent ACP initialized");
+
+  // Authenticate with a placeholder — the gateway rewrites real credentials on outbound calls.
+  // Some agents don't implement auth/authenticate (code -32601) — skip gracefully.
+  const authResp = await agent.sendAndWait({
+    jsonrpc: "2.0", id: -2, method: "auth/authenticate",
+    params: { id: "api-key", secret: "gateway-managed" },
+  });
+  if (authResp.error) {
+    if (authResp.error.code === -32601) {
+      log.info("agent does not implement auth/authenticate — skipping");
+    } else {
+      throw new Error(`agent auth/authenticate failed: ${authResp.error.message}`);
+    }
+  } else {
+    log.info("agent ACP authenticated");
+  }
+
+  return initResp.result;
 }
 
 async function main(): Promise<void> {
@@ -27,46 +59,43 @@ async function main(): Promise<void> {
 
   log.info({ cmd: config.acp_command.join(" "), cwd: config.cwd }, "starting agent manager");
 
+  let shuttingDown = false;
+
   // Downstream: spawn the actual agent via ACP over stdio
   const agent = new AgentProcess(config.acp_command, config.cwd);
 
   await agent.start();
+  const initResult = await handshake(agent);
 
-  // Perform ACP handshake: initialize + authenticate the agent before accepting clients.
-  const initResp = await agent.sendAndWait({
-    jsonrpc: "2.0", id: -1, method: "initialize",
-    params: { protocolVersion: 1, clientCapabilities: {} },
-  });
-  if (initResp.error) {
-    log.fatal({ error: initResp.error }, "agent initialize failed");
-    process.exit(1);
-  }
-  log.info("agent ACP initialized");
-
-  // Authenticate with a placeholder — the gateway rewrites real credentials on outbound calls.
-  // Some agents don't implement auth/authenticate (code -32601) — skip gracefully.
-  const authResp = await agent.sendAndWait({
-    jsonrpc: "2.0", id: -2, method: "auth/authenticate",
-    params: { id: "api-key", secret: "gateway-managed" },
-  });
-  if (authResp.error) {
-    if (authResp.error.code === -32601) {
-      log.info("agent does not implement auth/authenticate — skipping");
-    } else {
-      log.fatal({ error: authResp.error }, "agent auth/authenticate failed");
-      process.exit(1);
-    }
-  } else {
-    log.info("agent ACP authenticated");
-  }
-
-  // Stdio relay: the only interface. Parent (OpenACP) communicates via stdin/stdout.
+  // Stdio relay: the only interface. Parent (telegram-adapter) communicates via stdin/stdout.
   const relay = new StdioRelay(agent, config.cwd, { exitOnClose: true });
-  relay.setInitResult(initResp.result);
+  relay.setInitResult(initResult);
   relay.start();
+
+  // Auto-respawn: when the inner agent (pi-acp) crashes, respawn it after a delay.
+  // The relay already notifies the parent of the exit via __system__ session update.
+  agent.on("exit", (code: number | null, signal: string | null) => {
+    if (shuttingDown) return;
+    log.info({ code, signal, delayMs: RESPAWN_DELAY_MS }, "scheduling agent respawn");
+    setTimeout(() => respawn(), RESPAWN_DELAY_MS);
+  });
+
+  async function respawn(): Promise<void> {
+    if (shuttingDown) return;
+    try {
+      await agent.start();
+      const newInitResult = await handshake(agent);
+      relay.setInitResult(newInitResult);
+      log.info("agent respawned successfully");
+    } catch (err) {
+      log.error({ err }, "agent respawn failed, retrying...");
+      setTimeout(() => respawn(), RESPAWN_DELAY_MS);
+    }
+  }
 
   process.on("SIGTERM", async () => {
     log.info("shutting down");
+    shuttingDown = true;
     await agent.stop();
     process.exit(0);
   });

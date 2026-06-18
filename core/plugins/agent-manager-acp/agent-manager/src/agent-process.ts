@@ -42,6 +42,16 @@ export class AgentProcess extends EventEmitter {
       env: { ...process.env },
     });
 
+    // Catch EPIPE/write errors on stdin to prevent unhandled exceptions
+    // when the agent dies between the writable check and the actual write.
+    proc.stdin?.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED") {
+        log.debug({ err: err.code }, "agent stdin write error (process already exited)");
+      } else {
+        log.error({ err }, "agent stdin error");
+      }
+    });
+
     proc.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();
       if (text) {
