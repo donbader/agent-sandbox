@@ -11,10 +11,11 @@ runtime:
   entrypoint: ["node", "/opt/agent-manager/dist/index.js"]
 
 gateway:
-  services:
-    - url: https://agent-gateway.stx-ai.net
+  egress:
+    - hosts: ["agent-gateway.stx-ai.net"]
       headers:
-        Authorization: Bearer ${STX_LLM_GATEWAY_API_KEY}
+        Authorization: "Bearer ${STX_LLM_GATEWAY_API_KEY}"
+    - hosts: ["*"]
 
 installations:
   - plugin: "@builtin/home-override"
