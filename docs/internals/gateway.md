@@ -258,24 +258,24 @@ name: my-plugin
 description: Injects API key for example.com
 contributes:
   gateway:
-    services:
-      - domains: ["api.example.com"]
-        options_schema:
-          api_key:
-            type: string
-            source: env
+    egress:
+      - hosts: ["api.example.com"]
+        middlewares:
+          - "./src/middleware.ts"
 ```
 
 3. Write `src/middleware.ts`:
 
 ```typescript
-import type { MiddlewareContext } from "@agent-sandbox/sdk";
+/// <reference path="../../.build/gateway.d.ts" />
 
-export function middleware(ctx: MiddlewareContext): void {
-  const key = ctx.options.api_key;
-  secrets.register(key);
+const handler: MiddlewareHandler = (ctx, options) => {
+  const key = options.api_key;
+  if (!key) return;
+  gw.secrets.register(key);
   ctx.request.setHeader("Authorization", `Bearer ${key}`);
-}
+};
+export default handler;
 ```
 
 4. Reference the plugin in `agent.yaml`:

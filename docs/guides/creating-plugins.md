@@ -42,11 +42,10 @@ contributes:
     extra_builds:
       - "ENV MY_TOKEN=dummy"
   gateway:
-    services:
-      - url: "https://api.example.com"
-    middlewares:
-      - script: "./src/my-auth.ts"
-        domains: ["api.example.com"]
+    egress:
+      - hosts: ["api.example.com"]
+        middlewares:
+          - "./src/my-auth.ts"
 ```
 
 ### Real Example: github-pat
@@ -64,12 +63,10 @@ contributes:
     extra_builds:
       - "ENV GH_TOKEN=dummy GITHUB_TOKEN=dummy"
   gateway:
-    services:
-      - url: "https://api.github.com"
-      - url: "https://github.com"
-    middlewares:
-      - script: "./src/github-auth.ts"
-        domains: ["api.github.com", "github.com"]
+    egress:
+      - hosts: ["api.github.com", "github.com"]
+        middlewares:
+          - "./src/github-auth.ts"
 ```
 
 ### Real Example: mcp-oauth (dynamic services via Go templates)
@@ -87,14 +84,14 @@ options:
 
 contributes:
   gateway:
-    services:
+    egress:
 {{- range $name, $cfg := .plugin.options.providers }}
-      - url: "{{ index $cfg "mcp_url" }}"
+      - hosts: ["{{ index $cfg "mcp_url" }}"]
+        middlewares:
+          - "./src/oauth.ts"
 {{- end }}
     namespaced_volumes:
       - "oauth-tokens:/data/plugins/mcp-oauth"
-    middlewares:
-      - script: "./src/oauth.ts"
     routes:
       - path: "/callback"
         handler: "./src/callback.ts"
@@ -120,15 +117,14 @@ contributes:
 
 | Field | Description |
 |-------|-------------|
-| `services` | Upstream URLs the gateway should proxy |
-| `middlewares` | TypeScript middleware scripts with optional domain filter |
+| `egress` | Egress rules: host matching, credential injection, and middleware scripts |
 | `routes` | HTTP endpoints mounted on the gateway |
 | `namespaced_volumes` | Volumes auto-prefixed with `{agentName}-` for per-agent isolation |
 | `raw_volumes` | Volumes used as-is (no prefix) |
 
 ### Middleware entry format
 
-Middlewares are declared as plain string paths on egress rules:
+Middlewares are string paths declared inline on egress rules:
 
 ```yaml
 egress:
@@ -205,9 +201,7 @@ Routes expose HTTP endpoints on the gateway, mounted at `/plugins/<plugin-name>/
 ```typescript
 // src/callback.ts
 export default function(ctx: any, options: any) {
-  const query = ctx.request.query || "";
-  const params = new URLSearchParams(query);
-  const code = params.get("code");
+  const code = ctx.request.query["code"];
 
   if (!code) {
     ctx.response.status(400);
@@ -304,11 +298,10 @@ options:
     description: "API token env var reference (e.g. ${EXAMPLE_TOKEN})"
 contributes:
   gateway:
-    services:
-      - url: "https://api.example.com"
-    middlewares:
-      - script: "./src/example-auth.ts"
-        domains: ["api.example.com"]
+    egress:
+      - hosts: ["api.example.com"]
+        middlewares:
+          - "./src/example-auth.ts"
 ```
 
 **3. Write the middleware** (`src/example-auth.ts`):
@@ -348,9 +341,10 @@ agent-sandbox compose up --build
 **Domain-scoped middleware** — only intercept requests to specific hosts:
 
 ```yaml
-middlewares:
-  - script: "./src/auth.ts"
-    domains: ["api.github.com", "github.com"]
+egress:
+  - hosts: ["api.github.com", "github.com"]
+    middlewares:
+      - "./src/auth.ts"
 ```
 
 **Secret registration** — prevent credential leaks in gateway logs:

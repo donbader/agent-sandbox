@@ -191,35 +191,33 @@ Each plugin is defined by a `plugin.yaml` file:
 name: my-plugin
 description: What this plugin does
 
-middlewares:
-  - src/my-middleware.ts              # TypeScript middleware loaded at gateway runtime
-
-routes:
-  - path: /plugins/my-plugin/hook
-    handler: src/hook-handler.ts    # TypeScript route handler
-    method: POST                    # HTTP method (GET, POST, etc.)
-
-runtime:
-  env:
-    MY_VAR: "value"                 # environment variables set in agent container
-
-namespaced_volumes:
-  - name: my-data
-    mount: /data/my-plugin
+contributes:
+  gateway:
+    egress:
+      - hosts: ["api.example.com"]
+        middlewares:
+          - "./src/my-middleware.ts"    # TypeScript middleware loaded at gateway runtime
+    routes:
+      - path: "/hook"
+        handler: "./src/hook-handler.ts"    # TypeScript route handler
+  runtime:
+    environment:
+      MY_VAR: "value"                  # environment variables set in agent container
+    namespaced_volumes:
+      - "my-data:/data/my-plugin"
 ```
 
 ### Key Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `middlewares[].script` | string | Path to TypeScript middleware file (relative to plugin dir) |
-| `middlewares[].domains` | list | Domains this middleware applies to |
-| `routes[].path` | string | HTTP path the route handles |
-| `routes[].handler` | string | Path to TypeScript handler file (relative to plugin dir) |
-| `routes[].method` | string | HTTP method to match |
-| `runtime.env` | map | Environment variables injected into the agent container |
-| `namespaced_volumes` | list | Per-agent volumes (auto-prefixed with `{agentName}-`) |
-| `raw_volumes` | list | Volumes used as-is (bind mounts, fleet-shared volumes) |
+| `contributes.gateway.egress[].hosts` | list | Host patterns this egress rule matches |
+| `contributes.gateway.egress[].middlewares` | list | TypeScript middleware script paths (relative to plugin dir) |
+| `contributes.gateway.routes[].path` | string | HTTP path the route handles |
+| `contributes.gateway.routes[].handler` | string | Path to TypeScript handler file (relative to plugin dir) |
+| `contributes.runtime.environment` | map | Environment variables injected into the agent container |
+| `contributes.runtime.namespaced_volumes` | list | Per-agent volumes (auto-prefixed with `{agentName}-`) |
+| `contributes.runtime.raw_volumes` | list | Volumes used as-is (bind mounts, fleet-shared volumes) |
 
 ## Fleet Structure (fleet.yaml)
 

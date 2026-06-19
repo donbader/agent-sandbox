@@ -27,7 +27,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 | `deny` | `bool` | Block matching traffic at TCP layer (connection reset) |
 | `headers` | `map[string]string` | Inject headers via MITM. Implies allow. |
 | `deny_paths` | `[]string` | Block specific URL paths. Implies MITM. |
-| `middlewares` | `[]object` | TypeScript middleware scripts. Implies MITM. |
+| `middlewares` | `[]string` | TypeScript middleware scripts. Implies MITM. |
 | `target` | `string` | Forwarding destination (`host:port`) for internal/HTTP services |
 | `network` | `string` | Compose network to attach gateway to (for reaching internal services) |
 
