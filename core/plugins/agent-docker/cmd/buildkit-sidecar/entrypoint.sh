@@ -10,5 +10,4 @@ set -e
 # - Container boundary provides isolation from host
 exec buildkitd \
   --addr tcp://0.0.0.0:8372 \
-  --oci-worker-no-process-sandbox \
   --root /var/lib/buildkit
