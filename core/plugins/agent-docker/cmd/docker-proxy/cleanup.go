@@ -14,7 +14,8 @@ import (
 
 // Cleaner handles container cleanup on shutdown.
 type Cleaner struct {
-	sandboxID string
+	sandboxID  string
+	dockerAddr string
 }
 
 // NewCleaner creates a cleaner that talks to the Docker daemon.
