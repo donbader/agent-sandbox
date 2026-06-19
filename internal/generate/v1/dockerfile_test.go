@@ -46,7 +46,7 @@ func TestBuildDockerfile(t *testing.T) {
 		},
 	}
 
-	output, err := BuildDockerfile(cfg, contribs, ".build/entrypoint.sh", nil)
+	output, err := BuildDockerfile(cfg, contribs, ".build/entrypoint.sh", ".build/gateway-route.sh", nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "FROM node:24-slim")
@@ -65,7 +65,7 @@ func TestBuildDockerfile_BuiltinPreset(t *testing.T) {
 		},
 	}
 
-	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh", testPresets)
+	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh", ".build/gateway-route.sh", testPresets)
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "FROM node:24-slim")
@@ -81,7 +81,7 @@ func TestBuildDockerfile_CustomImage(t *testing.T) {
 		},
 	}
 
-	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh", nil)
+	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh", ".build/gateway-route.sh", nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "FROM python:3.12-slim")
@@ -96,7 +96,7 @@ func TestBuildDockerfile_PresetDefaultCMD(t *testing.T) {
 		},
 	}
 
-	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh", testPresets)
+	output, err := BuildDockerfile(cfg, nil, ".build/entrypoint.sh", ".build/gateway-route.sh", testPresets)
 	require.NoError(t, err)
 
 	assert.Contains(t, output, "FROM node:24-slim")
@@ -107,7 +107,7 @@ func TestBuildDockerfile_PresetDefaultCMD(t *testing.T) {
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
 	script := EntrypointScript(nil, "/home/agent/workspace")
 	assert.Contains(t, script, `exec gosu "$AGENT_USER" "$@"`)
-	assert.Contains(t, script, `${GATEWAY_HOST:=gateway}`)
+	assert.Contains(t, script, `. /usr/local/bin/gateway-route.sh`)
 	assert.Contains(t, script, "/home/agent/workspace")
 	assert.NotContains(t, script, "pre-entrypoint")
 }

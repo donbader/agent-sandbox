@@ -24,7 +24,8 @@ WORKDIR /home/agent
 {{- end }}
 
 COPY {{ .EntrypointPath }} /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY {{ .GatewayRoutePath }} /usr/local/bin/gateway-route.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/gateway-route.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 {{- if .CMD }}
 
