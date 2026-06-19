@@ -21,7 +21,6 @@ type ProxyConfig struct {
 	AllowCompose        bool
 	AllowBuild          bool
 	AllowedCapabilities []string
-	UpstreamDockerHost  string // e.g. "tcp://parent-proxy:2375"; empty = unix socket
 }
 
 func loadConfigFromEnv() (*ProxyConfig, error) {
@@ -63,9 +62,6 @@ func loadConfigFromEnv() (*ProxyConfig, error) {
 			return nil, fmt.Errorf("parse ALLOWED_CAPABILITIES: %w", err)
 		}
 	}
-
-	cfg.UpstreamDockerHost = os.Getenv("UPSTREAM_DOCKER_HOST")
-
 	return cfg, nil
 }
 

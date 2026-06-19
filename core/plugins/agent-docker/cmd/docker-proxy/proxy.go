@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"regexp"
+	"os"
 	"strings"
 	"sync"
 )
@@ -31,11 +32,10 @@ type DockerProxy struct {
 }
 
 // dialUpstream returns a net.Conn to the upstream Docker daemon.
-// If cfg.UpstreamDockerHost is tcp://..., dials TCP. Otherwise unix socket.
-func dialUpstream(cfg *ProxyConfig) (net.Conn, error) {
-	if cfg != nil && strings.HasPrefix(cfg.UpstreamDockerHost, "tcp://") {
-		addr := strings.TrimPrefix(cfg.UpstreamDockerHost, "tcp://")
-		return net.Dial("tcp", addr)
+// Respects DOCKER_HOST env var (standard Docker convention).
+func dialUpstream() (net.Conn, error) {
+	if dh := os.Getenv("DOCKER_HOST"); strings.HasPrefix(dh, "tcp://") {
+		return net.Dial("tcp", strings.TrimPrefix(dh, "tcp://"))
 	}
 	return net.Dial("unix", "/var/run/docker.sock")
 }
@@ -44,7 +44,7 @@ func dialUpstream(cfg *ProxyConfig) (net.Conn, error) {
 func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return dialUpstream(cfg)
+			return dialUpstream()
 		},
 	}
 	upstream := &httputil.ReverseProxy{
@@ -134,7 +134,7 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Cleanup stops and removes all tracked containers.
 func (dp *DockerProxy) Cleanup() {
-	cleaner := NewCleaner(dp.cfg.SandboxID, dp.cfg.UpstreamDockerHost)
+	cleaner := NewCleaner(dp.cfg.SandboxID)
 	cleaner.CleanupAll(context.Background())
 }
 
@@ -549,7 +549,7 @@ func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("hijack request", "method", r.Method, "path", r.URL.Path, "upgrade", r.Header.Get("Upgrade"))
 
 	// Connect to Docker daemon
-	dockerConn, err := dialUpstream(dp.cfg)
+	dockerConn, err := dialUpstream()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "cannot connect to Docker daemon")
 		return
