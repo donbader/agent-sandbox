@@ -131,9 +131,7 @@ Routes expose HTTP endpoints directly on the gateway (e.g. OAuth callbacks).
 ```typescript
 // src/callback.ts
 export default function(ctx: any, options: any) {
-  const query = ctx.request.query || "";
-  const params = new URLSearchParams(query);
-  const code = params.get("code");
+  const code = ctx.request.query["code"];
 
   if (!code) {
     ctx.response.status(400);
@@ -162,9 +160,11 @@ The `gw` global and `ctx` object are injected by the gateway runtime.
 | `ctx.request.url` | Full request URL |
 | `ctx.request.host` | Request hostname |
 | `ctx.request.path` | URL path |
-| `ctx.request.query` | Raw query string |
+| `ctx.request.query` | Parsed query parameters (`Record<string, string>`) |
 | `ctx.request.headers` | Header map (lowercase keys) |
 | `ctx.request.setHeader(name, value)` | Set/overwrite a request header |
+| `ctx.request.setPath(newPath)` | Rewrite the URL path before forwarding |
+| `ctx.request.body()` | Read the request body as a string (rewindable) |
 
 ### ctx.abort(status, body)
 
