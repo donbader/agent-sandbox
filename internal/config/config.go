@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/donbader/agent-sandbox/internal/runtime"
 	"gopkg.in/yaml.v3"
 )
 
@@ -127,8 +128,8 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate runtime_engine if specified
-	if c.RuntimeEngine != "" && c.RuntimeEngine != "docker" && c.RuntimeEngine != "podman" {
-		ve.Add(fmt.Sprintf("runtime_engine must be 'docker' or 'podman', got %q", c.RuntimeEngine))
+	if c.RuntimeEngine != "" && !runtime.IsValid(c.RuntimeEngine) {
+		ve.Add(fmt.Sprintf("runtime_engine must be one of %v, got %q", runtime.ValidNames(), c.RuntimeEngine))
 	}
 
 	// Validate egress rules

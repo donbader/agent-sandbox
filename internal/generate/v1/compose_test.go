@@ -6,6 +6,7 @@ import (
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/plugin"
+	"github.com/donbader/agent-sandbox/internal/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -800,4 +801,20 @@ func TestBuildProjectCompose_RawVolumesNotNamespaced(t *testing.T) {
 	// Raw volume keeps its original name (not prefixed with agent name)
 	assert.Contains(t, output, "my-data:/opt/data")
 	assert.NotContains(t, output, "my-agent-my-data")
+}
+
+// TestDangerousSocketPaths_EveryEngineHasSockets ensures every supported runtime
+// engine defines at least one socket path to block. If this fails, a new engine
+// was added to internal/runtime without defining its socket paths.
+func TestDangerousSocketPaths_EveryEngineHasSockets(t *testing.T) {
+	for name, engine := range runtime.Supported {
+		if len(engine.SocketPaths) == 0 {
+			t.Errorf("runtime engine %q has no socket paths defined — update internal/runtime/engine.go", name)
+		}
+	}
+	// DangerousSocketPaths must return at least the engine sockets + additional blocked.
+	paths := runtime.DangerousSocketPaths()
+	if len(paths) < len(runtime.Supported) {
+		t.Errorf("DangerousSocketPaths() returned %d paths, expected at least %d", len(paths), len(runtime.Supported))
+	}
 }

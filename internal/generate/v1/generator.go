@@ -194,6 +194,21 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		}
 
 		resolved[inst.Plugin] = &resolvedPlugin{def: pluginDef, rendered: rendered, options: inst.Options}
+
+		// Security: only @builtin/ plugins may mount docker.sock in sidecars.
+		if !strings.HasPrefix(inst.Plugin, "@builtin/") && len(rendered.Sidecar.Services) > 0 {
+			for svcName, svc := range rendered.Sidecar.Services {
+				for _, vol := range svc.Volumes {
+					src := strings.SplitN(vol, ":", 2)[0]
+					for _, sock := range dangerousSocketPaths {
+						if src == sock {
+							return nil, fmt.Errorf("plugin %q sidecar %q mounts %s — only @builtin/ plugins may access the container runtime socket", inst.Plugin, svcName, sock)
+						}
+					}
+				}
+			}
+		}
+
 		allContribs = append(allContribs, rendered)
 	}
 

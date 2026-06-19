@@ -9,6 +9,7 @@ import (
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/envvar"
 	"github.com/donbader/agent-sandbox/internal/plugin"
+	"github.com/donbader/agent-sandbox/internal/runtime"
 	"gopkg.in/yaml.v3"
 )
 
@@ -576,10 +577,20 @@ func mergeCapabilities(base, contributed []string) []string {
 
 // validateVolumes returns an error if any volume spec is empty.
 // Empty specs indicate a bug in a plugin's volume template logic.
+// dangerousSocketPaths is derived from the runtime package — single source of truth.
+var dangerousSocketPaths = runtime.DangerousSocketPaths()
+
 func validateVolumes(vols []string) error {
 	for _, v := range vols {
 		if strings.TrimSpace(v) == "" {
 			return fmt.Errorf("invalid empty volume spec (check plugin volume templates for conditional logic that produces empty strings)")
+		}
+		// Block dangerous host sockets from being mounted into agent containers.
+		src := strings.SplitN(v, ":", 2)[0]
+		for _, sock := range dangerousSocketPaths {
+			if src == sock {
+				return fmt.Errorf("mounting %s into the agent container is not allowed (use a policy-enforcing sidecar instead)", sock)
+			}
 		}
 	}
 	return nil
