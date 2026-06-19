@@ -16,9 +16,10 @@ import (
 
 // GatewayConfigOutput is the merged gateway configuration for rendering.
 type GatewayConfigOutput struct {
-	Services    []GatewayServiceOutput
-	AuthHeaders []AuthHeaderEntry // auth-header entries to bake into config.yaml
-	EgressRules []config.EgressRule
+	Services         []GatewayServiceOutput
+	AuthHeaders      []AuthHeaderEntry // auth-header entries to bake into config.yaml
+	EgressRules      []config.EgressRule
+	MiddlewareDomains []string // domains from plugin middlewares that require MITM
 }
 
 // AuthHeaderEntry describes an auth-header middleware to generate at build time.
@@ -122,6 +123,11 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 				out.EgressRules = insertPluginDomain(out.EgressRules, domain)
 			}
 		}
+
+		// Collect domains from plugin middlewares — these require MITM to intercept
+		for _, mw := range contribs.Gateway.Middlewares {
+			out.MiddlewareDomains = append(out.MiddlewareDomains, mw.Domains...)
+		}
 	}
 
 	return out
@@ -170,7 +176,14 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 	// Also add domains from plugin-contributed services
 	for _, svc := range gwCfg.Services {
 		domain := extractDomain(svc.URL)
-		if domain != "" && len(svc.Headers) > 0 {
+		if domain != "" {
+			mitmSet[domain] = true
+		}
+	}
+
+	// Add domains from plugin middlewares
+	for _, domain := range gwCfg.MiddlewareDomains {
+		if domain != "" && domain != "*" {
 			mitmSet[domain] = true
 		}
 	}
