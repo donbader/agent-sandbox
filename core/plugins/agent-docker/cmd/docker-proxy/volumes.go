@@ -230,6 +230,21 @@ func (dp *DockerProxy) translateBindMounts(body map[string]any) error {
 		}
 	}
 
+	// Intercept docker.sock mounts: remove them and inject DOCKER_HOST
+	var filteredBinds []string
+	hasSocketMount := false
+	for _, b := range binds {
+		if isDockerSocketBind(b) {
+			hasSocketMount = true
+		} else {
+			filteredBinds = append(filteredBinds, b)
+		}
+	}
+	if hasSocketMount {
+		dp.injectDockerHost(body)
+	}
+	binds = filteredBinds
+
 	remaining, newMounts, err := dp.volumes.TranslateBinds(binds)
 	if err != nil {
 		return err
@@ -257,4 +272,39 @@ func (dp *DockerProxy) translateBindMounts(body map[string]any) error {
 
 	body["HostConfig"] = hc
 	return nil
+}
+
+// isDockerSocketBind returns true if the bind mount source or target refers to a Docker socket.
+func isDockerSocketBind(bind string) bool {
+	parts := strings.SplitN(bind, ":", 3)
+	src := parts[0]
+	target := ""
+	if len(parts) >= 2 {
+		target = parts[1]
+	}
+	return isDockerSocketPath(src) || isDockerSocketPath(target)
+}
+
+// isDockerSocketPath returns true if the path looks like a Docker daemon socket.
+func isDockerSocketPath(p string) bool {
+	return p == "/var/run/docker.sock" ||
+		p == "/run/docker.sock" ||
+		strings.HasSuffix(p, "/docker.sock")
+}
+
+// injectDockerHost removes any existing DOCKER_HOST from env and adds one pointing to this proxy.
+func (dp *DockerProxy) injectDockerHost(body map[string]any) {
+	proxyHost := fmt.Sprintf("tcp://%s-agent-docker-proxy:2375", dp.cfg.AgentName)
+
+	var env []any
+	if existing, ok := body["Env"].([]any); ok {
+		for _, e := range existing {
+			s, _ := e.(string)
+			if !strings.HasPrefix(s, "DOCKER_HOST=") {
+				env = append(env, e)
+			}
+		}
+	}
+	env = append(env, "DOCKER_HOST="+proxyHost)
+	body["Env"] = env
 }
