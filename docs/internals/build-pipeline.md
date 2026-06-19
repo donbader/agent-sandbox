@@ -36,6 +36,8 @@ Detailed steps:
 
 11. **Generate docker-compose.yml** — Orchestrates agent + gateway containers with networking, volumes, and depends_on.
 
+12. **Generate .env.example** — Scans all `${VAR}` references across egress headers, plugin options, and plugin-contributed service headers. Writes a sorted, deduplicated `.env.example` to the project root.
+
 ## Generated Artifacts
 
 ```
@@ -59,6 +61,7 @@ Detailed steps:
         src/pkce.ts
   docker-compose.yml          ← single compose file orchestrating all agents
   schema.json
+.env.example                  ← all ${VAR} references (project root, not .build/)
 ```
 
 ## Gateway Container

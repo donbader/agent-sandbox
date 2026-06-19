@@ -96,6 +96,13 @@ GITHUB_PAT=ghp_xxxx
 
 Secrets are resolved at generate time and passed to the gateway at runtime via options. They never enter the agent container's environment. The `audit` command verifies this.
 
+The `generate` command automatically produces a `.env.example` file listing all `${VAR}` references found across fleet config, agent configs, and plugin options. Copy it to `.env` and fill in values:
+
+```bash
+cp .env.example .env
+# Edit .env with real values
+```
+
 ## Container Runtime
 
 By default, agent-sandbox uses Docker. To use Podman:

@@ -143,6 +143,9 @@ func (g *Generator) RunProject(project *config.Project) error {
 	if err := g.copyGatewayTypes(buildDir); err != nil {
 		return fmt.Errorf("copy gateway types: %w", err)
 	}
+	if err := WriteEnvExample(g.projectDir, entries); err != nil {
+		return fmt.Errorf("write .env.example: %w", err)
+	}
 	return nil
 }
 

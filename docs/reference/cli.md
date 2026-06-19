@@ -68,6 +68,7 @@ agent-sandbox -C examples/multi-agent generate
 - `.build/<agent-name>/gateway/` — gateway config and binary
 - `.build/docker-compose.yml` — all services
 - `.build/schema.json` — JSON Schema for agent.yaml
+- `.env.example` — all `${VAR}` references found in configs (project root)
 
 ## compose
 
