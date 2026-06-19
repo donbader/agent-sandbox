@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// handleVolumeCreate intercepts volume creation and injects the sandbox label.
+// handleVolumeCreate intercepts volume creation, namespaces the name, and injects the sandbox label.
 func (dp *DockerProxy) handleVolumeCreate(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -22,6 +22,14 @@ func (dp *DockerProxy) handleVolumeCreate(w http.ResponseWriter, r *http.Request
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+
+	// Namespace the volume name (only if one was explicitly provided)
+	userName, _ := body["Name"].(string)
+	var namespacedName string
+	if userName != "" {
+		namespacedName = dp.names.Namespace(KindVolume, userName)
+		body["Name"] = namespacedName
 	}
 
 	// Add sandbox label for ownership tracking
@@ -42,17 +50,19 @@ func (dp *DockerProxy) handleVolumeCreate(w http.ResponseWriter, r *http.Request
 	dp.upstream.ServeHTTP(rec, newReq)
 
 	if rec.code == http.StatusCreated || rec.code == http.StatusOK {
-		name, _ := body["Name"].(string)
-		if name != "" {
-			slog.Info("volume created", "name", name)
+		if userName != "" && namespacedName != "" {
+			dp.names.Track(KindVolume, userName, namespacedName)
+			slog.Info("volume created", "name", namespacedName)
 		}
 	}
 
+	respBody := dp.names.TranslateNames(KindVolume, rec.body.Bytes())
 	for k, v := range rec.header {
 		w.Header()[k] = v
 	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
 	w.WriteHeader(rec.code)
-	_, _ = w.Write(rec.body.Bytes())
+	_, _ = w.Write(respBody)
 }
 
 // handleVolumeList filters to only show volumes owned by this sandbox.
@@ -62,7 +72,17 @@ func (dp *DockerProxy) handleVolumeList(w http.ResponseWriter, r *http.Request) 
 	q.Set("filters", filters)
 	r.URL.RawQuery = q.Encode()
 
-	dp.upstream.ServeHTTP(w, r)
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, r)
+
+	body := dp.names.TranslateNames(KindVolume, rec.body.Bytes())
+
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(body)
 }
 
 // handleVolumeRemove only allows removing volumes owned by this sandbox.
@@ -74,12 +94,19 @@ func (dp *DockerProxy) handleVolumeRemove(w http.ResponseWriter, r *http.Request
 	}
 	volumeRef := parts[1]
 
+	// Resolve user-visible name to real (namespaced) name if known
+	if resolved := dp.names.Resolve(KindVolume, volumeRef); resolved != "" && resolved != volumeRef {
+		volumeRef = resolved
+		r.URL.Path = strings.Replace(r.URL.Path, parts[1], volumeRef, 1)
+	}
+
 	if !dp.volumeOwnedByLabel(volumeRef) {
 		writeError(w, http.StatusForbidden, "cannot remove volumes not created by this sandbox")
 		return
 	}
 
 	dp.upstream.ServeHTTP(w, r)
+	dp.names.Untrack(KindVolume, volumeRef)
 }
 
 // handleVolumeInspect only allows inspecting volumes owned by this sandbox.
@@ -90,6 +117,12 @@ func (dp *DockerProxy) handleVolumeInspect(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	volumeRef := parts[1]
+
+	// Resolve user-visible name to real (namespaced) name if known
+	if resolved := dp.names.Resolve(KindVolume, volumeRef); resolved != "" && resolved != volumeRef {
+		volumeRef = resolved
+		r.URL.Path = strings.Replace(r.URL.Path, parts[1], volumeRef, 1)
+	}
 
 	if !dp.volumeOwnedByLabel(volumeRef) {
 		writeError(w, http.StatusNotFound, "volume not found")

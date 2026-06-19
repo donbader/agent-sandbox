@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// handleNetworkCreate intercepts network creation and forces Internal=true.
+// handleNetworkCreate intercepts network creation, namespaces the name, and forces Internal=true.
 func (dp *DockerProxy) handleNetworkCreate(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -23,6 +23,11 @@ func (dp *DockerProxy) handleNetworkCreate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
+	// Namespace the network name
+	userName, _ := body["Name"].(string)
+	namespacedName := dp.names.Namespace(KindNetwork, userName)
+	body["Name"] = namespacedName
 
 	// Force internal: true — created networks cannot reach the internet
 	body["Internal"] = true
@@ -51,16 +56,19 @@ func (dp *DockerProxy) handleNetworkCreate(w http.ResponseWriter, r *http.Reques
 				dp.mu.Lock()
 				dp.networks[id] = true
 				dp.mu.Unlock()
-				slog.Info("network created", "id", id[:min(12, len(id))], "internal", true)
+				dp.names.Track(KindNetwork, userName, namespacedName)
+				slog.Info("network created", "id", id[:min(12, len(id))], "name", namespacedName, "internal", true)
 			}
 		}
 	}
 
+	respBody := dp.names.TranslateNames(KindNetwork, rec.body.Bytes())
 	for k, v := range rec.header {
 		w.Header()[k] = v
 	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
 	w.WriteHeader(rec.code)
-	_, _ = w.Write(rec.body.Bytes())
+	_, _ = w.Write(respBody)
 }
 
 // handleNetworkRemove only allows removing networks we created.
@@ -71,6 +79,12 @@ func (dp *DockerProxy) handleNetworkRemove(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	networkRef := parts[1]
+
+	// Resolve user-visible name to real (namespaced) name if known
+	if resolved := dp.names.Resolve(KindNetwork, networkRef); resolved != "" && resolved != networkRef {
+		networkRef = resolved
+		r.URL.Path = strings.Replace(r.URL.Path, parts[1], networkRef, 1)
+	}
 
 	// Check if we own this network (by ID)
 	dp.mu.Lock()
@@ -92,6 +106,7 @@ func (dp *DockerProxy) handleNetworkRemove(w http.ResponseWriter, r *http.Reques
 	dp.mu.Lock()
 	delete(dp.networks, networkRef)
 	dp.mu.Unlock()
+	dp.names.Untrack(KindNetwork, networkRef)
 }
 
 // handleNetworkList filters to only show networks owned by this sandbox.
@@ -101,7 +116,17 @@ func (dp *DockerProxy) handleNetworkList(w http.ResponseWriter, r *http.Request)
 	q.Set("filters", filters)
 	r.URL.RawQuery = q.Encode()
 
-	dp.upstream.ServeHTTP(w, r)
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, r)
+
+	body := dp.names.TranslateNames(KindNetwork, rec.body.Bytes())
+
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(body)
 }
 
 // handleNetworkConnect allows connecting containers to networks we own.

@@ -23,12 +23,12 @@ type DockerProxy struct {
 	cfg      *ProxyConfig
 	upstream *httputil.ReverseProxy
 	volumes  *VolumeTranslator
+	names    *NameTranslator    // bidirectional name mapping for containers, networks, volumes
 	mu       sync.Mutex
-	ids         map[string]bool   // container IDs owned by this sandbox (for counting)
-	tracked     map[string]bool   // all lookup keys (IDs + namespaced names) for ownership checks
-	nameMap     map[string]string // user-provided name → namespaced name
-	networks    map[string]bool   // network IDs created by this sandbox (for cleanup)
-	builtImages map[string]bool   // image tags built through this proxy (auto-allowed)
+	ids         map[string]bool // container IDs owned by this sandbox (for counting)
+	tracked     map[string]bool // all lookup keys (IDs + namespaced names) for ownership checks
+	networks    map[string]bool // network IDs created by this sandbox (for cleanup)
+	builtImages map[string]bool // image tags built through this proxy (auto-allowed)
 }
 
 // dialUpstream returns a net.Conn to the upstream Docker daemon.
@@ -68,9 +68,9 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 		mutator:     NewMutator(cfg),
 		cfg:         cfg,
 		upstream:    upstream,
+		names:       NewNameTranslator(cfg.SandboxID),
 		ids:         make(map[string]bool),
 		tracked:     make(map[string]bool),
-		nameMap:     make(map[string]string),
 		networks:    make(map[string]bool),
 		builtImages: builtImages,
 	}, nil
@@ -347,7 +347,17 @@ func (dp *DockerProxy) handleContainerList(w http.ResponseWriter, r *http.Reques
 	q.Set("filters", filters)
 	r.URL.RawQuery = q.Encode()
 
-	dp.upstream.ServeHTTP(w, r)
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, r)
+
+	body := dp.names.TranslateNames(KindContainer, rec.body.Bytes())
+
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(body)
 }
 
 // extractCreateRequest pulls validation-relevant fields from a Docker create body.
@@ -509,15 +519,15 @@ func extractContainerID(path string) string {
 // resolveContainerRef translates a user-provided container reference to the actual
 // namespaced name/ID. Returns empty string if not owned.
 func (dp *DockerProxy) resolveContainerRef(ref string) string {
+	// Try name translation first (user name → namespaced name, or real name passthrough)
+	if resolved := dp.names.Resolve(KindContainer, ref); resolved != "" {
+		return resolved
+	}
 	dp.mu.Lock()
 	defer dp.mu.Unlock()
 	// Direct match (full ID or namespaced name)
 	if dp.tracked[ref] {
 		return ref
-	}
-	// Try as user-provided name → namespaced name
-	if namespaced, ok := dp.nameMap[ref]; ok {
-		return namespaced
 	}
 	// Try prefix match on container IDs (docker allows short IDs)
 	for id := range dp.tracked {
@@ -534,9 +544,7 @@ func (dp *DockerProxy) trackContainer(id, userName, namespacedName string) {
 	dp.ids[id] = true
 	dp.tracked[id] = true
 	dp.tracked[namespacedName] = true
-	if userName != "" {
-		dp.nameMap[userName] = namespacedName
-	}
+	dp.names.Track(KindContainer, userName, namespacedName)
 }
 
 // isHijackEndpoint returns true for endpoints that require HTTP connection upgrade.
