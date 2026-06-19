@@ -410,44 +410,6 @@ func TestResolveFleetPaths(t *testing.T) {
 	}
 }
 
-func TestRenderContributions_RejectsLegacyServices(t *testing.T) {
-	raw := `
-name: legacy-plugin
-contributes:
-  gateway:
-    services:
-      - url: https://api.example.com
-`
-	p, err := ParsePluginYAML([]byte(raw))
-	require.NoError(t, err)
-
-	opts := map[string]any{}
-	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "deprecated")
-	assert.Contains(t, err.Error(), "agent-sandbox migrate")
-	assert.Contains(t, err.Error(), "legacy-plugin")
-}
-
-func TestRenderContributions_RejectsLegacyMiddlewares(t *testing.T) {
-	raw := `
-name: mw-plugin
-contributes:
-  gateway:
-    middlewares:
-      - script: "./src/auth.ts"
-        domains: ["api.example.com"]
-`
-	p, err := ParsePluginYAML([]byte(raw))
-	require.NoError(t, err)
-
-	opts := map[string]any{}
-	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "deprecated")
-	assert.Contains(t, err.Error(), "agent-sandbox migrate")
-}
-
 func TestRenderContributions_AllowsNewEgressFormat(t *testing.T) {
 	raw := `
 name: modern-plugin

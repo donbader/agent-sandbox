@@ -47,7 +47,6 @@ func main() {
 	root.AddCommand(generateCmd(&dir))
 	root.AddCommand(composeCmd(&dir))
 	root.AddCommand(auditCmd(&dir))
-	root.AddCommand(migrateCmd(&dir))
 	root.AddCommand(initCmd())
 
 	if err := root.Execute(); err != nil {
