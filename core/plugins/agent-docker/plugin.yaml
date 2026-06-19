@@ -2,6 +2,7 @@ name: agent-docker
 assets:
   - path: cmd/docker-proxy/
     exclude: ["*_test.go"]
+  - path: cmd/buildkit-sidecar/
 
 options:
   allowed_images:
@@ -39,7 +40,7 @@ options:
     type: boolean
     required: false
     default: false
-    description: "Allow docker build operations (auto-allows buildkit image and build-related endpoints)"
+    description: "Allow docker build operations (runs isolated buildkitd sidecar, agent connects via remote driver)"
   allowed_capabilities:
     type: array
     items:
@@ -53,7 +54,7 @@ contributes:
     environment:
       DOCKER_HOST: "tcp://{{ .agent.name }}-agent-docker-proxy:2375"
     pre_entrypoint:
-      - '{{ if .plugin.options.allow_build }}rm -rf "$AGENT_HOME/.docker/buildx/instances" 2>/dev/null || true{{ end }}'
+      - '{{ if .plugin.options.allow_build }}docker buildx create --name buildkit --driver remote --driver-opt url=tcp://{{ .agent.name }}-agent-docker-buildkit:8372 --use 2>/dev/null || true{{ end }}'
   sidecar:
     services:
       agent-docker-proxy:
@@ -69,3 +70,5 @@ contributes:
           ALLOW_COMPOSE: "{{ .plugin.options.allow_compose }}"
           ALLOW_BUILD: "{{ .plugin.options.allow_build }}"
           ALLOWED_CAPABILITIES: '{{ toJSON .plugin.options.allowed_capabilities }}'
+      agent-docker-buildkit:
+        build: {{ asset "cmd/buildkit-sidecar" }}
