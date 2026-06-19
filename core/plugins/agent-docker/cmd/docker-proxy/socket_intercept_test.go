@@ -35,7 +35,7 @@ func TestTranslateBindMounts_DockerSocket_StandardPath(t *testing.T) {
 	require.NoError(t, err)
 
 	// Socket bind should be removed
-	hc := body["HostConfig"].(map[string]any)
+	hc, _ := body["HostConfig"].(map[string]any)
 	_, hasBind := hc["Binds"]
 	assert.False(t, hasBind, "docker.sock bind should be removed")
 
@@ -69,7 +69,7 @@ func TestTranslateBindMounts_DockerSocket_AlternativeSrcPath(t *testing.T) {
 	err := dp.translateBindMounts(body)
 	require.NoError(t, err)
 
-	hc := body["HostConfig"].(map[string]any)
+	hc, _ := body["HostConfig"].(map[string]any)
 	_, hasBind := hc["Binds"]
 	assert.False(t, hasBind)
 
@@ -103,7 +103,7 @@ func TestTranslateBindMounts_DockerSocket_AlternativeTargetPath(t *testing.T) {
 	err := dp.translateBindMounts(body)
 	require.NoError(t, err)
 
-	hc := body["HostConfig"].(map[string]any)
+	hc, _ := body["HostConfig"].(map[string]any)
 	_, hasBind := hc["Binds"]
 	assert.False(t, hasBind)
 
@@ -141,7 +141,7 @@ func TestTranslateBindMounts_DockerSocket_MixedWithOtherBinds(t *testing.T) {
 	require.NoError(t, err)
 
 	// Named volume bind stays, socket removed, host path translated
-	hc := body["HostConfig"].(map[string]any)
+	hc, _ := body["HostConfig"].(map[string]any)
 	binds, _ := hc["Binds"].([]any)
 	assert.Equal(t, []any{"cache-vol:/cache"}, binds)
 
@@ -246,7 +246,7 @@ func TestTranslateBindMounts_DockerSocket_ReadOnlyVariant(t *testing.T) {
 	err := dp.translateBindMounts(body)
 	require.NoError(t, err)
 
-	hc := body["HostConfig"].(map[string]any)
+	hc, _ := body["HostConfig"].(map[string]any)
 	_, hasBind := hc["Binds"]
 	assert.False(t, hasBind)
 
