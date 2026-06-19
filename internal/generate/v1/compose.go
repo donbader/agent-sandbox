@@ -40,6 +40,7 @@ type agentPairParams struct {
 type agentPairResult struct {
 	services map[string]any
 	volumes  map[string]any
+	networks map[string]any // extra networks from egress rules
 }
 
 // buildAgentPair constructs the agent service, gateway service, and sidecar services
@@ -48,6 +49,7 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	result := agentPairResult{
 		services: map[string]any{},
 		volumes:  map[string]any{},
+		networks: map[string]any{},
 	}
 
 	cfg := p.cfg
@@ -166,6 +168,28 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	}
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
+	}
+	// Attach extra networks from egress rules to the gateway service.
+	// These are pre-existing Docker networks (external: true) that the gateway
+	// must join to reach services on those networks.
+	if gwNets, ok := gatewaySvc["networks"].(map[string]any); ok {
+		for _, rule := range cfg.Gateway.Egress {
+			if rule.Network != "" {
+				gwNets[rule.Network] = map[string]any{}
+				result.networks[rule.Network] = map[string]any{
+					"external": true,
+				}
+			}
+		}
+		// Also check legacy services for backward compat
+		for _, svc := range cfg.Gateway.Services {
+			if svc.Network != "" {
+				gwNets[svc.Network] = map[string]any{}
+				result.networks[svc.Network] = map[string]any{
+					"external": true,
+				}
+			}
+		}
 	}
 	result.services[p.gatewayName] = gatewaySvc
 
@@ -298,6 +322,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 
 		maps.Copy(compose.Services, pair.services)
 		maps.Copy(compose.Volumes, pair.volumes)
+		maps.Copy(compose.Networks, pair.networks)
 	}
 
 	// Validate network isolation: non-gateway services must only be on internal networks.

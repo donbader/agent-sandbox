@@ -26,6 +26,14 @@ func MigrateServicesToEgress(services []GatewayServiceEntry) []EgressRule {
 		if len(svc.Headers) > 0 {
 			rule.Headers = svc.Headers
 		}
+		if svc.Network != "" {
+			rule.Network = svc.Network
+		}
+		// Build target from host:port URL
+		target := extractMigrationTarget(svc.URL)
+		if target != "" {
+			rule.Target = target
+		}
 		rules = append(rules, rule)
 	}
 
@@ -89,4 +97,18 @@ func extractMigrationDomain(rawURL string) string {
 		return rawURL[:idx]
 	}
 	return rawURL
+}
+
+// extractMigrationTarget builds a target (host:port) from a service URL.
+// Returns empty for standard HTTPS URLs (passthrough) and "host:port" for plain host:port services.
+func extractMigrationTarget(rawURL string) string {
+	if strings.Contains(rawURL, "://") {
+		// Standard HTTPS — no explicit target needed (passthrough on :443)
+		return ""
+	}
+	// Plain host:port — use as target directly
+	if strings.Contains(rawURL, ":") {
+		return rawURL
+	}
+	return ""
 }

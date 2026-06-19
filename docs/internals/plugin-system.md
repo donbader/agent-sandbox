@@ -133,7 +133,7 @@ Host APIs available: `gw.crypto`, `gw.fs`, `gw.http`, `gw.secrets`, `gw.log`.
 `LoadProject()` merges `shared` into each per-agent config:
 
 - `shared.installations` prepended to per-agent installations (same plugin name → per-agent wins)
-- `shared.gateway.services` prepended to per-agent services (same URL → per-agent wins)
+- `shared.gateway.egress` used unless per-agent defines its own (per-agent fully overrides shared)
 - Each agent gets its own gateway container with independently loaded plugins
 
 ## Conflict Detection

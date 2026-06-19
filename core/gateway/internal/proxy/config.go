@@ -44,6 +44,7 @@ type EgressRule struct {
 	Deny      bool              `yaml:"deny,omitempty"`       // if true, block matching traffic
 	Headers   map[string]string `yaml:"headers,omitempty"`    // headers to inject (implies allow + MITM)
 	DenyPaths []string          `yaml:"deny_paths,omitempty"` // URL path patterns to block
+	Target    string            `yaml:"target,omitempty"`       // forwarding destination (host:port)
 }
 
 // RequestHandler intercepts connections to specific hosts.

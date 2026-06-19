@@ -59,6 +59,7 @@ type egressRuleRuntime struct {
 	Deny      bool              `yaml:"deny,omitempty"`
 	Headers   map[string]string `yaml:"headers,omitempty"`
 	DenyPaths []string          `yaml:"deny_paths,omitempty"`
+	Target    string            `yaml:"target,omitempty"`
 }
 
 // BuildGatewayConfig merges user gateway config with plugin contributions.
@@ -198,6 +199,7 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			Deny:      rule.Deny,
 			Headers:   rule.Headers,
 			DenyPaths: rule.DenyPaths,
+			Target:    rule.Target,
 		})
 	}
 

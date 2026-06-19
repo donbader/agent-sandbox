@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -135,10 +136,25 @@ func main() {
 	// Register HTTP proxy handler (for plain HTTP services)
 	{
 		egressFilter := proxy.NewEgressFilter(cfg.EgressRules)
-		httpHandler := proxy.NewHTTPHandler(cfg.HTTPServices, egressFilter)
+
+		// Build HTTP services from egress rules with target specified
+		httpServices := append([]proxy.HTTPService{}, cfg.HTTPServices...)
+		for _, rule := range cfg.EgressRules {
+			if rule.Target != "" && !rule.Deny {
+				host, port, err := net.SplitHostPort(rule.Target)
+				if err == nil {
+					httpServices = append(httpServices, proxy.HTTPService{
+						Host: host,
+						Port: port,
+					})
+				}
+			}
+		}
+
+		httpHandler := proxy.NewHTTPHandler(httpServices, egressFilter)
 		p.RegisterHTTPHandler(httpHandler)
-		if len(cfg.HTTPServices) > 0 {
-			slog.Info("http proxy enabled", "services", cfg.HTTPServices)
+		if len(httpServices) > 0 {
+			slog.Info("http proxy enabled", "services", httpServices)
 		}
 		if len(cfg.EgressRules) > 0 {
 			slog.Info("egress rules loaded", "count", len(cfg.EgressRules))

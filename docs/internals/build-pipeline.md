@@ -22,7 +22,7 @@ Detailed steps:
 
 4. **Render contributions** — Each plugin's `contributes` fields are rendered as Go templates with access to plugin options and agent context.
 
-5. **Merge contributions** — All plugin contributions are merged (runtime extra_builds, gateway services, volumes, etc.).
+5. **Merge contributions** — All plugin contributions are merged (runtime extra_builds, gateway egress rules, volumes, etc.).
 
 6. **Generate Dockerfile** — Combine runtime preset (base image, install commands) with plugin contributions (extra_builds, ports, volumes).
 

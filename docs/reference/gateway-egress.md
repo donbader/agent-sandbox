@@ -1,45 +1,44 @@
 # Gateway Egress Rules
 
-Egress rules control which external hosts the agent container can reach through the gateway. All outbound traffic is intercepted via iptables DNAT and routed through the gateway — egress rules determine what gets allowed, blocked, or modified.
-
-## Configuration
-
-Add `gateway.egress` to your `agent.yaml`:
+Control which hosts the agent can reach, inject credentials, and block specific paths — all through ordered rules evaluated at the gateway.
 
 ```yaml
 gateway:
   egress:
-    - hosts: ["evil.com", "*.malware.net"]
-      deny: true
-
     - hosts: ["api.github.com"]
       headers:
         Authorization: "Bearer ${GITHUB_PAT}"
-      deny_paths:
-        - "DELETE /repos/*"
-        - "DELETE /orgs/*"
-
-    - hosts: ["registry.npmjs.org", "*.cloudfront.net", "pypi.org"]
-
-    - hosts: ["*"]   # catch-all allow — remove this for deny-all-by-default
+    - hosts: ["registry.npmjs.org", "pypi.org"]
+    - hosts: ["*"]
 ```
 
-## How It Works
+## Rule Evaluation
 
-Rules are evaluated **in order**. First match wins.
+Rules are evaluated **in order**. First match wins. No match = **implicit deny**.
 
-| Rule type | Meaning |
-|-----------|---------|
-| `hosts: [x]` | Allow traffic, passthrough |
-| `hosts: [x], headers: {...}` | Allow + MITM + inject credentials |
-| `hosts: [x], deny: true` | Block traffic (connection reset) |
-| `hosts: [x], deny_paths: [...]` | Allow host but block specific URL paths |
-| No match | **Implicit deny** (connection dropped) |
+- End with `hosts: ["*"]` for permissive mode (allow-all, only explicit `deny` blocks)
+- Omit catch-all for strict mode (only listed hosts are reachable)
 
-### Catch-All Behavior
+## Field Reference
 
-- **With** `hosts: ["*"]` at the end → permissive mode (only explicit `deny` rules block)
-- **Without** catch-all → strict mode (only listed hosts are allowed)
+| Field | Type | Purpose |
+|-------|------|---------|
+| `hosts` | `[]string` | **Required.** Host patterns to match (domain globs, CIDRs, `"*"`) |
+| `deny` | `bool` | Block matching traffic at TCP layer (connection reset) |
+| `headers` | `map[string]string` | Inject headers via MITM. Implies allow. |
+| `deny_paths` | `[]string` | Block specific URL paths. Implies MITM. |
+| `target` | `string` | Forwarding destination (`host:port`) for internal/HTTP services |
+| `network` | `string` | Compose network to attach gateway to (for reaching internal services) |
+
+### Field Responsibilities
+
+| Concern | Field | Layer |
+|---------|-------|-------|
+| Matching | `hosts` | Which outbound connections trigger this rule |
+| Decision | `deny` | Block at L4 (no TLS termination, cheap) |
+| Request modification | `headers`, `deny_paths` | Inject creds or block paths at L7 (requires MITM) |
+| Routing | `target` | Where to forward traffic (default: passthrough on :443) |
+| Infrastructure | `network` | Docker network attachment for compose generation |
 
 ## Host Patterns
 
@@ -50,9 +49,9 @@ Rules are evaluated **in order**. First match wins.
 | `"10.0.0.0/8"` | IP addresses in CIDR range |
 | `"*"` | Everything (catch-all) |
 
-## Headers (Credential Injection)
+## Headers
 
-When a rule has `headers`, the gateway performs TLS MITM on that domain to inject the specified headers into every request:
+Inject credentials into requests via TLS MITM:
 
 ```yaml
 - hosts: ["api.anthropic.com"]
@@ -61,34 +60,48 @@ When a rule has `headers`, the gateway performs TLS MITM on that domain to injec
     anthropic-version: "2024-01-01"
 ```
 
-Headers support `${ENV_VAR}` syntax — the env var is resolved at gateway runtime, never baked into images.
+`${ENV_VAR}` syntax is resolved at gateway runtime — secrets never baked into images.
 
 ## Deny Paths
 
-Block specific URL paths while allowing the host generally. Requires MITM (automatically enabled):
+Block specific URL paths while allowing the host. Requires MITM (auto-enabled):
 
 ```yaml
 - hosts: ["api.github.com"]
   headers:
     Authorization: "Bearer ${GITHUB_PAT}"
   deny_paths:
-    - "DELETE /repos/*"        # Block DELETE to /repos/<anything>
-    - "/orgs/*/members"        # Block any method to this path
-    - "/admin/*"               # Block entire /admin/ subtree
+    - "DELETE /repos/*"
+    - "/orgs/*/members"
+    - "/admin/*"
 ```
 
-Path pattern formats:
-- `"/path/glob"` — matches any HTTP method
-- `"METHOD /path/glob"` — matches only the specified method
+Formats:
+- `"/path/glob"` — any method
+- `"METHOD /path/glob"` — specific method only
 
-Path matching uses glob syntax (`*` matches one path segment, not `/`).
+## Internal Services (target + network)
 
-## Fleet (Shared) Configuration
-
-In `fleet.yaml`, shared egress rules apply to all agents unless the agent defines its own:
+For services on non-standard ports or separate Docker networks:
 
 ```yaml
-# fleet.yaml
+- hosts: ["rkgw"]
+  target: "rkgw:8765"
+  network: rkgw-external
+  headers:
+    x-api-key: "${RKGW_API_KEY}"
+```
+
+- `target` — tells gateway where to forward HTTP traffic (omit for standard HTTPS passthrough on :443)
+- `network` — attaches gateway container to that Docker network so it can reach the target
+
+Services already on the sandbox network don't need `network`.
+
+## Fleet Configuration
+
+Shared egress in `fleet.yaml`:
+
+```yaml
 shared:
   gateway:
     egress:
@@ -98,51 +111,43 @@ shared:
       - hosts: ["*"]
 ```
 
-**Override behavior:** If an agent defines `gateway.egress`, it **fully replaces** the shared rules (not merged). This is because rule order matters and merging could produce surprising first-match-wins behavior.
+Per-agent `gateway.egress` **fully replaces** shared rules (not merged). Rule order matters — additive merging would produce surprising first-match-wins behavior.
 
 ## Migration from `gateway.services`
 
-The old `gateway.services` format is deprecated. During `agent-sandbox generate`, you'll be prompted to migrate:
+`gateway.services` is deprecated. Run `agent-sandbox generate` to be prompted, or use `--migrate` for automatic conversion.
 
-```
-⚠️  Agent "coder" uses deprecated gateway.services format.
-   The new gateway.egress format provides whitelist/blacklist control.
-
-   Migrate agent.yaml? [Y/n]
-```
-
-Use `--migrate` flag for automatic migration without prompts.
-
-### Manual Migration
-
-Old format:
+Before:
 ```yaml
 gateway:
   services:
     - url: https://api.github.com
       headers:
         Authorization: "Bearer ${GITHUB_PAT}"
-    - url: https://api.anthropic.com
+    - url: rkgw:8765
+      network: rkgw-external
       headers:
-        x-api-key: "${ANTHROPIC_KEY}"
+        x-api-key: "${RKGW_API_KEY}"
 ```
 
-New format:
+After:
 ```yaml
 gateway:
   egress:
     - hosts: ["api.github.com"]
       headers:
         Authorization: "Bearer ${GITHUB_PAT}"
-    - hosts: ["api.anthropic.com"]
+    - hosts: ["rkgw"]
+      target: "rkgw:8765"
+      network: rkgw-external
       headers:
-        x-api-key: "${ANTHROPIC_KEY}"
+        x-api-key: "${RKGW_API_KEY}"
     - hosts: ["*"]   # preserves old default-allow behavior
 ```
 
 ## Examples
 
-### Strict whitelist (recommended for production)
+### Strict whitelist
 
 ```yaml
 gateway:
@@ -157,7 +162,7 @@ gateway:
     - hosts: ["pypi.org", "files.pythonhosted.org"]
 ```
 
-No catch-all → agent can **only** reach these hosts.
+No catch-all → only listed hosts are reachable.
 
 ### Permissive with blocklist
 
@@ -172,9 +177,7 @@ gateway:
     - hosts: ["*"]
 ```
 
-Everything allowed except explicitly blocked hosts.
-
-### Mixed: allow with path restrictions
+### Path restrictions
 
 ```yaml
 gateway:
@@ -189,4 +192,18 @@ gateway:
     - hosts: ["*"]
 ```
 
-Agent can use OpenAI API but can't fine-tune models, upload files, or delete models.
+### Internal service with network
+
+```yaml
+gateway:
+  egress:
+    - hosts: ["agent-gateway.stx-ai.net"]
+      headers:
+        Authorization: "Bearer ${STX_KEY}"
+    - hosts: ["rkgw"]
+      target: "rkgw:8765"
+      network: rkgw-external
+      headers:
+        x-api-key: "${RKGW_API_KEY}"
+    - hosts: ["*"]
+```
