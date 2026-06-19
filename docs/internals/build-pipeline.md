@@ -28,7 +28,7 @@ Detailed steps:
 
 7. **Generate entrypoint.sh** — Pre-entrypoint commands from plugins, then the agent CMD.
 
-8. **Generate gateway config** — `config.yaml` (MITM domains, auth headers, DNS, port forwards) and `plugins.yaml` (TypeScript plugin manifest for runtime loading).
+8. **Generate gateway config** — `config.yaml` (MITM domains from egress rules with headers, deny_paths, or middlewares; auth headers; DNS; port forwards) and `plugins.yaml` (TypeScript plugin manifest for runtime loading).
 
 9. **Copy gateway binary** — Pre-built `gateway-linux-<arch>` binary from core tarball into `.build/`.
 
@@ -101,7 +101,7 @@ Resolved values are baked into gateway `config.yaml` (for auth-header injection)
 
 ## CA Lifecycle
 
-If any plugin declares MITM domains (services with `https://` URLs), the generator:
+If any egress rule requires MITM (has `headers`, `deny_paths`, or `middlewares`), the generator:
 1. Configures the gateway to perform MITM on those domains
 2. The gateway generates/reuses a CA keypair at runtime (persisted on shared volume)
 3. The agent container trusts this CA (injected into system trust store at boot)

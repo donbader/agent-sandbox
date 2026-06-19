@@ -78,7 +78,7 @@ Local plugin paths are validated to not escape the project directory (path trave
 8. Merge contributions across all plugins (runtime, gateway)
 9. Render Dockerfile from template (preset + extra_builds + plugin contributions)
 10. Render entrypoint.sh from template
-11. Build gateway runtime config (collect MITM domains from service URLs)
+11. Build gateway runtime config (collect MITM domains from egress rules with headers, deny_paths, or middlewares)
 12. Generate auth-header config from `headers` with `${ENV_VAR}` patterns
 13. Copy TypeScript plugin sources into gateway build context
 14. Generate `plugins.yaml` for gateway runtime plugin loading

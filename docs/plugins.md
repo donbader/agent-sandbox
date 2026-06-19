@@ -29,13 +29,12 @@ options:
 
 contributes:
   gateway:
-    services:                      # domains the gateway should proxy
-      - url: "https://api.example.com"
+    egress:                            # egress rules (same format as user config)
+      - hosts: ["api.example.com"]
+        middlewares:                    # intercept proxied requests
+          - script: "./src/auth.ts"
     namespaced_volumes:            # auto-prefixed with {agentName}-
       - "my-data:{{ .plugin.options.data_dir }}"
-    middlewares:                    # intercept proxied requests
-      - script: "./src/auth.ts"
-        domains: ["api.example.com"]   # optional domain filter
     routes:                        # expose HTTP endpoints on the gateway
       - path: "/callback"
         handler: "./src/callback.ts"
@@ -58,12 +57,12 @@ contributes:
 
 **Built-in template functions:** `toJSON`, `asset`, `index` (Go built-in).
 
-Dynamic service list example:
+Dynamic egress list example:
 
 ```yaml
-services:
+egress:
 {{- range $name, $cfg := .plugin.options.providers }}
-  - url: "{{ index $cfg "mcp_url" }}"
+  - hosts: ["{{ index $cfg "host" }}"]
 {{- end }}
 ```
 
@@ -123,7 +122,7 @@ export default function(ctx: any, options: any) {
 - Return normally → request continues to upstream
 - Call `ctx.abort(status, body)` → request is terminated with the given response
 
-If `domains` is set in `plugin.yaml`, the handler only fires for requests matching those hosts. Otherwise it fires for all proxied requests.
+Middlewares are scoped to the hosts defined in their parent egress rule — they only fire for requests matching those hosts.
 
 ## Writing a Route Handler
 
