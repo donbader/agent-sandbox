@@ -83,7 +83,6 @@ type GatewayServiceEntry struct {
 // Installation represents a plugin installation with options.
 type Installation struct {
 	Plugin  string         `yaml:"plugin" json:"plugin" jsonschema:"required,title=plugin,description=Plugin reference. Use @builtin/name for bundled plugins or ./path for local plugins. Bare names are not allowed."`
-	Source  string         `yaml:"source" json:"source,omitempty" jsonschema:"title=source,description=Plugin source (reserved for future remote resolution)"`
 	Options map[string]any `yaml:"options" json:"options,omitempty" jsonschema:"title=options,description=Plugin-specific configuration options"`
 }
 
@@ -139,15 +138,9 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate service URLs (legacy format)
-	for i, svc := range c.Gateway.Services {
-		if svc.URL == "" {
-			ve.Add(fmt.Sprintf("gateway.services[%d]: url is required", i))
-			continue
-		}
-		if strings.HasPrefix(svc.URL, "docker://") {
-			ve.Add(fmt.Sprintf("gateway.services[%d]: docker:// URLs are deprecated, use plain host:port (e.g. %s)", i, strings.TrimPrefix(svc.URL, "docker://")))
-		}
+	// Legacy services format is no longer supported — must migrate to egress
+	if len(c.Gateway.Services) > 0 {
+		ve.Add("gateway.services is removed — run 'agent-sandbox generate --migrate' to convert to gateway.egress format")
 	}
 
 	if ve.HasErrors() {
@@ -211,36 +204,6 @@ func MergeInstallations(shared []Installation, perAgent []Installation) []Instal
 	}
 
 	// Append all per-agent installations
-	merged = append(merged, perAgent...)
-	return merged
-}
-
-// MergeGatewayServices merges shared gateway services with per-agent services.
-// Shared services are prepended; per-agent services with the same URL override shared.
-func MergeGatewayServices(shared, perAgent []GatewayServiceEntry) []GatewayServiceEntry {
-	if len(shared) == 0 {
-		return perAgent
-	}
-	if len(perAgent) == 0 {
-		return shared
-	}
-
-	// Build set of per-agent URLs for dedup
-	agentURLs := make(map[string]bool, len(perAgent))
-	for _, svc := range perAgent {
-		agentURLs[svc.URL] = true
-	}
-
-	// Shared services that aren't overridden by per-agent
-	var merged []GatewayServiceEntry
-	for _, svc := range shared {
-		if agentURLs[svc.URL] {
-			continue
-		}
-		merged = append(merged, svc)
-	}
-
-	// Append all per-agent services
 	merged = append(merged, perAgent...)
 	return merged
 }

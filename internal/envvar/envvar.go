@@ -2,7 +2,6 @@
 package envvar
 
 import (
-	"os"
 	"strings"
 )
 
@@ -36,22 +35,6 @@ func ExtractAll(s string) []string {
 		s = s[start+2+end+1:]
 	}
 	return vars
-}
-
-// Expand replaces the first ${VAR} in s with the value of that environment variable.
-// If no ${VAR} pattern exists, returns s unchanged.
-func Expand(s string) string {
-	start := strings.Index(s, "${")
-	if start == -1 {
-		return s
-	}
-	end := strings.Index(s[start+2:], "}")
-	if end == -1 {
-		return s
-	}
-	varName := s[start+2 : start+2+end]
-	envVal := os.Getenv(varName)
-	return s[:start] + envVal + s[start+2+end+1:]
 }
 
 // ParseTemplate extracts the env var name and produces a value format template.

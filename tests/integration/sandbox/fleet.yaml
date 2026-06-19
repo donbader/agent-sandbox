@@ -5,5 +5,5 @@ agents:
 
 shared:
   gateway:
-    services: []
+    egress: []
   installations: []
