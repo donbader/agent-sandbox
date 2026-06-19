@@ -16,7 +16,7 @@ func TestResolve_BuiltinPrefix(t *testing.T) {
 	bundled := testBundledFS()
 
 	resolver := NewResolver(dir, bundled)
-	p, err := resolver.Resolve("@builtin/github-pat", "")
+	p, err := resolver.Resolve("@builtin/github-pat")
 	require.NoError(t, err)
 	assert.Equal(t, "github-pat", p.Name)
 }
@@ -25,14 +25,14 @@ func TestResolve_BuiltinPrefix_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	bundled := testBundledFS()
 	resolver := NewResolver(dir, bundled)
-	_, err := resolver.Resolve("@builtin/nonexistent", "")
+	_, err := resolver.Resolve("@builtin/nonexistent")
 	assert.ErrorContains(t, err, "not found in bundled plugins")
 }
 
 func TestResolve_BuiltinPrefix_NoBundledFS(t *testing.T) {
 	dir := t.TempDir()
 	resolver := NewResolver(dir, nil)
-	_, err := resolver.Resolve("@builtin/github-pat", "")
+	_, err := resolver.Resolve("@builtin/github-pat")
 	assert.ErrorContains(t, err, "no bundled plugins available")
 }
 
@@ -49,7 +49,7 @@ contributes:
 `), 0644))
 
 	resolver := NewResolver(dir, nil)
-	p, err := resolver.Resolve("./plugins/custom-thing", "")
+	p, err := resolver.Resolve("./plugins/custom-thing")
 	require.NoError(t, err)
 	assert.Equal(t, "custom-thing", p.Name)
 	assert.Equal(t, filepath.Clean(customDir), p.BaseDir)
@@ -58,14 +58,14 @@ contributes:
 func TestResolve_LocalPathPrefix_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	resolver := NewResolver(dir, nil)
-	_, err := resolver.Resolve("./nonexistent", "")
-	assert.ErrorContains(t, err, "plugin at \"./nonexistent\" not found")
+	_, err := resolver.Resolve("./nonexistent")
+	assert.ErrorContains(t, err, "plugin at ./nonexistent not found")
 }
 
 func TestResolve_LocalPathPrefix_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	resolver := NewResolver(dir, nil)
-	_, err := resolver.Resolve("./../../etc", "")
+	_, err := resolver.Resolve("./../../etc")
 	assert.ErrorContains(t, err, "escapes project directory")
 }
 
@@ -73,7 +73,7 @@ func TestResolve_BareName_Rejected(t *testing.T) {
 	dir := t.TempDir()
 	bundled := testBundledFS()
 	resolver := NewResolver(dir, bundled)
-	_, err := resolver.Resolve("github-pat", "")
+	_, err := resolver.Resolve("github-pat")
 	assert.ErrorContains(t, err, "must use @builtin/github-pat, @fleet/<path>, or ./<path> prefix")
 }
 

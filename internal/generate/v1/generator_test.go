@@ -41,11 +41,6 @@ log_level: debug
 runtime:
   image: "@builtin/codex"
   entrypoint: ["sleep", "infinity"]
-gateway:
-  services:
-    - url: https://api.example.com
-      headers:
-        Authorization: Bearer ${TOKEN}
 installations:
   - plugin: ./plugins/my-tool
     options:
@@ -371,11 +366,6 @@ name: test-agent
 core_version: latest
 runtime:
   image: "@builtin/codex"
-gateway:
-  services:
-    - url: https://api.example.com
-      headers:
-        Authorization: Bearer ${TOKEN}
 `
 	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
 
@@ -442,11 +432,6 @@ name: %s
 core_version: latest
 runtime:
   image: "@builtin/codex"
-gateway:
-  services:
-    - url: https://api.example.com
-      headers:
-        Authorization: Bearer ${TOKEN}
 `, name)
 		require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
 	}
@@ -521,11 +506,6 @@ name: %s
 core_version: latest
 runtime:
   image: "@builtin/codex"
-gateway:
-  services:
-    - url: https://api.example.com
-      headers:
-        Authorization: Bearer ${TOKEN}
 `, name)
 		require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
 	}

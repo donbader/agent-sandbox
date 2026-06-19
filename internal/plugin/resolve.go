@@ -36,17 +36,10 @@ func (r *Resolver) SetFleetDir(dir string) {
 //   - "./path"        — resolve from local filesystem (relative to project dir)
 //
 // Bare names without a prefix are rejected.
-// If source is non-empty, it's a remote plugin (future).
-func (r *Resolver) Resolve(name string, source string) (*PluginDef, error) {
-	// Remote (future — source field)
-	if source != "" {
-		return nil, fmt.Errorf("remote plugin resolution not yet implemented: %s", source)
-	}
-
+func (r *Resolver) Resolve(name string) (*PluginDef, error) {
 	// Explicit @builtin/ prefix — bundled only
 	if after, ok := strings.CutPrefix(name, builtinPrefix); ok {
-		pluginName := after
-		return r.resolveFromBundled(pluginName)
+		return r.resolveFromBundled(after)
 	}
 
 	// Explicit @fleet/ prefix — resolve relative to fleet/project root
@@ -54,12 +47,12 @@ func (r *Resolver) Resolve(name string, source string) (*PluginDef, error) {
 		if r.fleetDir == "" {
 			return nil, fmt.Errorf("plugin %q: @fleet/ prefix requires fleet mode", name)
 		}
-		return r.resolveFromFleet(after)
+		return r.resolveFromDir(r.fleetDir, after, "@fleet/"+after)
 	}
 
 	// Explicit ./ prefix — local only
 	if strings.HasPrefix(name, "./") {
-		return r.resolveFromLocal(name)
+		return r.resolveFromDir(r.projectDir, name, name)
 	}
 
 	return nil, fmt.Errorf("plugin %q: must use @builtin/%s, @fleet/<path>, or ./<path> prefix", name, name)
@@ -79,44 +72,20 @@ func (r *Resolver) resolveFromBundled(name string) (*PluginDef, error) {
 	return ParsePluginYAML(data)
 }
 
-// resolveFromLocal resolves a plugin from a local path relative to the project dir.
-// Rejects paths that escape the project directory.
-func (r *Resolver) resolveFromLocal(relPath string) (*PluginDef, error) {
-	localDir := filepath.Join(r.projectDir, relPath)
-	// Prevent path traversal outside project dir
+// resolveFromDir resolves a plugin from a path relative to baseDir.
+// label is used in error messages (e.g. the original plugin reference).
+func (r *Resolver) resolveFromDir(baseDir, relPath, label string) (*PluginDef, error) {
+	localDir := filepath.Join(baseDir, relPath)
 	cleanDir := filepath.Clean(localDir)
-	cleanProject := filepath.Clean(r.projectDir)
-	if !strings.HasPrefix(cleanDir, cleanProject+string(filepath.Separator)) {
-		return nil, fmt.Errorf("plugin path %q escapes project directory", relPath)
+	cleanBase := filepath.Clean(baseDir)
+	if !strings.HasPrefix(cleanDir, cleanBase+string(filepath.Separator)) {
+		return nil, fmt.Errorf("plugin path %s escapes project directory", label)
 	}
 
 	localPath := filepath.Join(cleanDir, "plugin.yaml")
 	data, err := os.ReadFile(localPath)
 	if err != nil {
-		return nil, fmt.Errorf("plugin at %q not found (checked %s)", relPath, localPath)
-	}
-	p, err := ParsePluginYAML(data)
-	if err != nil {
-		return nil, err
-	}
-	p.BaseDir = cleanDir
-	return p, nil
-}
-
-// resolveFromFleet resolves a plugin from a path relative to the fleet/project root.
-// Used for @fleet/ prefixed plugin references in fleet mode.
-func (r *Resolver) resolveFromFleet(relPath string) (*PluginDef, error) {
-	localDir := filepath.Join(r.fleetDir, relPath)
-	cleanDir := filepath.Clean(localDir)
-	cleanFleet := filepath.Clean(r.fleetDir)
-	if !strings.HasPrefix(cleanDir, cleanFleet+string(filepath.Separator)) {
-		return nil, fmt.Errorf("plugin path @fleet/%s escapes project directory", relPath)
-	}
-
-	localPath := filepath.Join(cleanDir, "plugin.yaml")
-	data, err := os.ReadFile(localPath)
-	if err != nil {
-		return nil, fmt.Errorf("plugin at @fleet/%s not found (checked %s)", relPath, localPath)
+		return nil, fmt.Errorf("plugin at %s not found (checked %s)", label, localPath)
 	}
 	p, err := ParsePluginYAML(data)
 	if err != nil {

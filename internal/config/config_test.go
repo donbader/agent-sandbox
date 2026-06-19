@@ -43,7 +43,7 @@ gateway:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
 	_, err := Load(dir)
-	assert.ErrorContains(t, err, "docker:// URLs are deprecated")
+	assert.ErrorContains(t, err, "gateway.services is removed")
 }
 
 func TestLoad_BasicConfig(t *testing.T) {
@@ -59,11 +59,6 @@ runtime:
   entrypoint: ["codex-acp", "--listen", ":8080"]
   volumes:
     - "data:/opt/data"
-gateway:
-  services:
-    - url: https://api.example.com
-      headers:
-        Authorization: Bearer ${TOKEN}
 installations:
   - plugin: github-pat
     options:
@@ -79,8 +74,6 @@ installations:
 	assert.Equal(t, "v1.0.0", cfg.CoreVersion)
 	assert.Equal(t, "@builtin/codex", cfg.Runtime.Image)
 	assert.Equal(t, []string{"codex-acp", "--listen", ":8080"}, cfg.Runtime.Entrypoint)
-	assert.Len(t, cfg.Gateway.Services, 1)
-	assert.Equal(t, "https://api.example.com", cfg.Gateway.Services[0].URL)
 	assert.Len(t, cfg.Installations, 1)
 	assert.Equal(t, "github-pat", cfg.Installations[0].Plugin)
 }
@@ -132,23 +125,6 @@ runtime:
 	})
 }
 
-func TestLoad_PlainHostPort(t *testing.T) {
-	dir := t.TempDir()
-	yaml := `
-name: test
-core_version: latest
-runtime:
-  image: "@builtin/codex"
-gateway:
-  services:
-    - url: "sidecar:8080"
-`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
-	cfg, err := Load(dir)
-	require.NoError(t, err)
-	assert.Equal(t, "sidecar:8080", cfg.Gateway.Services[0].URL)
-}
-
 func TestValidate_CollectsAllErrors(t *testing.T) {
 	// Config with multiple problems — validation should report all of them.
 	cfg := &Config{
@@ -171,13 +147,12 @@ func TestValidate_CollectsAllErrors(t *testing.T) {
 
 	ve, ok := err.(*ValidationError)
 	require.True(t, ok, "expected *ValidationError, got %T", err)
-	assert.Len(t, ve.Errors, 6, "should collect all 6 validation errors")
+	assert.Len(t, ve.Errors, 5, "should collect all 5 validation errors")
 	assert.Contains(t, ve.Error(), "name is required")
 	assert.Contains(t, ve.Error(), "core_version is required")
 	assert.Contains(t, ve.Error(), "runtime.image is required")
 	assert.Contains(t, ve.Error(), "runtime_engine must be")
-	assert.Contains(t, ve.Error(), "docker:// URLs are deprecated")
-	assert.Contains(t, ve.Error(), "url is required")
+	assert.Contains(t, ve.Error(), "gateway.services is removed")
 }
 
 func TestValidate_NoErrorsOnValidConfig(t *testing.T) {
@@ -187,12 +162,7 @@ func TestValidate_NoErrorsOnValidConfig(t *testing.T) {
 		Runtime: RuntimeConfig{
 			Image: "@builtin/codex",
 		},
-		Gateway: GatewayConfig{
-			Services: []GatewayServiceEntry{
-				{URL: "https://api.example.com"},
-			},
-		},
-	}
+		}
 
 	err := cfg.Validate()
 	assert.NoError(t, err)
@@ -354,108 +324,4 @@ agents:
 	})
 }
 
-func TestMergeGatewayServices(t *testing.T) {
-	t.Run("shared only", func(t *testing.T) {
-		shared := []GatewayServiceEntry{
-			{URL: "https://gateway.example.com", Headers: map[string]string{"Auth": "Bearer x"}},
-		}
-		result := MergeGatewayServices(shared, nil)
-		require.Len(t, result, 1)
-		assert.Equal(t, "https://gateway.example.com", result[0].URL)
-	})
 
-	t.Run("per-agent only", func(t *testing.T) {
-		perAgent := []GatewayServiceEntry{
-			{URL: "https://api.openai.com"},
-		}
-		result := MergeGatewayServices(nil, perAgent)
-		require.Len(t, result, 1)
-		assert.Equal(t, "https://api.openai.com", result[0].URL)
-	})
-
-	t.Run("per-agent overrides shared same URL", func(t *testing.T) {
-		shared := []GatewayServiceEntry{
-			{URL: "https://gateway.example.com", Headers: map[string]string{"Auth": "shared-token"}},
-		}
-		perAgent := []GatewayServiceEntry{
-			{URL: "https://gateway.example.com", Headers: map[string]string{"Auth": "agent-token"}},
-		}
-
-		result := MergeGatewayServices(shared, perAgent)
-		require.Len(t, result, 1)
-		assert.Equal(t, "agent-token", result[0].Headers["Auth"])
-	})
-
-	t.Run("different URLs merge additively", func(t *testing.T) {
-		shared := []GatewayServiceEntry{
-			{URL: "https://gateway.example.com"},
-		}
-		perAgent := []GatewayServiceEntry{
-			{URL: "https://api.openai.com"},
-		}
-
-		result := MergeGatewayServices(shared, perAgent)
-		require.Len(t, result, 2)
-		assert.Equal(t, "https://gateway.example.com", result[0].URL)
-		assert.Equal(t, "https://api.openai.com", result[1].URL)
-	})
-}
-
-func TestLoadFleetAgents_SharedGateway(t *testing.T) {
-	dir := t.TempDir()
-
-	fleetYAML := `
-agents:
-  - coder
-  - reviewer
-shared:
-  gateway:
-    services:
-      - url: https://agent-gateway.stx-ai.net
-        headers:
-          Authorization: Bearer ${STX_TOKEN}
-  installations:
-    - plugin: "@builtin/github-pat"
-      options:
-        token: "${GITHUB_PAT}"
-`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(fleetYAML), 0644))
-
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "coder"), 0755))
-	coderYAML := `
-name: coder
-core_version: latest
-runtime:
-  image: "@builtin/codex"
-`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "coder", "agent.yaml"), []byte(coderYAML), 0644))
-
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "reviewer"), 0755))
-	reviewerYAML := `
-name: reviewer
-core_version: latest
-runtime:
-  image: "@builtin/claude-code"
-gateway:
-  services:
-    - url: https://api.anthropic.com
-      headers:
-        x-api-key: ${ANTHROPIC_KEY}
-`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer", "agent.yaml"), []byte(reviewerYAML), 0644))
-
-	project, err := LoadProject(dir)
-	require.NoError(t, err)
-	require.Len(t, project.Agents, 2)
-
-	// coder: gets shared gateway only
-	coder := project.Agents[0]
-	require.Len(t, coder.Config.Gateway.Services, 1)
-	assert.Equal(t, "https://agent-gateway.stx-ai.net", coder.Config.Gateway.Services[0].URL)
-
-	// reviewer: gets shared + own gateway (additive)
-	reviewer := project.Agents[1]
-	require.Len(t, reviewer.Config.Gateway.Services, 2)
-	assert.Equal(t, "https://agent-gateway.stx-ai.net", reviewer.Config.Gateway.Services[0].URL)
-	assert.Equal(t, "https://api.anthropic.com", reviewer.Config.Gateway.Services[1].URL)
-}
