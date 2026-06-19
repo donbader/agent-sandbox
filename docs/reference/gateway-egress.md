@@ -83,6 +83,42 @@ Path pattern formats:
 
 Path matching uses glob syntax (`*` matches one path segment, not `/`).
 
+## Target (Internal Service Routing)
+
+For internal services (sidecars, databases, APIs on the sandbox network or external Docker networks), use `target` to specify the forwarding destination:
+
+```yaml
+- hosts: ["rkgw"]
+  target: "rkgw:8765"
+  headers:
+    x-api-key: "${RKGW_API_KEY}"
+```
+
+`target` is a `host:port` string that tells the gateway where to actually forward the HTTP request. Without `target`, HTTPS traffic is passed through to port 443 by SNI.
+
+Use `target` when:
+- The service listens on a non-standard port
+- The service uses plain HTTP (not HTTPS)
+- The forwarding destination differs from the match pattern in `hosts`
+
+## Network (Compose Network Attachment)
+
+When the target service lives on a Docker network that the gateway isn't on by default, use `network` to attach the gateway container:
+
+```yaml
+- hosts: ["rkgw"]
+  target: "rkgw:8765"
+  network: rkgw-external
+  headers:
+    x-api-key: "${RKGW_API_KEY}"
+```
+
+This tells the compose generator to:
+1. Add the gateway service to the `rkgw-external` network
+2. Define `rkgw-external` in the compose-level networks
+
+Services on the default sandbox network don't need `network` — the gateway is already attached to it.
+
 ## Fleet (Shared) Configuration
 
 In `fleet.yaml`, shared egress rules apply to all agents unless the agent defines its own:
