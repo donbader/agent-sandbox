@@ -422,4 +422,69 @@ allowed_capabilities:
 ## Prerequisites
 
 - Docker CLI installed in the agent container
-- Host Docker running with socket at `/var/run/docker.sock`
+- Host Docker running with socket at `/var/run/docker.sock`, or `DOCKER_HOST` set to a reachable Docker API
+
+---
+
+## Docker Socket Interception (Recursive DinD)
+
+When a container tries to bind mount `/var/run/docker.sock`, the proxy intercepts the request and transparently redirects Docker access back to itself:
+
+1. The socket bind mount is removed
+2. `DOCKER_HOST=tcp://<proxy>:2375` is injected into the container's environment
+
+This enables recursive Docker-in-Docker — containers that need Docker get routed through the same policy proxy regardless of nesting depth.
+
+### How it works
+
+```
+Agent → docker run -v /var/run/docker.sock:/var/run/docker.sock dind-image
+         ↓ (proxy intercepts)
+Container gets: DOCKER_HOST=tcp://proxy:2375 (no socket mount)
+         ↓
+Container runs: docker run alpine echo hello
+         ↓ (goes through same proxy)
+Proxy: policy check → create container → done
+```
+
+All levels share the same proxy and buildkit instance. No nested proxy chains, no extra infrastructure.
+
+### Detected socket paths
+
+The proxy recognizes all common Docker socket mount patterns:
+- `/var/run/docker.sock`
+- `/run/docker.sock`
+- Any path ending in `/docker.sock`
+
+Read-only mounts (`:ro`) are also intercepted.
+
+### Works with any Docker-compatible runtime
+
+Since `DOCKER_HOST` is the standard mechanism, this works transparently with:
+- Docker CLI
+- Docker Compose
+- BuildKit / Buildx
+- Podman (Docker compatibility mode)
+- Any tool that respects `DOCKER_HOST`
+
+### Security
+
+All policy controls remain active for containers spawned at any depth:
+- Image allowlist applies
+- Resource limits enforced
+- Network isolation maintained
+- Namespacing active
+- Container count limits enforced
+
+---
+
+## Upstream Connection
+
+The proxy itself respects the `DOCKER_HOST` environment variable for its upstream Docker connection:
+
+| `DOCKER_HOST` value | Behavior |
+|---------------------|----------|
+| (not set) | Connects to `/var/run/docker.sock` (default) |
+| `tcp://host:port` | Connects via TCP |
+
+This enables running the proxy in environments where a Unix socket isn't available (e.g. inside another sandbox). No special configuration needed — the standard Docker convention is sufficient.
