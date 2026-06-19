@@ -59,6 +59,9 @@ func (p *Policy) ValidateCreate(req *CreateRequest, currentCount int) error {
 		return &PolicyError{Code: 403, Message: fmt.Sprintf("image %q not in allowlist", req.Image)}
 	}
 	if req.Privileged {
+		if p.AllowBuild && matchImage("moby/buildkit:*", normalizeImage(req.Image)) {
+			return &PolicyError{Code: 403, Message: "privileged mode is not allowed. Build failed: the buildx docker-container driver requires privileged but it is blocked by policy. Ensure buildx is configured with the remote driver pointing to the buildkit sidecar (tcp://<agent>-agent-docker-buildkit:8372). If the sidecar is down, check: docker compose ps agent-docker-buildkit"}
+		}
 		return &PolicyError{Code: 403, Message: "privileged mode is not allowed"}
 	}
 	if req.NetworkMode == "host" {
