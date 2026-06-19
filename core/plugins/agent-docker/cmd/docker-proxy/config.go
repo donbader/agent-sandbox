@@ -10,14 +10,14 @@ import (
 
 // ProxyConfig holds the Docker proxy configuration.
 type ProxyConfig struct {
-	SandboxID     string
-	AgentName     string
-	NetworkName   string
-	AllowedImages []string
-	MaxContainers int
-	MemoryBytes   int64
-	NanoCPUs      int64
-	PidsLimit     int64
+	SandboxID           string
+	AgentName           string
+	NetworkName         string
+	AllowedImages       []string
+	MaxContainers       int
+	MemoryBytes         int64
+	NanoCPUs            int64
+	PidsLimit           int64
 	AllowCompose        bool
 	AllowBuild          bool
 	AllowedCapabilities []string
@@ -62,7 +62,6 @@ func loadConfigFromEnv() (*ProxyConfig, error) {
 			return nil, fmt.Errorf("parse ALLOWED_CAPABILITIES: %w", err)
 		}
 	}
-
 	return cfg, nil
 }
 

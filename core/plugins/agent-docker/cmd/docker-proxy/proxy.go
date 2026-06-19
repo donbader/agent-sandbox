@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,11 +31,20 @@ type DockerProxy struct {
 	builtImages map[string]bool   // image tags built through this proxy (auto-allowed)
 }
 
+// dialUpstream returns a net.Conn to the upstream Docker daemon.
+// Respects DOCKER_HOST env var (standard Docker convention).
+func dialUpstream() (net.Conn, error) {
+	if dh := os.Getenv("DOCKER_HOST"); strings.HasPrefix(dh, "tcp://") {
+		return net.Dial("tcp", strings.TrimPrefix(dh, "tcp://"))
+	}
+	return net.Dial("unix", "/var/run/docker.sock")
+}
+
 // NewDockerProxy creates a new Docker API proxy.
 func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.Dial("unix", "/var/run/docker.sock")
+			return dialUpstream()
 		},
 	}
 	upstream := &httputil.ReverseProxy{
@@ -539,7 +549,7 @@ func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("hijack request", "method", r.Method, "path", r.URL.Path, "upgrade", r.Header.Get("Upgrade"))
 
 	// Connect to Docker daemon
-	dockerConn, err := net.Dial("unix", "/var/run/docker.sock")
+	dockerConn, err := dialUpstream()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "cannot connect to Docker daemon")
 		return
@@ -590,8 +600,8 @@ func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
 			_, _ = dockerConn.Write(buffered)
 		}
 		_, _ = io.Copy(dockerConn, clientConn)
-		if uc, ok := dockerConn.(*net.UnixConn); ok {
-			_ = uc.CloseWrite()
+		if cw, ok := dockerConn.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
 		}
 	}()
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,36 +16,35 @@ import (
 // Cleaner handles container cleanup on shutdown.
 type Cleaner struct {
 	sandboxID  string
-	dockerAddr string // "unix" for real socket, or "http://..." for testing
+	dockerAddr string
 }
 
 // NewCleaner creates a cleaner that talks to the Docker daemon.
+// Connectivity is determined by dialUpstream() which reads DOCKER_HOST env.
 func NewCleaner(sandboxID string) *Cleaner {
-	return &Cleaner{
-		sandboxID:  sandboxID,
-		dockerAddr: "unix",
-	}
+	return &Cleaner{sandboxID: sandboxID}
 }
 
 func (c *Cleaner) httpClient() *http.Client {
-	if c.dockerAddr == "unix" {
-		return &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", "/var/run/docker.sock")
-				},
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				if c.dockerAddr != "" && c.dockerAddr != "unix" {
+					addr := strings.TrimPrefix(c.dockerAddr, "http://")
+					return net.Dial("tcp", addr)
+				}
+				return dialUpstream()
 			},
-			Timeout: 30 * time.Second,
-		}
+		},
+		Timeout: 30 * time.Second,
 	}
-	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func (c *Cleaner) baseURL() string {
-	if c.dockerAddr == "unix" {
-		return "http://docker"
+	if c.dockerAddr != "" && c.dockerAddr != "unix" {
+		return c.dockerAddr
 	}
-	return c.dockerAddr
+	return "http://docker"
 }
 
 // CleanupAll stops and removes all containers and networks labeled with this sandbox ID.
@@ -52,10 +52,7 @@ func (c *Cleaner) CleanupAll(ctx context.Context) {
 	client := c.httpClient()
 	base := c.baseURL()
 
-	// Clean up containers first
 	c.cleanupContainers(ctx, client, base)
-
-	// Then clean up networks
 	c.cleanupNetworks(ctx, client, base)
 }
 
@@ -82,7 +79,6 @@ func (c *Cleaner) cleanupContainers(ctx context.Context, client *http.Client, ba
 
 	slog.Info("cleanup: found containers", "count", len(containers))
 
-	// Stop and remove in parallel to stay within Docker's SIGTERM grace period
 	var wg sync.WaitGroup
 	for _, container := range containers {
 		wg.Add(1)
@@ -93,7 +89,6 @@ func (c *Cleaner) cleanupContainers(ctx context.Context, client *http.Client, ba
 				name = names[0]
 			}
 
-			// Force remove (kills + removes in one call)
 			removeURL := fmt.Sprintf("%s/containers/%s?force=true", base, id)
 			req, _ := http.NewRequestWithContext(ctx, "DELETE", removeURL, nil)
 			rmResp, err := client.Do(req)
