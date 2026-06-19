@@ -30,8 +30,8 @@ find_local_latest() {
 
 resolve_latest() {
   _ver=$(curl -fsSL --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
-    "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=20" 2>/dev/null \
-    | grep '"tag_name":' | grep '"v' | head -1 \
+    "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null \
+    | grep '"tag_name":' | head -1 \
     | sed 's/.*"v\([^"]*\)".*/\1/')
   if [ -n "$_ver" ]; then
     printf '%s' "$_ver"
