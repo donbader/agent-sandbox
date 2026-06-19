@@ -45,7 +45,7 @@ type agentPairResult struct {
 
 // buildAgentPair constructs the agent service, gateway service, and sidecar services
 // for a single agent-gateway pair. Both BuildCompose and BuildFleetCompose delegate here.
-func buildAgentPair(p agentPairParams) agentPairResult {
+func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 	result := agentPairResult{
 		services: map[string]any{},
 		volumes:  map[string]any{},
@@ -62,6 +62,9 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	if contribs != nil {
 		agentVolumes = append(agentVolumes, namespaceVolumes(p.agentName, contribs.Runtime.NamespacedVolumes)...)
 		agentVolumes = append(agentVolumes, contribs.Runtime.RawVolumes...)
+	}
+	if err := validateVolumes(agentVolumes); err != nil {
+		return agentPairResult{}, fmt.Errorf("agent %q: %w", p.agentName, err)
 	}
 
 	// Build cap_add from base set plus plugin contributions.
@@ -138,6 +141,9 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 	if contribs != nil {
 		gatewayVolumes = append(gatewayVolumes, namespaceVolumes(p.agentName, contribs.Gateway.NamespacedVolumes)...)
 		gatewayVolumes = append(gatewayVolumes, contribs.Gateway.RawVolumes...)
+	}
+	if err := validateVolumes(gatewayVolumes); err != nil {
+		return agentPairResult{}, fmt.Errorf("agent %q gateway: %w", p.agentName, err)
 	}
 	gatewaySvc := map[string]any{
 		"build":    p.gatewayBuild,
@@ -255,7 +261,7 @@ func buildAgentPair(p agentPairParams) agentPairResult {
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 // ComposeAgentEntry holds the data needed to generate one agent's services in a fleet compose file.
@@ -295,7 +301,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 
 		composeDir := filepath.Join(projectDir, ".build")
 
-		pair := buildAgentPair(agentPairParams{
+		pair, err := buildAgentPair(agentPairParams{
 			cfg:          cfg,
 			contribs:     agent.Contribs,
 			agentName:    agentName,
@@ -319,6 +325,9 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			projectName:   filepath.Base(projectDir),
 			exposeGateway: false,
 		})
+		if err != nil {
+			return "", err
+		}
 
 		maps.Copy(compose.Services, pair.services)
 		maps.Copy(compose.Volumes, pair.volumes)
@@ -561,6 +570,17 @@ func mergeCapabilities(base, contributed []string) []string {
 		}
 	}
 	return base
+}
+
+// validateVolumes returns an error if any volume spec is empty.
+// Empty specs indicate a bug in a plugin's volume template logic.
+func validateVolumes(vols []string) error {
+	for _, v := range vols {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("invalid empty volume spec (check plugin volume templates for conditional logic that produces empty strings)")
+		}
+	}
+	return nil
 }
 
 // injectSidecarSystemEnv adds well-known env vars to a sidecar service.

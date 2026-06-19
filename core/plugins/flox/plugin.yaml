@@ -15,7 +15,10 @@ contributes:
       - "RUN chown agent:agent /nix/store && chown -R agent:agent /nix/var"
     pre_entrypoint:
       - '. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true'
+{{- if eq .plugin.options.volume_strategy "per-agent" }}
     namespaced_volumes:
-      - '{{ if eq .plugin.options.volume_strategy "per-agent" }}nix-store:/nix{{ end }}'
+      - "nix-store:/nix"
+{{- else if eq .plugin.options.volume_strategy "fleet" }}
     raw_volumes:
-      - '{{ if eq .plugin.options.volume_strategy "fleet" }}nix-store:/nix{{ end }}'
+      - "nix-store:/nix"
+{{- end }}

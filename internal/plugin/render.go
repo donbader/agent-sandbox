@@ -101,6 +101,13 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 		return nil, fmt.Errorf("parse rendered contributes for plugin %q: %w", p.Name, err)
 	}
 
+	// Strip empty strings from list fields — conditional template items
+	// (e.g. {{ if ... }}value{{ end }}) render to "" when the condition is false.
+	rendered.Runtime.NamespacedVolumes = stripEmpty(rendered.Runtime.NamespacedVolumes)
+	rendered.Runtime.RawVolumes = stripEmpty(rendered.Runtime.RawVolumes)
+	rendered.Gateway.NamespacedVolumes = stripEmpty(rendered.Gateway.NamespacedVolumes)
+	rendered.Gateway.RawVolumes = stripEmpty(rendered.Gateway.RawVolumes)
+
 	return &rendered, nil
 }
 
@@ -171,4 +178,16 @@ func ConfigToMap(cfg any) map[string]any {
 		return map[string]any{}
 	}
 	return m
+}
+
+// stripEmpty removes empty/whitespace-only strings from a slice.
+// Used after template rendering to discard conditional list items that evaluated to "".
+func stripEmpty(ss []string) []string {
+	result := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			result = append(result, s)
+		}
+	}
+	return result
 }
