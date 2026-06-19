@@ -92,6 +92,7 @@ func auditAgent(cfg *config.Config, projectName, dir string) []auditCheck {
 	checks = append(checks, checkDNATRules(agentContainer))
 	checks = append(checks, checkDefaultRoute(agentContainer))
 	checks = append(checks, checkNoDirectEgress(agentContainer))
+	checks = append(checks, checkNoDockerSocket(agentContainer))
 	checks = append(checks, checkNetworkIsolation(projectName))
 
 	return checks
@@ -516,4 +517,31 @@ func printSummary(checks []auditCheck) error {
 		os.Exit(1)
 	}
 	return nil
+}
+
+// checkNoDockerSocket verifies the agent container does not have direct access
+// to any container runtime socket. Direct socket access bypasses all policy enforcement.
+func checkNoDockerSocket(container string) auditCheck {
+	socketPaths := []string{
+		"/var/run/docker.sock",
+		"/run/docker.sock",
+		"/var/run/podman/podman.sock",
+		"/run/podman/podman.sock",
+		"/var/run/containerd/containerd.sock",
+	}
+	for _, sock := range socketPaths {
+		_, err := containerExec(container, "stat", sock)
+		if err == nil {
+			return auditCheck{
+				Name:   "No runtime socket in agent",
+				Passed: false,
+				Detail: fmt.Sprintf("%s is accessible in agent container — bypasses all policy enforcement (use a sidecar proxy instead)", sock),
+			}
+		}
+	}
+	return auditCheck{
+		Name:   "No runtime socket in agent",
+		Passed: true,
+		Detail: "no container runtime sockets found in agent container",
+	}
 }

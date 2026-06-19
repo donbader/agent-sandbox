@@ -121,7 +121,7 @@ runtime:
 `
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
 		_, err := Load(dir)
-		assert.ErrorContains(t, err, "runtime_engine must be 'docker' or 'podman'")
+		assert.ErrorContains(t, err, "runtime_engine must be one of")
 	})
 }
 
