@@ -281,7 +281,7 @@ func TestDockerProxy_AllowCompose_NetworkCreateForcesInternal(t *testing.T) {
 		_ = json.Unmarshal(body, &req)
 
 		assert.Equal(t, true, req["Internal"])
-		assert.Equal(t, "mynet", req["Name"])
+		assert.Equal(t, "test-coder-mynet", req["Name"]) // namespaced by NameTranslator
 
 		labels, _ := req["Labels"].(map[string]any)
 		assert.Equal(t, "test-coder", labels["agent-sandbox.sandbox"])
