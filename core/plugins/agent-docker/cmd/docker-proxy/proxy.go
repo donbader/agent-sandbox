@@ -10,8 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"regexp"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 )
