@@ -94,6 +94,11 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 		return nil, fmt.Errorf("render contributes template: %w", err)
 	}
 
+	// Reject legacy gateway format before strict unmarshal
+	if err := rejectLegacyGateway(p.Name, buf.String()); err != nil {
+		return nil, err
+	}
+
 	var rendered Contributions
 	decoder := yaml.NewDecoder(bytes.NewReader(buf.Bytes()))
 	decoder.KnownFields(true)
@@ -102,6 +107,25 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	}
 
 	return &rendered, nil
+}
+
+// rejectLegacyGateway checks rendered plugin YAML for the deprecated
+// contributes.gateway.services/middlewares format and returns a helpful error.
+func rejectLegacyGateway(pluginName, rendered string) error {
+	var raw struct {
+		Gateway struct {
+			Services    any `yaml:"services"`
+			Middlewares any `yaml:"middlewares"`
+		} `yaml:"gateway"`
+	}
+	if err := yaml.Unmarshal([]byte(rendered), &raw); err != nil {
+		return nil // can't parse — let normal unmarshal handle it
+	}
+	if raw.Gateway.Services != nil || raw.Gateway.Middlewares != nil {
+		return fmt.Errorf("plugin %q uses deprecated contributes.gateway.services/middlewares format. "+
+			"Run `agent-sandbox migrate` to convert to the egress format", pluginName)
+	}
+	return nil
 }
 
 func validateOptions(schema map[string]OptionSchema, opts map[string]any) error {
