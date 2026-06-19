@@ -413,7 +413,10 @@ func correctAgentProjectPaths(projectDir string, agent config.Agent) (bool, erro
 
 	content := string(data)
 	for _, c := range corrections {
-		oldVal := agent.Config.Installations[c.instIdx].Options[c.optKey].(string)
+		oldVal, ok := agent.Config.Installations[c.instIdx].Options[c.optKey].(string)
+		if !ok {
+			continue
+		}
 		// Replace the option value in YAML — handles both quoted and unquoted forms
 		content = strings.Replace(content, oldVal, c.newVal, 1)
 	}
