@@ -162,6 +162,15 @@ func TestValidateEgressRules(t *testing.T) {
 		assert.Len(t, errs, 1)
 		assert.Contains(t, errs[0], "cannot have both deny: true and deny_paths")
 	})
+
+	t.Run("deny with middlewares", func(t *testing.T) {
+		rules := []EgressRule{
+			{Hosts: []string{"evil.com"}, Deny: true, Middlewares: []MiddlewareEntry{{Script: "./foo.ts"}}},
+		}
+		errs := ValidateEgressRules(rules)
+		assert.Len(t, errs, 1)
+		assert.Contains(t, errs[0], "cannot have both deny: true and middlewares")
+	})
 }
 
 func TestMigrateServicesToEgress(t *testing.T) {
@@ -191,6 +200,23 @@ func TestEgressRule_NeedsMITM(t *testing.T) {
 	assert.True(t, (&EgressRule{DenyPaths: []string{"/foo"}}).NeedsMITM())
 	assert.False(t, (&EgressRule{Hosts: []string{"*"}}).NeedsMITM())
 	assert.False(t, (&EgressRule{Deny: true}).NeedsMITM())
+}
+
+func TestNeedsMITM_WithMiddlewares(t *testing.T) {
+	rule := EgressRule{
+		Hosts: []string{"api.telegram.org"},
+		Middlewares: []MiddlewareEntry{
+			{Script: "./src/rewrite.ts"},
+		},
+	}
+	assert.True(t, rule.NeedsMITM())
+}
+
+func TestNeedsMITM_NoMiddlewares(t *testing.T) {
+	rule := EgressRule{
+		Hosts: []string{"example.com"},
+	}
+	assert.False(t, rule.NeedsMITM())
 }
 
 func TestHasLegacyServices(t *testing.T) {
