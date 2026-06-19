@@ -110,6 +110,14 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		dp.handleNetworkList(w, r)
 	case r.Method == "POST" && strings.HasPrefix(path, "/networks/") && strings.HasSuffix(path, "/connect"):
 		dp.handleNetworkConnect(w, r)
+	case r.Method == "POST" && path == "/volumes/create":
+		dp.handleVolumeCreate(w, r)
+	case r.Method == "GET" && path == "/volumes":
+		dp.handleVolumeList(w, r)
+	case r.Method == "GET" && strings.HasPrefix(path, "/volumes/"):
+		dp.handleVolumeInspect(w, r, path)
+	case r.Method == "DELETE" && strings.HasPrefix(path, "/volumes/"):
+		dp.handleVolumeRemove(w, r, path)
 	default:
 		// For namespace-checked endpoints, verify ownership and translate names
 		if id := extractContainerID(path); id != "" {
