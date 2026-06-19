@@ -40,13 +40,13 @@ func (c *Cleaner) httpClient() *http.Client {
 	}
 }
 
-
 func (c *Cleaner) baseURL() string {
 	if c.dockerAddr != "" && c.dockerAddr != "unix" {
 		return c.dockerAddr
 	}
 	return "http://docker"
 }
+
 // CleanupAll stops and removes all containers and networks labeled with this sandbox ID.
 func (c *Cleaner) CleanupAll(ctx context.Context) {
 	client := c.httpClient()
