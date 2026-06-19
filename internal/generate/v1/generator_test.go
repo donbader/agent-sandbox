@@ -98,8 +98,8 @@ options:
     required: true
 contributes:
   gateway:
-    services:
-      - url: https://github.com
+    egress:
+      - hosts: ["github.com"]
         headers:
           Authorization: "Bearer {{ .plugin.options.token }}"
 `), 0644))

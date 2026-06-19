@@ -12,9 +12,7 @@ contributes:
       # (the gateway intercepts and injects real credentials)
       - "ENV GH_TOKEN=dummy GITHUB_TOKEN=dummy"
   gateway:
-    services:
-      - url: "https://api.github.com"
-      - url: "https://github.com"
-    middlewares:
-      - script: "./src/github-auth.ts"
-        domains: ["api.github.com", "github.com"]
+    egress:
+      - hosts: ["api.github.com", "github.com"]
+        middlewares:
+          - script: "./src/github-auth.ts"

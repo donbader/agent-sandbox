@@ -40,6 +40,17 @@ These are handled by `agent-sandbox-core`:
 | `agent-sandbox compose ...` | Docker compose passthrough |
 | `agent-sandbox audit` | Verify running sandbox meets security contract |
 
+## migrate
+
+Converts deprecated `gateway.services` format (in both `agent.yaml` and `plugin.yaml`) to the unified `gateway.egress` format.
+
+```bash
+agent-sandbox migrate
+agent-sandbox -C examples/multi-agent migrate
+```
+
+The command rewrites config files in-place. Review the diff after running. See [Gateway Egress — Migration](gateway-egress.md#migration-from-gatewayservices) for format details.
+
 ## Global Flags
 
 | Flag | Default | Description |
@@ -68,6 +79,7 @@ agent-sandbox -C examples/multi-agent generate
 - `.build/<agent-name>/gateway/` — gateway config and binary
 - `.build/docker-compose.yml` — all services
 - `.build/schema.json` — JSON Schema for agent.yaml
+- `.env.example` — all `${VAR}` references found in configs (project root)
 
 ## compose
 

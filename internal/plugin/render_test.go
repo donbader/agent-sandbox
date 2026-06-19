@@ -19,8 +19,9 @@ contributes:
     extra_builds:
       - "RUN echo {{ .plugin.options.token }}"
   gateway:
-    services:
-      - url: https://github.com
+    egress:
+      - hosts:
+          - https://github.com
         headers:
           Authorization: "Bearer {{ .plugin.options.token }}"
 `
@@ -32,7 +33,7 @@ contributes:
 	require.NoError(t, err)
 
 	assert.Equal(t, "RUN echo ghp_abc123", rendered.Runtime.ExtraBuilds[0])
-	assert.Equal(t, "Bearer ghp_abc123", rendered.Gateway.Services[0].Headers["Authorization"])
+	assert.Equal(t, "Bearer ghp_abc123", rendered.Gateway.Egress[0].Headers["Authorization"])
 }
 
 func TestRenderContributions_MissingRequired(t *testing.T) {
@@ -407,4 +408,62 @@ func TestResolveFleetPaths(t *testing.T) {
 			assert.Equal(t, tt.wantOpts, tt.opts)
 		})
 	}
+}
+
+func TestRenderContributions_RejectsLegacyServices(t *testing.T) {
+	raw := `
+name: legacy-plugin
+contributes:
+  gateway:
+    services:
+      - url: https://api.example.com
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "deprecated")
+	assert.Contains(t, err.Error(), "agent-sandbox migrate")
+	assert.Contains(t, err.Error(), "legacy-plugin")
+}
+
+func TestRenderContributions_RejectsLegacyMiddlewares(t *testing.T) {
+	raw := `
+name: mw-plugin
+contributes:
+  gateway:
+    middlewares:
+      - script: "./src/auth.ts"
+        domains: ["api.example.com"]
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{}
+	_, err = RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "deprecated")
+	assert.Contains(t, err.Error(), "agent-sandbox migrate")
+}
+
+func TestRenderContributions_AllowsNewEgressFormat(t *testing.T) {
+	raw := `
+name: modern-plugin
+contributes:
+  gateway:
+    egress:
+      - hosts: ["api.example.com"]
+        middlewares:
+          - script: "./src/auth.ts"
+`
+	p, err := ParsePluginYAML([]byte(raw))
+	require.NoError(t, err)
+
+	opts := map[string]any{}
+	rendered, err := RenderContributions(p, opts, RenderContext{Self: map[string]any{"name": "test-agent"}})
+	require.NoError(t, err)
+	assert.Len(t, rendered.Gateway.Egress, 1)
+	assert.Equal(t, "api.example.com", rendered.Gateway.Egress[0].Hosts[0])
 }

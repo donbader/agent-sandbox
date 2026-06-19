@@ -27,6 +27,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 | `deny` | `bool` | Block matching traffic at TCP layer (connection reset) |
 | `headers` | `map[string]string` | Inject headers via MITM. Implies allow. |
 | `deny_paths` | `[]string` | Block specific URL paths. Implies MITM. |
+| `middlewares` | `[]object` | TypeScript middleware scripts. Implies MITM. |
 | `target` | `string` | Forwarding destination (`host:port`) for internal/HTTP services |
 | `network` | `string` | Compose network to attach gateway to (for reaching internal services) |
 
@@ -36,7 +37,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 |---------|-------|-------|
 | Matching | `hosts` | Which outbound connections trigger this rule |
 | Decision | `deny` | Block at L4 (no TLS termination, cheap) |
-| Request modification | `headers`, `deny_paths` | Inject creds or block paths at L7 (requires MITM) |
+| Request modification | `headers`, `deny_paths`, `middlewares` | Inject creds or block paths at L7 (requires MITM) |
 | Routing | `target` | Where to forward traffic (default: passthrough on :443) |
 | Infrastructure | `network` | Docker network attachment for compose generation |
 
@@ -79,6 +80,26 @@ Block specific URL paths while allowing the host. Requires MITM (auto-enabled):
 Formats:
 - `"/path/glob"` — any method
 - `"METHOD /path/glob"` — specific method only
+
+## Middlewares
+
+Attach TypeScript middleware scripts to a rule. Middlewares fire for requests matching the rule's `hosts` and imply MITM (TLS termination):
+
+```yaml
+- hosts: ["api.example.com"]
+  middlewares:
+    - script: "./src/auth.ts"
+```
+
+Each middleware entry has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `script` | `string` | Path to TypeScript file (relative to plugin or project root) |
+
+Middlewares run in order before the request is forwarded upstream. They can modify headers, abort requests, or perform credential injection. See [Plugin Authoring](../plugins.md) for the middleware handler API.
+
+Plugins use this same format in `contributes.gateway.egress` — there is no separate `middlewares` or `services` section.
 
 ## Internal Services (target + network)
 

@@ -20,6 +20,24 @@ func Extract(s string) string {
 	return s[start+2 : start+2+end]
 }
 
+// ExtractAll finds all ${VAR_NAME} patterns in a string and returns the variable names.
+func ExtractAll(s string) []string {
+	var vars []string
+	for {
+		start := strings.Index(s, "${")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s[start+2:], "}")
+		if end == -1 {
+			break
+		}
+		vars = append(vars, s[start+2:start+2+end])
+		s = s[start+2+end+1:]
+	}
+	return vars
+}
+
 // Expand replaces the first ${VAR} in s with the value of that environment variable.
 // If no ${VAR} pattern exists, returns s unchanged.
 func Expand(s string) string {

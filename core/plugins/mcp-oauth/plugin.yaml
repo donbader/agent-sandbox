@@ -12,14 +12,14 @@ options:
 
 contributes:
   gateway:
-    services:
+    egress:
 {{- range $name, $cfg := .plugin.options.providers }}
-      - url: "{{ index $cfg "mcp_url" }}"
+      - hosts: ["{{ index $cfg "mcp_url" }}"]
+        middlewares:
+          - script: "./src/oauth.ts"
 {{- end }}
     namespaced_volumes:
       - "oauth-tokens:/data/plugins/mcp-oauth"
-    middlewares:
-      - script: "./src/oauth.ts"
     routes:
       - path: "/callback"
         handler: "./src/callback.ts"

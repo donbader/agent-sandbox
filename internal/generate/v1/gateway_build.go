@@ -271,16 +271,15 @@ func (g *Generator) writePluginsYAML(gatewayDir string, cfg *config.Config, cont
 			Options: resolvedOpts,
 		}
 
-		// Add top-level middlewares from the plugin
-		for _, mw := range rp.rendered.Gateway.Middlewares {
-			entry.Gateway.Middlewares = append(entry.Gateway.Middlewares, pluginsYAMLMiddleware{
-				Script:  mw.Script,
-				Domains: mw.Domains,
-			})
+		// Derive middleware entries from plugin's egress rules
+		for _, rule := range rp.rendered.Gateway.Egress {
+			for _, mw := range rule.Middlewares {
+				entry.Gateway.Middlewares = append(entry.Gateway.Middlewares, pluginsYAMLMiddleware{
+					Script:  mw.Script,
+					Domains: normalizeHosts(rule.Hosts),
+				})
+			}
 		}
-
-		// Add per-service middlewares (TS-based) — reserved for future use
-		_ = rp.rendered.Gateway.Services
 
 		// Add routes
 		for _, route := range rp.rendered.Gateway.Routes {
@@ -304,13 +303,23 @@ func (g *Generator) writePluginsYAML(gatewayDir string, cfg *config.Config, cont
 
 // hasGatewayTSContribs returns true if the plugin contributes TS middlewares or routes.
 func hasGatewayTSContribs(rp *resolvedPlugin) bool {
-	if len(rp.rendered.Gateway.Middlewares) > 0 {
-		return true
+	for _, rule := range rp.rendered.Gateway.Egress {
+		if len(rule.Middlewares) > 0 {
+			return true
+		}
 	}
-	if len(rp.rendered.Gateway.Routes) > 0 {
-		return true
+	return len(rp.rendered.Gateway.Routes) > 0
+}
+
+// normalizeHosts extracts bare hostnames from a list that may contain URLs.
+func normalizeHosts(hosts []string) []string {
+	var result []string
+	for _, h := range hosts {
+		if d := extractDomain(h); d != "" && d != "*" {
+			result = append(result, d)
+		}
 	}
-	return false
+	return result
 }
 
 // writeGatewayBuildFiles writes the gateway Dockerfile into the gateway build directory.

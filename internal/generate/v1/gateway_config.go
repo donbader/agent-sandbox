@@ -16,7 +16,6 @@ import (
 
 // GatewayConfigOutput is the merged gateway configuration for rendering.
 type GatewayConfigOutput struct {
-	Services    []GatewayServiceOutput
 	AuthHeaders []AuthHeaderEntry // auth-header entries to bake into config.yaml
 	EgressRules []config.EgressRule
 }
@@ -27,13 +26,6 @@ type AuthHeaderEntry struct {
 	Header      string
 	EnvVar      string
 	ValueFormat string
-}
-
-// GatewayServiceOutput represents a single gateway service entry in the output.
-type GatewayServiceOutput struct {
-	URL     string
-	Network string
-	Headers map[string]string
 }
 
 // gatewayRuntimeConfig matches the proxy.Config struct in core/gateway.
@@ -74,7 +66,7 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 		out.EgressRules = config.MigrateServicesToEgress(cfg.Gateway.Services)
 	}
 
-	// Process egress rules for auth headers and services
+	// Process egress rules for auth headers
 	for _, rule := range out.EgressRules {
 		if rule.Deny || len(rule.Headers) == 0 {
 			continue
@@ -83,10 +75,6 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 			if host == "*" {
 				continue
 			}
-			out.Services = append(out.Services, GatewayServiceOutput{
-				URL:     "https://" + host,
-				Headers: rule.Headers,
-			})
 			for header, value := range rule.Headers {
 				ev, valueFormat := envvar.ParseTemplate(value)
 				out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
@@ -99,52 +87,54 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 		}
 	}
 
-	// Plugin-contributed services (still supported — plugins use the old API)
+	// Merge plugin-contributed egress rules (inserted before catch-all)
 	if contribs != nil {
-		for _, svc := range contribs.Gateway.Services {
-			out.Services = append(out.Services, GatewayServiceOutput{
-				URL:     svc.URL,
-				Network: svc.Network,
-				Headers: svc.Headers,
-			})
-			domain := extractDomain(svc.URL)
-			for header, value := range svc.Headers {
-				ev, valueFormat := envvar.ParseTemplate(value)
-				out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
-					Domain:      domain,
-					Header:      header,
-					EnvVar:      ev,
-					ValueFormat: valueFormat,
-				})
+		for _, rule := range contribs.Gateway.Egress {
+			normalized := normalizeEgressHosts(rule)
+			// Extract auth headers from plugin rules that have static headers
+			for _, host := range normalized.Hosts {
+				if host == "*" {
+					continue
+				}
+				for header, value := range normalized.Headers {
+					ev, valueFormat := envvar.ParseTemplate(value)
+					out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
+						Domain:      host,
+						Header:      header,
+						EnvVar:      ev,
+						ValueFormat: valueFormat,
+					})
+				}
 			}
-			// Auto-add plugin domains to egress rules (allowed implicitly)
-			if domain != "" {
-				out.EgressRules = insertPluginDomain(out.EgressRules, domain)
-			}
+			out.EgressRules = insertPluginEgressRule(out.EgressRules, normalized)
 		}
 	}
 
 	return out
 }
 
-// insertPluginDomain ensures a plugin-contributed domain is allowed in egress rules.
-// If there's already a matching rule, do nothing. Otherwise insert before catch-all.
-func insertPluginDomain(rules []config.EgressRule, domain string) []config.EgressRule {
-	// Check if already covered
-	m := config.MatchHost(rules, domain)
-	if m.Matched && !m.Denied {
-		return rules
-	}
-
-	// Insert before the last rule if it's a catch-all, otherwise append
-	newRule := config.EgressRule{Hosts: []string{domain}}
+// insertPluginEgressRule inserts a plugin rule before the catch-all, or appends if no catch-all.
+func insertPluginEgressRule(rules []config.EgressRule, rule config.EgressRule) []config.EgressRule {
 	if len(rules) > 0 && len(rules[len(rules)-1].Hosts) == 1 && rules[len(rules)-1].Hosts[0] == "*" {
-		// Insert before catch-all
-		rules = append(rules[:len(rules)-1], newRule, rules[len(rules)-1])
+		rules = append(rules[:len(rules)-1], rule, rules[len(rules)-1])
 	} else {
-		rules = append(rules, newRule)
+		rules = append(rules, rule)
 	}
 	return rules
+}
+
+// normalizeEgressHosts converts any URLs in rule.Hosts to bare hostnames.
+func normalizeEgressHosts(rule config.EgressRule) config.EgressRule {
+	normalized := rule
+	normalized.Hosts = make([]string, 0, len(rule.Hosts))
+	for _, h := range rule.Hosts {
+		if d := extractDomain(h); d != "" {
+			normalized.Hosts = append(normalized.Hosts, d)
+		} else {
+			normalized.Hosts = append(normalized.Hosts, h)
+		}
+	}
+	return normalized
 }
 
 // WriteGatewayRuntimeConfig renders the gateway runtime config.yaml into the build dir.
@@ -164,14 +154,6 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			if host != "*" && !strings.Contains(host, "/") {
 				mitmSet[host] = true
 			}
-		}
-	}
-
-	// Also add domains from plugin-contributed services
-	for _, svc := range gwCfg.Services {
-		domain := extractDomain(svc.URL)
-		if domain != "" && len(svc.Headers) > 0 {
-			mitmSet[domain] = true
 		}
 	}
 

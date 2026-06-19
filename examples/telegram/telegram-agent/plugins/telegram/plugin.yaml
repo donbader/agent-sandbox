@@ -21,11 +21,10 @@ options:
 
 contributes:
   gateway:
-    services:
-      - url: https://api.telegram.org
-    middlewares:
-      - script: "./src/telegram-token-rewrite.ts"
-        domains: ["api.telegram.org"]
+    egress:
+      - hosts: ["api.telegram.org"]
+        middlewares:
+          - script: "./src/telegram-token-rewrite.ts"
   sidecar:
     services:
       telegram:

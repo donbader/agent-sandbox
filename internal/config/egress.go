@@ -7,16 +7,22 @@ import (
 	"strings"
 )
 
+// MiddlewareEntry declares a TypeScript middleware attached to an egress rule.
+type MiddlewareEntry struct {
+	Script string `yaml:"script" json:"script" jsonschema:"required,title=script,description=Path to TypeScript middleware file"`
+}
+
 // EgressRule defines a single egress access control rule.
 // Rules are evaluated in order; first match wins.
 // If no rule matches, traffic is denied (implicit deny-all).
 type EgressRule struct {
-	Hosts     []string          `yaml:"hosts" json:"hosts" jsonschema:"required,title=hosts,description=Host patterns to match (domain globs or CIDRs). Use ['*'] as catch-all."`
-	Deny      bool              `yaml:"deny,omitempty" json:"deny,omitempty" jsonschema:"title=deny,description=If true block matching traffic"`
-	Headers   map[string]string `yaml:"headers,omitempty" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway (implies MITM + allow)"`
-	DenyPaths []string          `yaml:"deny_paths,omitempty" json:"deny_paths,omitempty" jsonschema:"title=deny_paths,description=URL path patterns to block (implies MITM). Format: METHOD /path/glob or /path/glob"`
-	Network   string            `yaml:"network,omitempty" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach gateway to (for internal services)"`
-	Target    string            `yaml:"target,omitempty" json:"target,omitempty" jsonschema:"title=target,description=Forwarding destination (host:port) for internal services. Omit for standard HTTPS passthrough."`
+	Hosts       []string          `yaml:"hosts" json:"hosts" jsonschema:"required,title=hosts,description=Host patterns to match (domain globs or CIDRs). Use ['*'] as catch-all."`
+	Deny        bool              `yaml:"deny,omitempty" json:"deny,omitempty" jsonschema:"title=deny,description=If true block matching traffic"`
+	Headers     map[string]string `yaml:"headers,omitempty" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway (implies MITM + allow)"`
+	DenyPaths   []string          `yaml:"deny_paths,omitempty" json:"deny_paths,omitempty" jsonschema:"title=deny_paths,description=URL path patterns to block (implies MITM). Format: METHOD /path/glob or /path/glob"`
+	Middlewares []MiddlewareEntry `yaml:"middlewares,omitempty" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=TypeScript middleware scripts (implies MITM)"`
+	Network     string            `yaml:"network,omitempty" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach gateway to (for internal services)"`
+	Target      string            `yaml:"target,omitempty" json:"target,omitempty" jsonschema:"title=target,description=Forwarding destination (host:port) for internal services. Omit for standard HTTPS passthrough."`
 }
 
 // EgressMatch describes the result of matching a host against egress rules.
@@ -169,6 +175,10 @@ func ValidateEgressRules(rules []EgressRule) []string {
 			errs = append(errs, fmt.Sprintf("gateway.egress[%d]: cannot have both deny: true and deny_paths (entire host is already denied)", i))
 		}
 
+		if rule.Deny && len(rule.Middlewares) > 0 {
+			errs = append(errs, fmt.Sprintf("gateway.egress[%d]: cannot have both deny: true and middlewares", i))
+		}
+
 		for j, pattern := range rule.Hosts {
 			if pattern == "" {
 				errs = append(errs, fmt.Sprintf("gateway.egress[%d].hosts[%d]: empty pattern", i, j))
@@ -179,9 +189,9 @@ func ValidateEgressRules(rules []EgressRule) []string {
 	return errs
 }
 
-// NeedsMITM returns true if a rule requires TLS MITM (has headers or deny_paths).
+// NeedsMITM returns true if a rule requires TLS MITM (has headers, deny_paths, or middlewares).
 func (r *EgressRule) NeedsMITM() bool {
-	return len(r.Headers) > 0 || len(r.DenyPaths) > 0
+	return len(r.Headers) > 0 || len(r.DenyPaths) > 0 || len(r.Middlewares) > 0
 }
 
 // IsAllow returns true if the rule allows traffic (not denied).
