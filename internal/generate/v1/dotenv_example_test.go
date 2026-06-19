@@ -213,9 +213,9 @@ func TestWriteEnvExample_CollectsFromPluginContribHeaders(t *testing.T) {
 			Config: &config.Config{},
 			Contribs: &plugin.Contributions{
 				Gateway: plugin.GatewayContrib{
-					Services: []plugin.GatewayService{
+					Egress: []config.EgressRule{
 						{
-							URL:     "https://github.com",
+							Hosts:   []string{"github.com"},
 							Headers: map[string]string{"Authorization": "Bearer ${GH_TOKEN}"},
 						},
 					},

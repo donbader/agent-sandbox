@@ -35,11 +35,10 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 		if c.Runtime.SkipUserns {
 			merged.Runtime.SkipUserns = true
 		}
-		merged.Gateway.Services = append(merged.Gateway.Services, c.Gateway.Services...)
+		merged.Gateway.Egress = append(merged.Gateway.Egress, c.Gateway.Egress...)
 		merged.Gateway.NamespacedVolumes = append(merged.Gateway.NamespacedVolumes, c.Gateway.NamespacedVolumes...)
 		merged.Gateway.RawVolumes = append(merged.Gateway.RawVolumes, c.Gateway.RawVolumes...)
 		merged.Gateway.Routes = append(merged.Gateway.Routes, c.Gateway.Routes...)
-		merged.Gateway.Middlewares = append(merged.Gateway.Middlewares, c.Gateway.Middlewares...)
 		maps.Copy(merged.Sidecar.Services, c.Sidecar.Services)
 	}
 

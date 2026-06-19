@@ -497,10 +497,10 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 		}
 	}
 
-	// From plugin contributions (header-based only)
+	// From plugin contributions (egress rule headers)
 	if contribs != nil {
-		for _, svc := range contribs.Gateway.Services {
-			for _, value := range svc.Headers {
+		for _, rule := range contribs.Gateway.Egress {
+			for _, value := range rule.Headers {
 				if ev := envvar.Extract(value); ev != "" {
 					seen[ev] = true
 				}

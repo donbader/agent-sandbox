@@ -26,9 +26,9 @@ func TestBuildGatewayConfig(t *testing.T) {
 
 	pluginContribs := &plugin.Contributions{
 		Gateway: plugin.GatewayContrib{
-			Services: []plugin.GatewayService{
+			Egress: []config.EgressRule{
 				{
-					URL:     "https://github.com",
+					Hosts:   []string{"github.com"},
 					Headers: map[string]string{"Authorization": "Bearer ghp_abc"},
 				},
 			},
@@ -37,9 +37,10 @@ func TestBuildGatewayConfig(t *testing.T) {
 
 	gwCfg := BuildGatewayConfig(cfg, pluginContribs)
 
-	require.Len(t, gwCfg.Services, 2)
-	assert.Equal(t, "https://api.example.com", gwCfg.Services[0].URL)
-	assert.Equal(t, "https://github.com", gwCfg.Services[1].URL)
+	// User config produces 1 auth header (api.example.com) + plugin produces 1 (github.com)
+	require.Len(t, gwCfg.AuthHeaders, 2)
+	assert.Equal(t, "api.example.com", gwCfg.AuthHeaders[0].Domain)
+	assert.Equal(t, "github.com", gwCfg.AuthHeaders[1].Domain)
 }
 
 func TestBuildGatewayConfig_NilContribs(t *testing.T) {
@@ -52,8 +53,8 @@ func TestBuildGatewayConfig_NilContribs(t *testing.T) {
 	}
 
 	gwCfg := BuildGatewayConfig(cfg, nil)
-	// Service with no headers doesn't need MITM, so it's not in Services
-	assert.Empty(t, gwCfg.Services)
+	// Service with no headers doesn't produce auth headers
+	assert.Empty(t, gwCfg.AuthHeaders)
 	// But it's tracked in EgressRules (migrated from legacy format + catch-all)
 	require.Len(t, gwCfg.EgressRules, 2) // example.com + catch-all "*"
 	assert.Equal(t, []string{"example.com"}, gwCfg.EgressRules[0].Hosts)
@@ -71,37 +72,37 @@ func TestBuildGatewayConfig_MiddlewareDomains(t *testing.T) {
 
 	pluginContribs := &plugin.Contributions{
 		Gateway: plugin.GatewayContrib{
-			Services: []plugin.GatewayService{
-				{URL: "https://api.telegram.org"},
-			},
-			Middlewares: []plugin.GatewayMiddleware{
-				{Script: "./src/rewrite.ts", Domains: []string{"api.telegram.org"}},
+			Egress: []config.EgressRule{
+				{
+					Hosts: []string{"api.telegram.org"},
+					Middlewares: []config.MiddlewareEntry{
+						{Script: "./src/rewrite.ts"},
+					},
+				},
 			},
 		},
 	}
 
 	gwCfg := BuildGatewayConfig(cfg, pluginContribs)
 
-	// Middleware domains should be collected
-	assert.Contains(t, gwCfg.MiddlewareDomains, "api.telegram.org")
+	// Plugin egress rule should be inserted before catch-all
+	require.Len(t, gwCfg.EgressRules, 2)
+	assert.Equal(t, []string{"api.telegram.org"}, gwCfg.EgressRules[0].Hosts)
+	assert.Equal(t, []string{"*"}, gwCfg.EgressRules[1].Hosts)
 
-	// Plugin service without headers should still appear in Services
-	require.Len(t, gwCfg.Services, 1)
-	assert.Equal(t, "https://api.telegram.org", gwCfg.Services[0].URL)
+	// Middleware on the rule means it needs MITM
+	assert.True(t, gwCfg.EgressRules[0].NeedsMITM())
 }
 
 func TestWriteGatewayRuntimeConfig_MiddlewareDomainsMITM(t *testing.T) {
 	buildDir := t.TempDir()
 
 	gwCfg := &GatewayConfigOutput{
-		Services: []GatewayServiceOutput{
-			{URL: "https://api.telegram.org"},
-		},
 		EgressRules: []config.EgressRule{
 			{Hosts: []string{"api.example.com"}, Headers: map[string]string{"Authorization": "Bearer ${TOKEN}"}},
+			{Hosts: []string{"api.telegram.org"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/rewrite.ts"}}},
 			{Hosts: []string{"*"}},
 		},
-		MiddlewareDomains: []string{"api.telegram.org"},
 	}
 
 	err := WriteGatewayRuntimeConfig(buildDir, gwCfg)
@@ -122,10 +123,8 @@ func TestWriteGatewayRuntimeConfig_PluginServiceWithoutHeaders(t *testing.T) {
 	buildDir := t.TempDir()
 
 	gwCfg := &GatewayConfigOutput{
-		Services: []GatewayServiceOutput{
-			{URL: "https://api.telegram.org"}, // no headers — middleware handles auth
-		},
 		EgressRules: []config.EgressRule{
+			{Hosts: []string{"api.telegram.org"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/rewrite.ts"}}},
 			{Hosts: []string{"*"}},
 		},
 	}
@@ -139,6 +138,6 @@ func TestWriteGatewayRuntimeConfig_PluginServiceWithoutHeaders(t *testing.T) {
 	var rc gatewayRuntimeConfig
 	require.NoError(t, yaml.Unmarshal(data, &rc))
 
-	// Plugin service domain should be MITM'd even without headers
+	// Plugin domain with middleware should be MITM'd even without headers
 	assert.Contains(t, rc.MITMDomains, "api.telegram.org")
 }

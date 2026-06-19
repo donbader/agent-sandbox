@@ -62,10 +62,10 @@ func collectEnvVars(cfg *config.Config, contribs *plugin.Contributions, seen map
 		}
 	}
 
-	// From plugin contributions (header-based)
+	// From plugin contributions (egress rule headers)
 	if contribs != nil {
-		for _, svc := range contribs.Gateway.Services {
-			for _, value := range svc.Headers {
+		for _, rule := range contribs.Gateway.Egress {
+			for _, value := range rule.Headers {
 				for _, ev := range envvar.ExtractAll(value) {
 					seen[ev] = true
 				}

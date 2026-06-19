@@ -19,8 +19,9 @@ contributes:
     extra_builds:
       - "RUN echo {{ .plugin.options.token }}"
   gateway:
-    services:
-      - url: https://github.com
+    egress:
+      - hosts:
+          - https://github.com
         headers:
           Authorization: "Bearer {{ .plugin.options.token }}"
 `
@@ -32,7 +33,7 @@ contributes:
 	require.NoError(t, err)
 
 	assert.Equal(t, "RUN echo ghp_abc123", rendered.Runtime.ExtraBuilds[0])
-	assert.Equal(t, "Bearer ghp_abc123", rendered.Gateway.Services[0].Headers["Authorization"])
+	assert.Equal(t, "Bearer ghp_abc123", rendered.Gateway.Egress[0].Headers["Authorization"])
 }
 
 func TestRenderContributions_MissingRequired(t *testing.T) {
