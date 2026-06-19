@@ -2,8 +2,7 @@ FROM moby/buildkit:latest AS buildkit
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates iptables curl \
-    && adduser -D -H buildkit \
-    && mkdir -p /var/lib/buildkit && chown buildkit:buildkit /var/lib/buildkit
+    && mkdir -p /var/lib/buildkit
 COPY --from=buildkit /usr/bin/buildkitd /usr/local/bin/buildkitd
 COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
 COPY gateway-route.sh /usr/local/bin/gateway-route.sh
