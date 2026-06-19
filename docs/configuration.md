@@ -70,9 +70,7 @@ gateway:
       headers:            # optional — injected on every proxied request (implies MITM + allow)
         Authorization: "Bearer ${ENV_VAR}"
       middlewares:        # optional — TypeScript middleware scripts
-        - script: ./path/to/middleware.ts
-          domains:        # optional — list of domains this middleware applies to
-            - "api.example.com"
+        - ./path/to/middleware.ts
     - hosts: ["internal.bad.com"]
       deny: true          # optional — explicitly block matching hosts
     - hosts: ["*"]        # optional — catch-all allow (permissive mode)
@@ -194,10 +192,7 @@ name: my-plugin
 description: What this plugin does
 
 middlewares:
-  - script: src/my-middleware.ts    # TypeScript middleware loaded at gateway runtime
-    domains:                         # domains this middleware intercepts
-      - "api.example.com"
-      - "*.example.com"
+  - src/my-middleware.ts              # TypeScript middleware loaded at gateway runtime
 
 routes:
   - path: /plugins/my-plugin/hook

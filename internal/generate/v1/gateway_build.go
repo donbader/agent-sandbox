@@ -273,9 +273,9 @@ func (g *Generator) writePluginsYAML(gatewayDir string, cfg *config.Config, cont
 
 		// Derive middleware entries from plugin's egress rules
 		for _, rule := range rp.rendered.Gateway.Egress {
-			for _, mw := range rule.Middlewares {
+			for _, script := range rule.Middlewares {
 				entry.Gateway.Middlewares = append(entry.Gateway.Middlewares, pluginsYAMLMiddleware{
-					Script:  mw.Script,
+					Script:  script,
 					Domains: normalizeHosts(rule.Hosts),
 				})
 			}

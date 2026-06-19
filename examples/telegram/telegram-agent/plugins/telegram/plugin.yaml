@@ -24,7 +24,7 @@ contributes:
     egress:
       - hosts: ["api.telegram.org"]
         middlewares:
-          - script: "./src/telegram-token-rewrite.ts"
+          - "./src/telegram-token-rewrite.ts"
   sidecar:
     services:
       telegram:

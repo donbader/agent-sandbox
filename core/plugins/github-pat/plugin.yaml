@@ -15,4 +15,4 @@ contributes:
     egress:
       - hosts: ["api.github.com", "github.com"]
         middlewares:
-          - script: "./src/github-auth.ts"
+          - "./src/github-auth.ts"
