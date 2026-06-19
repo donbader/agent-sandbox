@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,10 +20,16 @@ type Cleaner struct {
 }
 
 // NewCleaner creates a cleaner that talks to the Docker daemon.
-func NewCleaner(sandboxID string) *Cleaner {
+// If upstreamHost is non-empty (e.g. "tcp://parent-proxy:2375"), the cleaner
+// connects via TCP instead of the local unix socket.
+func NewCleaner(sandboxID, upstreamHost string) *Cleaner {
+	addr := "unix"
+	if upstreamHost != "" {
+		addr = "http://" + strings.TrimPrefix(upstreamHost, "tcp://")
+	}
 	return &Cleaner{
 		sandboxID:  sandboxID,
-		dockerAddr: "unix",
+		dockerAddr: addr,
 	}
 }
 
@@ -31,7 +38,7 @@ func (c *Cleaner) httpClient() *http.Client {
 		return &http.Client{
 			Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", "/var/run/docker.sock")
+					return dialUpstream(nil)
 				},
 			},
 			Timeout: 30 * time.Second,

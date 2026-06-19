@@ -30,11 +30,21 @@ type DockerProxy struct {
 	builtImages map[string]bool   // image tags built through this proxy (auto-allowed)
 }
 
+// dialUpstream returns a net.Conn to the upstream Docker daemon.
+// If cfg.UpstreamDockerHost is tcp://..., dials TCP. Otherwise unix socket.
+func dialUpstream(cfg *ProxyConfig) (net.Conn, error) {
+	if cfg != nil && strings.HasPrefix(cfg.UpstreamDockerHost, "tcp://") {
+		addr := strings.TrimPrefix(cfg.UpstreamDockerHost, "tcp://")
+		return net.Dial("tcp", addr)
+	}
+	return net.Dial("unix", "/var/run/docker.sock")
+}
+
 // NewDockerProxy creates a new Docker API proxy.
 func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.Dial("unix", "/var/run/docker.sock")
+			return dialUpstream(cfg)
 		},
 	}
 	upstream := &httputil.ReverseProxy{
@@ -124,7 +134,7 @@ func (dp *DockerProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Cleanup stops and removes all tracked containers.
 func (dp *DockerProxy) Cleanup() {
-	cleaner := NewCleaner(dp.cfg.SandboxID)
+	cleaner := NewCleaner(dp.cfg.SandboxID, dp.cfg.UpstreamDockerHost)
 	cleaner.CleanupAll(context.Background())
 }
 
@@ -539,7 +549,7 @@ func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("hijack request", "method", r.Method, "path", r.URL.Path, "upgrade", r.Header.Get("Upgrade"))
 
 	// Connect to Docker daemon
-	dockerConn, err := net.Dial("unix", "/var/run/docker.sock")
+	dockerConn, err := dialUpstream(dp.cfg)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "cannot connect to Docker daemon")
 		return
@@ -590,8 +600,8 @@ func (dp *DockerProxy) handleHijack(w http.ResponseWriter, r *http.Request) {
 			_, _ = dockerConn.Write(buffered)
 		}
 		_, _ = io.Copy(dockerConn, clientConn)
-		if uc, ok := dockerConn.(*net.UnixConn); ok {
-			_ = uc.CloseWrite()
+		if cw, ok := dockerConn.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
 		}
 	}()
 
