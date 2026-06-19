@@ -205,6 +205,8 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 			sidecar := buildSidecarService(svc, p.buildDir)
 			// Inject system env vars into all sidecars.
 			injectSidecarSystemEnv(sidecar, p.cfg.Name, p.projectName)
+			// Inject gateway routing infrastructure (cap_add, certs volume, GATEWAY_HOST).
+			injectSidecarGatewayRouting(sidecar, p.agentName, p.certsVolume)
 			// Sidecars implicitly depend on the agent service being started.
 			if sidecar["depends_on"] == nil {
 				sidecar["depends_on"] = map[string]any{
@@ -593,5 +595,28 @@ func injectSidecarSystemEnv(sidecar map[string]any, agentName, projectName strin
 	env["SANDBOX_ID"] = projectName + "-" + agentName
 	env["SANDBOX_NETWORK"] = projectName + "_sandbox"
 	env["AGENT_NAME"] = agentName
+	sidecar["environment"] = env
+}
+
+// injectSidecarGatewayRouting adds gateway routing infrastructure to all sidecar services.
+// This allows sidecars to route traffic through the gateway for credential injection and
+// outbound network access.
+func injectSidecarGatewayRouting(sidecar map[string]any, agentName, certsVolume string) {
+	// Add NET_ADMIN capability for iptables.
+	capAdd, _ := sidecar["cap_add"].([]string)
+	capAdd = append(capAdd, "NET_ADMIN")
+	sidecar["cap_add"] = capAdd
+
+	// Add certs volume so sidecar can install the gateway CA.
+	volumes, _ := sidecar["volumes"].([]string)
+	volumes = append(volumes, certsVolume+":/shared/certs")
+	sidecar["volumes"] = volumes
+
+	// Add GATEWAY_HOST env var.
+	env, ok := sidecar["environment"].(map[string]string)
+	if !ok || env == nil {
+		env = make(map[string]string)
+	}
+	env["GATEWAY_HOST"] = agentName + "-gateway"
 	sidecar["environment"] = env
 }

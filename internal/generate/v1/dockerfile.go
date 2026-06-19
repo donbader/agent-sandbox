@@ -51,18 +51,19 @@ type entrypointData struct {
 
 // dockerfileData is the template data for Dockerfile.tmpl.
 type dockerfileData struct {
-	BaseImage      string
-	PresetInstalls []string
-	IsPreset       bool
-	ExtraBuilds    []string
-	EntrypointPath string
-	CMD            string
+	BaseImage        string
+	PresetInstalls   []string
+	IsPreset         bool
+	ExtraBuilds      []string
+	EntrypointPath   string
+	GatewayRoutePath string
+	CMD              string
 }
 
 // BuildDockerfile generates a Dockerfile string using the embedded templates.
 // This is a convenience wrapper around RenderDockerfile for callers that don't manage their own Loader.
-func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions, entrypointPath string, presets map[string]*Preset) (string, error) {
-	return RenderDockerfile(templates.NewEmbeddedLoader(), cfg, contribs, entrypointPath, presets)
+func BuildDockerfile(cfg *config.Config, contribs *plugin.Contributions, entrypointPath, gatewayRoutePath string, presets map[string]*Preset) (string, error) {
+	return RenderDockerfile(templates.NewEmbeddedLoader(), cfg, contribs, entrypointPath, gatewayRoutePath, presets)
 }
 
 // EntrypointScript returns the entrypoint script using the embedded templates.
@@ -95,7 +96,7 @@ func RenderEntrypointScript(loader *templates.Loader, preEntrypoint []string, cw
 }
 
 // RenderDockerfile executes the Dockerfile template from config and plugin contributions.
-func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *plugin.Contributions, entrypointPath string, presets map[string]*Preset) (string, error) {
+func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *plugin.Contributions, entrypointPath, gatewayRoutePath string, presets map[string]*Preset) (string, error) {
 	tmpl, err := loader.Load("Dockerfile.tmpl")
 	if err != nil {
 		return "", fmt.Errorf("load Dockerfile template: %w", err)
@@ -154,12 +155,13 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, dockerfileData{
-		BaseImage:      baseImage,
-		PresetInstalls: presetInstalls,
-		IsPreset:       isPreset,
-		ExtraBuilds:    extraBuilds,
-		EntrypointPath: entrypointPath,
-		CMD:            cmd,
+		BaseImage:        baseImage,
+		PresetInstalls:   presetInstalls,
+		IsPreset:         isPreset,
+		ExtraBuilds:      extraBuilds,
+		EntrypointPath:   entrypointPath,
+		GatewayRoutePath: gatewayRoutePath,
+		CMD:              cmd,
 	}); err != nil {
 		return "", fmt.Errorf("execute Dockerfile template: %w", err)
 	}

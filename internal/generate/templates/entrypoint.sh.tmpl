@@ -2,82 +2,11 @@
 set -e
 
 # Configuration via environment (set by compose).
-: "${GATEWAY_HOST:=gateway}"
 : "${AGENT_USER:=agent}"
 : "${AGENT_HOME:=/home/agent}"
 
-# Wait for gateway to be healthy before setting up routing.
-echo "[entrypoint] waiting for gateway ($GATEWAY_HOST)..."
-until curl -sf http://$GATEWAY_HOST:8080/health >/dev/null 2>&1; do
-    sleep 1
-done
-echo "[entrypoint] gateway ready"
-
-# Resolve gateway IP (getent may not exist in slim images, fall back to ping).
-GATEWAY_IP=""
-if command -v getent >/dev/null 2>&1; then
-    GATEWAY_IP=$(getent hosts $GATEWAY_HOST | awk '{print $1}' | head -1)
-fi
-if [ -z "$GATEWAY_IP" ]; then
-    GATEWAY_IP=$(ping -c1 -W1 $GATEWAY_HOST 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p')
-fi
-if [ -z "$GATEWAY_IP" ]; then
-    echo "[entrypoint] ERROR: could not resolve gateway IP" >&2
-    exit 1
-fi
-echo "[entrypoint] gateway IP: $GATEWAY_IP"
-
-# Determine the sandbox network CIDR so local (east-west) traffic is not redirected.
-SANDBOX_CIDR=$(ip route | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1)
-if [ -z "$SANDBOX_CIDR" ]; then
-    # Fallback: exclude only the gateway IP
-    SANDBOX_CIDR="${GATEWAY_IP}/32"
-fi
-
-# Redirect ALL outbound TCP (except sandbox-local) to the gateway proxy.
-# This catches HTTPS (443), HTTP (80), and any other protocol.
-iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "${GATEWAY_IP}:8443"
-echo "[entrypoint] iptables: all outbound TCP (except $SANDBOX_CIDR) → ${GATEWAY_IP}:8443"
-
-# On internal networks, there is no default route — the kernel rejects connect() with
-# ENETUNREACH before DNAT can redirect the packet. Add a dummy default route via the
-# gateway so packets reach the nat OUTPUT chain. DNAT rewrites the destination to the
-# gateway regardless, so this route is never actually used for forwarding.
-if ! ip route show default >/dev/null 2>&1 || [ -z "$(ip route show default 2>/dev/null)" ]; then
-    ip route add default via "$GATEWAY_IP" 2>/dev/null || route add default gw "$GATEWAY_IP" 2>/dev/null || true
-    echo "[entrypoint] added default route via ${GATEWAY_IP} (for DNAT reachability)"
-fi
-
-# Point DNS at the gateway's DNS forwarder.
-# On internal networks, Docker's embedded DNS (127.0.0.11) cannot resolve external hostnames
-# because it can't reach upstream resolvers. The gateway is dual-networked (internal + external)
-# and its DNS forwarder tries Docker DNS first (for container names), then public DNS (for internet).
-# We keep 127.0.0.11 as a fallback so container-name resolution still works if gateway DNS is slow.
-echo "nameserver ${GATEWAY_IP}" > /etc/resolv.conf
-echo "nameserver 127.0.0.11" >> /etc/resolv.conf
-echo "[entrypoint] DNS: ${GATEWAY_IP} (primary), 127.0.0.11 (fallback)"
-
-# Install the gateway CA certificate so TLS verification succeeds.
-if [ -f /shared/certs/ca.crt ]; then
-    cp /shared/certs/ca.crt /usr/local/share/ca-certificates/gateway-ca.crt
-    update-ca-certificates --fresh >/dev/null 2>&1
-    # Debian slim's update-ca-certificates may not append to the bundle file reliably.
-    # Explicitly append so native-tls/rustls (which read the bundle directly) trust the CA.
-    # Use the second line of the PEM (unique base64 content) as the dedup key.
-    _cert_id=$(sed -n '2p' /shared/certs/ca.crt)
-    if ! grep -qF "$_cert_id" /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
-        cat /shared/certs/ca.crt >> /etc/ssl/certs/ca-certificates.crt
-    fi
-    # Node.js does not use the system CA store — export for Node-based agents (Claude Code, etc).
-    # NODE_EXTRA_CA_CERTS: works on Node 7.3+ (points to a specific cert file).
-    # NODE_USE_SYSTEM_CA: works on Node 20.12+ (reads the system CA bundle directly).
-    # Both can coexist safely — older Node ignores the unknown env var.
-    export NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/gateway-ca.crt
-    export NODE_USE_SYSTEM_CA=1
-    echo "[entrypoint] CA certificate installed"
-else
-    echo "[entrypoint] WARNING: CA cert not found at /shared/certs/ca.crt" >&2
-fi
+# Shared gateway routing (iptables DNAT, DNS, CA cert).
+. /usr/local/bin/gateway-route.sh
 {{- if .PreEntrypoint }}
 
 # Plugin pre-entrypoint commands
