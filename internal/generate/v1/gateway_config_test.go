@@ -117,6 +117,8 @@ func TestWriteGatewayRuntimeConfig_MiddlewareDomainsMITM(t *testing.T) {
 	// Both the egress header domain and the middleware domain should be in mitm_domains
 	assert.Contains(t, rc.MITMDomains, "api.example.com")
 	assert.Contains(t, rc.MITMDomains, "api.telegram.org")
+	// Catch-all should NOT be in mitm_domains
+	assert.NotContains(t, rc.MITMDomains, "*")
 }
 
 func TestWriteGatewayRuntimeConfig_PluginServiceWithoutHeaders(t *testing.T) {
@@ -140,4 +142,64 @@ func TestWriteGatewayRuntimeConfig_PluginServiceWithoutHeaders(t *testing.T) {
 
 	// Plugin domain with middleware should be MITM'd even without headers
 	assert.Contains(t, rc.MITMDomains, "api.telegram.org")
+}
+
+func TestBuildGatewayConfig_PluginEgressMerged(t *testing.T) {
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			Egress: []config.EgressRule{
+				{Hosts: []string{"api.example.com"}, Headers: map[string]string{"Authorization": "Bearer ${TOKEN}"}},
+				{Hosts: []string{"*"}},
+			},
+		},
+	}
+
+	pluginContribs := &plugin.Contributions{
+		Gateway: plugin.GatewayContrib{
+			Egress: []config.EgressRule{
+				{Hosts: []string{"api.telegram.org"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/rewrite.ts"}}},
+				{Hosts: []string{"github.com"}, Headers: map[string]string{"Authorization": "Bearer ${GH_TOKEN}"}},
+			},
+		},
+	}
+
+	gwCfg := BuildGatewayConfig(cfg, pluginContribs)
+
+	// Plugin rules should be inserted before catch-all
+	require.Len(t, gwCfg.EgressRules, 4)
+	assert.Equal(t, []string{"api.example.com"}, gwCfg.EgressRules[0].Hosts)
+	assert.Equal(t, []string{"api.telegram.org"}, gwCfg.EgressRules[1].Hosts)
+	assert.Equal(t, []string{"github.com"}, gwCfg.EgressRules[2].Hosts)
+	assert.Equal(t, []string{"*"}, gwCfg.EgressRules[3].Hosts)
+
+	// Middleware should be preserved on the telegram rule
+	require.Len(t, gwCfg.EgressRules[1].Middlewares, 1)
+	assert.Equal(t, "./src/rewrite.ts", gwCfg.EgressRules[1].Middlewares[0].Script)
+
+	// Auth headers should be generated for both header-based rules
+	assert.Len(t, gwCfg.AuthHeaders, 2) // api.example.com + github.com
+}
+
+func TestBuildGatewayConfig_PluginURLNormalization(t *testing.T) {
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			Egress: []config.EgressRule{
+				{Hosts: []string{"*"}},
+			},
+		},
+	}
+
+	pluginContribs := &plugin.Contributions{
+		Gateway: plugin.GatewayContrib{
+			Egress: []config.EgressRule{
+				{Hosts: []string{"https://mcp.notion.com/mcp"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/oauth.ts"}}},
+			},
+		},
+	}
+
+	gwCfg := BuildGatewayConfig(cfg, pluginContribs)
+
+	// URL should be normalized to bare hostname
+	require.Len(t, gwCfg.EgressRules, 2)
+	assert.Equal(t, []string{"mcp.notion.com"}, gwCfg.EgressRules[0].Hosts)
 }
