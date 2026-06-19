@@ -59,7 +59,10 @@ func (p *Policy) ValidateCreate(req *CreateRequest, currentCount int) error {
 		return &PolicyError{Code: 403, Message: fmt.Sprintf("image %q not in allowlist", req.Image)}
 	}
 	if req.Privileged {
-		return &PolicyError{Code: 403, Message: "privileged mode is not allowed"}
+		// Allow privileged for BuildKit builder when builds are enabled
+		if !(p.AllowBuild && matchImage("moby/buildkit:*", normalizeImage(req.Image))) {
+			return &PolicyError{Code: 403, Message: "privileged mode is not allowed"}
+		}
 	}
 	if req.NetworkMode == "host" {
 		return &PolicyError{Code: 403, Message: "host network mode is not allowed"}
