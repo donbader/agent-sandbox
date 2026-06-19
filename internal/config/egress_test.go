@@ -165,7 +165,7 @@ func TestValidateEgressRules(t *testing.T) {
 
 	t.Run("deny with middlewares", func(t *testing.T) {
 		rules := []EgressRule{
-			{Hosts: []string{"evil.com"}, Deny: true, Middlewares: []MiddlewareEntry{{Script: "./foo.ts"}}},
+			{Hosts: []string{"evil.com"}, Deny: true, Middlewares: []string{"./foo.ts"}},
 		}
 		errs := ValidateEgressRules(rules)
 		assert.Len(t, errs, 1)
@@ -204,10 +204,8 @@ func TestEgressRule_NeedsMITM(t *testing.T) {
 
 func TestNeedsMITM_WithMiddlewares(t *testing.T) {
 	rule := EgressRule{
-		Hosts: []string{"api.telegram.org"},
-		Middlewares: []MiddlewareEntry{
-			{Script: "./src/rewrite.ts"},
-		},
+		Hosts:       []string{"api.telegram.org"},
+		Middlewares: []string{"./src/rewrite.ts"},
 	}
 	assert.True(t, rule.NeedsMITM())
 }

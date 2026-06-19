@@ -74,10 +74,8 @@ func TestBuildGatewayConfig_MiddlewareDomains(t *testing.T) {
 		Gateway: plugin.GatewayContrib{
 			Egress: []config.EgressRule{
 				{
-					Hosts: []string{"api.telegram.org"},
-					Middlewares: []config.MiddlewareEntry{
-						{Script: "./src/rewrite.ts"},
-					},
+					Hosts:       []string{"api.telegram.org"},
+					Middlewares: []string{"./src/rewrite.ts"},
 				},
 			},
 		},
@@ -100,7 +98,7 @@ func TestWriteGatewayRuntimeConfig_MiddlewareDomainsMITM(t *testing.T) {
 	gwCfg := &GatewayConfigOutput{
 		EgressRules: []config.EgressRule{
 			{Hosts: []string{"api.example.com"}, Headers: map[string]string{"Authorization": "Bearer ${TOKEN}"}},
-			{Hosts: []string{"api.telegram.org"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/rewrite.ts"}}},
+			{Hosts: []string{"api.telegram.org"}, Middlewares: []string{"./src/rewrite.ts"}},
 			{Hosts: []string{"*"}},
 		},
 	}
@@ -126,7 +124,7 @@ func TestWriteGatewayRuntimeConfig_PluginServiceWithoutHeaders(t *testing.T) {
 
 	gwCfg := &GatewayConfigOutput{
 		EgressRules: []config.EgressRule{
-			{Hosts: []string{"api.telegram.org"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/rewrite.ts"}}},
+			{Hosts: []string{"api.telegram.org"}, Middlewares: []string{"./src/rewrite.ts"}},
 			{Hosts: []string{"*"}},
 		},
 	}
@@ -157,7 +155,7 @@ func TestBuildGatewayConfig_PluginEgressMerged(t *testing.T) {
 	pluginContribs := &plugin.Contributions{
 		Gateway: plugin.GatewayContrib{
 			Egress: []config.EgressRule{
-				{Hosts: []string{"api.telegram.org"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/rewrite.ts"}}},
+				{Hosts: []string{"api.telegram.org"}, Middlewares: []string{"./src/rewrite.ts"}},
 				{Hosts: []string{"github.com"}, Headers: map[string]string{"Authorization": "Bearer ${GH_TOKEN}"}},
 			},
 		},
@@ -174,7 +172,7 @@ func TestBuildGatewayConfig_PluginEgressMerged(t *testing.T) {
 
 	// Middleware should be preserved on the telegram rule
 	require.Len(t, gwCfg.EgressRules[1].Middlewares, 1)
-	assert.Equal(t, "./src/rewrite.ts", gwCfg.EgressRules[1].Middlewares[0].Script)
+	assert.Equal(t, "./src/rewrite.ts", gwCfg.EgressRules[1].Middlewares[0])
 
 	// Auth headers should be generated for both header-based rules
 	assert.Len(t, gwCfg.AuthHeaders, 2) // api.example.com + github.com
@@ -192,7 +190,7 @@ func TestBuildGatewayConfig_PluginURLNormalization(t *testing.T) {
 	pluginContribs := &plugin.Contributions{
 		Gateway: plugin.GatewayContrib{
 			Egress: []config.EgressRule{
-				{Hosts: []string{"https://mcp.notion.com/mcp"}, Middlewares: []config.MiddlewareEntry{{Script: "./src/oauth.ts"}}},
+				{Hosts: []string{"https://mcp.notion.com/mcp"}, Middlewares: []string{"./src/oauth.ts"}},
 			},
 		},
 	}

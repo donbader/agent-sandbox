@@ -88,14 +88,10 @@ Attach TypeScript middleware scripts to a rule. Middlewares fire for requests ma
 ```yaml
 - hosts: ["api.example.com"]
   middlewares:
-    - script: "./src/auth.ts"
+    - "./src/auth.ts"
 ```
 
-Each middleware entry has:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `script` | `string` | Path to TypeScript file (relative to plugin or project root) |
+Each entry is a path to a TypeScript file (relative to plugin or project root).
 
 Middlewares run in order before the request is forwarded upstream. They can modify headers, abort requests, or perform credential injection. See [Plugin Authoring](../plugins.md) for the middleware handler API.
 

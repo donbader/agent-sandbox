@@ -32,7 +32,7 @@ contributes:
     egress:                            # egress rules (same format as user config)
       - hosts: ["api.example.com"]
         middlewares:                    # intercept proxied requests
-          - script: "./src/auth.ts"
+          - "./src/auth.ts"
     namespaced_volumes:            # auto-prefixed with {agentName}-
       - "my-data:{{ .plugin.options.data_dir }}"
     routes:                        # expose HTTP endpoints on the gateway

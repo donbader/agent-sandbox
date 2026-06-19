@@ -7,11 +7,6 @@ import (
 	"strings"
 )
 
-// MiddlewareEntry declares a TypeScript middleware attached to an egress rule.
-type MiddlewareEntry struct {
-	Script string `yaml:"script" json:"script" jsonschema:"required,title=script,description=Path to TypeScript middleware file"`
-}
-
 // EgressRule defines a single egress access control rule.
 // Rules are evaluated in order; first match wins.
 // If no rule matches, traffic is denied (implicit deny-all).
@@ -20,7 +15,7 @@ type EgressRule struct {
 	Deny        bool              `yaml:"deny,omitempty" json:"deny,omitempty" jsonschema:"title=deny,description=If true block matching traffic"`
 	Headers     map[string]string `yaml:"headers,omitempty" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway (implies MITM + allow)"`
 	DenyPaths   []string          `yaml:"deny_paths,omitempty" json:"deny_paths,omitempty" jsonschema:"title=deny_paths,description=URL path patterns to block (implies MITM). Format: METHOD /path/glob or /path/glob"`
-	Middlewares []MiddlewareEntry `yaml:"middlewares,omitempty" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=TypeScript middleware scripts (implies MITM)"`
+	Middlewares []string          `yaml:"middlewares,omitempty" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=TypeScript middleware scripts (implies MITM)"`
 	Network     string            `yaml:"network,omitempty" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach gateway to (for internal services)"`
 	Target      string            `yaml:"target,omitempty" json:"target,omitempty" jsonschema:"title=target,description=Forwarding destination (host:port) for internal services. Omit for standard HTTPS passthrough."`
 }

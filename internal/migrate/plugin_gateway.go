@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// middlewareScriptRe matches `- script: "..." or - script: '...' or - script: ...` entries
+// under a middlewares: key, for auto-correction to plain strings.
+var middlewareScriptRe = regexp.MustCompile(`(?m)^(\s+)- script:\s*["']?([^"'\n]+?)["']?\s*$`)
 
 // DetectLegacyGateway checks if a plugin.yaml uses the old gateway format.
 // Returns true if the contributes section has gateway.services or top-level
@@ -205,7 +210,7 @@ func buildEgressBlock(services []LegacyService, middlewares []LegacyMiddleware) 
 		if len(entry.middlewares) > 0 {
 			sb.WriteString("        middlewares:\n")
 			for _, mw := range entry.middlewares {
-				fmt.Fprintf(&sb, "          - script: %q\n", mw.Script)
+				fmt.Fprintf(&sb, "          - %q\n", mw.Script)
 			}
 		}
 	}
@@ -341,4 +346,35 @@ func countLeadingSpaces(line string) int {
 		}
 	}
 	return len(line)
+}
+
+// DetectMiddlewareScriptForm checks if a plugin.yaml uses the object form
+// `- script: "./path.ts"` instead of the plain string form `- "./path.ts"`.
+func DetectMiddlewareScriptForm(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	return middlewareScriptRe.Match(data), nil
+}
+
+// FixMiddlewareScriptForm rewrites `- script: "./path.ts"` to `- "./path.ts"`.
+// Returns true if the file was modified.
+func FixMiddlewareScriptForm(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+
+	content := string(data)
+	fixed := middlewareScriptRe.ReplaceAllString(content, `${1}- "${2}"`)
+
+	if fixed == content {
+		return false, nil
+	}
+
+	if err := os.WriteFile(path, []byte(fixed), 0644); err != nil {
+		return false, err
+	}
+	return true, nil
 }

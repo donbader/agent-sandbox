@@ -128,10 +128,13 @@ contributes:
 
 ### Middleware entry format
 
+Middlewares are declared as plain string paths on egress rules:
+
 ```yaml
-middlewares:
-  - script: "./src/my-middleware.ts"   # path relative to plugin dir
-    domains: ["api.example.com"]       # optional: only fire for these hosts
+egress:
+  - hosts: ["api.example.com"]
+    middlewares:
+      - "./src/my-middleware.ts"       # path relative to plugin dir
 ```
 
 ### Route entry format

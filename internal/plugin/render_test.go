@@ -418,7 +418,7 @@ contributes:
     egress:
       - hosts: ["api.example.com"]
         middlewares:
-          - script: "./src/auth.ts"
+          - "./src/auth.ts"
 `
 	p, err := ParsePluginYAML([]byte(raw))
 	require.NoError(t, err)
