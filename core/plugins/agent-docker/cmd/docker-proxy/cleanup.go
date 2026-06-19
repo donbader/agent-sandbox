@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"net/http"
 	"sync"
 	"time"
@@ -28,6 +29,10 @@ func (c *Cleaner) httpClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				if c.dockerAddr != "" && c.dockerAddr != "unix" {
+					addr := strings.TrimPrefix(c.dockerAddr, "http://")
+					return net.Dial("tcp", addr)
+				}
 				return dialUpstream()
 			},
 		},
@@ -35,10 +40,17 @@ func (c *Cleaner) httpClient() *http.Client {
 	}
 }
 
+
+func (c *Cleaner) baseURL() string {
+	if c.dockerAddr != "" && c.dockerAddr != "unix" {
+		return c.dockerAddr
+	}
+	return "http://docker"
+}
 // CleanupAll stops and removes all containers and networks labeled with this sandbox ID.
 func (c *Cleaner) CleanupAll(ctx context.Context) {
 	client := c.httpClient()
-	base := "http://docker"
+	base := c.baseURL()
 
 	c.cleanupContainers(ctx, client, base)
 	c.cleanupNetworks(ctx, client, base)
