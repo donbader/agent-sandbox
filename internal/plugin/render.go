@@ -108,7 +108,32 @@ func RenderContributions(p *PluginDef, opts map[string]any, ctx RenderContext) (
 	rendered.Gateway.NamespacedVolumes = stripEmpty(rendered.Gateway.NamespacedVolumes)
 	rendered.Gateway.RawVolumes = stripEmpty(rendered.Gateway.RawVolumes)
 
+	// Promote build_stage to a named stage using the plugin name.
+	if rendered.Runtime.BuildStage != nil {
+		rendered.Runtime.BuildStages = append(rendered.Runtime.BuildStages, NamedBuildStage{
+			Name:      sanitizeStageName(p.Name),
+			Base:      rendered.Runtime.BuildStage.Base,
+			Steps:     rendered.Runtime.BuildStage.Steps,
+			Artifacts: rendered.Runtime.BuildStage.Artifacts,
+		})
+		rendered.Runtime.BuildStage = nil
+	}
+
 	return &rendered, nil
+}
+
+// sanitizeStageName converts a plugin name to a valid Docker stage name.
+// Docker stage names must match [a-zA-Z0-9_-]; anything else becomes a hyphen.
+func sanitizeStageName(name string) string {
+	var b strings.Builder
+	for _, ch := range strings.ToLower(name) {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' {
+			b.WriteRune(ch)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
 }
 
 

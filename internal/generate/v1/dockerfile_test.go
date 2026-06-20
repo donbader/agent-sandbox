@@ -104,6 +104,64 @@ func TestBuildDockerfile_PresetDefaultCMD(t *testing.T) {
 	assert.Contains(t, output, `CMD ["sleep","infinity"]`)
 }
 
+func TestBuildDockerfile_BuildStages(t *testing.T) {
+	cfg := &config.Config{
+		Runtime: config.RuntimeConfig{
+			Image: "node:24-slim",
+			BuildStages: []config.BuildStageConfig{
+				{
+					Name:  "tools",
+					Base:  "golang:1.24",
+					Steps: []string{"RUN go build -o /usr/local/bin/mytool ./cmd"},
+					Artifacts: []config.StageArtifact{
+						{From: "/usr/local/bin/mytool", To: "/usr/local/bin/mytool"},
+					},
+				},
+			},
+		},
+	}
+
+	pluginContribs := &plugin.Contributions{
+		Runtime: plugin.RuntimeContrib{
+			BuildStages: []plugin.NamedBuildStage{
+				{
+					Name:  "plugin-assets",
+					Steps: []string{"RUN npm ci", "RUN npm run build"},
+					Artifacts: []config.StageArtifact{
+						{From: "/app/dist", To: "/home/agent/dist"},
+					},
+				},
+			},
+		},
+	}
+
+	output, err := BuildDockerfile(cfg, pluginContribs, ".build/entrypoint.sh", ".build/gateway-route.sh", nil)
+	require.NoError(t, err)
+
+	// Build stages must appear before the final FROM
+	assert.Contains(t, output, "FROM golang:1.24 AS build-tools")
+	assert.Contains(t, output, "RUN go build -o /usr/local/bin/mytool ./cmd")
+	assert.Contains(t, output, "FROM node:24-slim AS build-plugin-assets")
+	assert.Contains(t, output, "RUN npm ci")
+
+	// Artifacts must be COPYed in the final stage
+	assert.Contains(t, output, "COPY --from=build-tools /usr/local/bin/mytool /usr/local/bin/mytool")
+	assert.Contains(t, output, "COPY --from=build-plugin-assets /app/dist /home/agent/dist")
+
+	// Final FROM must be present (no AS qualifier)
+	assert.Contains(t, output, "FROM node:24-slim\n")
+
+	// Stage FROMs must appear before the final FROM
+	toolsIdx := indexOf(output, "FROM golang:1.24 AS build-tools")
+	finalIdx := indexOf(output, "FROM node:24-slim\n")
+	assert.Greater(t, finalIdx, toolsIdx, "build stages must appear before the final FROM")
+
+	// Artifacts must appear after ExtraBuilds section and before entrypoint COPY
+	artifactIdx := indexOf(output, "COPY --from=build-tools")
+	entrypointIdx := indexOf(output, "COPY .build/entrypoint.sh")
+	assert.Greater(t, entrypointIdx, artifactIdx, "artifacts must appear before entrypoint COPY")
+}
+
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
 	script := EntrypointScript(nil, "/home/agent/workspace")
 	assert.Contains(t, script, `exec gosu "$AGENT_USER" "$@"`)

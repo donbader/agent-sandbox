@@ -73,15 +73,32 @@ type Contributions struct {
 	Sidecar SidecarContrib `yaml:"sidecar"`
 }
 
+// BuildStage declares an isolated Docker build stage contributed by a plugin.
+type BuildStage struct {
+	Base      string                 `yaml:"base"`      // optional, defaults to main base image
+	Steps     []string               `yaml:"steps"`     // Dockerfile instructions for the build stage
+	Artifacts []config.StageArtifact `yaml:"artifacts"` // what to COPY --from into the final image
+}
+
+// NamedBuildStage is a BuildStage with its resolved stage name, populated after render.
+type NamedBuildStage struct {
+	Name      string                 // Docker stage name: "build-{Name}"
+	Base      string
+	Steps     []string
+	Artifacts []config.StageArtifact
+}
+
 type RuntimeContrib struct {
-	ExtraBuilds       []string          `yaml:"extra_builds"`
-	Environment       map[string]string `yaml:"environment"`
-	PreEntrypoint     []string          `yaml:"pre_entrypoint"`
-	Ports             []string          `yaml:"ports"`
-	NamespacedVolumes []string          `yaml:"namespaced_volumes"` // auto-prefixed with {agentName}- at compose generation
-	RawVolumes        []string          `yaml:"raw_volumes"`        // used as-is, no agent name prefix
-	CapAdd            []string          `yaml:"cap_add"`            // validated at install time if plugin source is remote
-	SkipUserns        bool              `yaml:"skip_userns"`
+	BuildStage        *BuildStage        `yaml:"build_stage"`  // from plugin YAML; promoted to BuildStages by RenderContributions
+	BuildStages       []NamedBuildStage  `yaml:"-"`            // accumulated after render; merged by MergeContributions
+	ExtraBuilds       []string           `yaml:"extra_builds"`
+	Environment       map[string]string  `yaml:"environment"`
+	PreEntrypoint     []string           `yaml:"pre_entrypoint"`
+	Ports             []string           `yaml:"ports"`
+	NamespacedVolumes []string           `yaml:"namespaced_volumes"` // auto-prefixed with {agentName}- at compose generation
+	RawVolumes        []string           `yaml:"raw_volumes"`        // used as-is, no agent name prefix
+	CapAdd            []string           `yaml:"cap_add"`            // validated at install time if plugin source is remote
+	SkipUserns        bool               `yaml:"skip_userns"`
 }
 
 type GatewayContrib struct {

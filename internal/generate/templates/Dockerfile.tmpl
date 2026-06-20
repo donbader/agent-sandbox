@@ -1,3 +1,11 @@
+{{- range $stage := .BuildStages -}}
+
+FROM {{ if $stage.Base }}{{ $stage.Base }}{{ else }}{{ $.BaseImage }}{{ end }} AS build-{{ $stage.Name }}
+{{- range $stage.Steps }}
+{{ . }}
+{{- end }}
+
+{{ end -}}
 FROM {{ .BaseImage }}
 {{- range .PresetInstalls }}
 
@@ -16,6 +24,11 @@ WORKDIR /home/agent
 {{- range .ExtraBuilds }}
 
 {{ . }}
+{{- end }}
+{{- range $stage := .BuildStages }}
+{{- range $stage.Artifacts }}
+COPY --from=build-{{ $stage.Name }} {{ .From }} {{ .To }}
+{{- end }}
 {{- end }}
 
 COPY {{ .EntrypointPath }} /usr/local/bin/entrypoint.sh
