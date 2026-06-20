@@ -22,6 +22,7 @@ type dockerfileData struct {
 	BaseImage        string
 	PresetInstalls   []string
 	IsPreset         bool
+	BuildStages      []plugin.NamedBuildStage
 	ExtraBuilds      []string
 	EntrypointPath   string
 	GatewayRoutePath string
@@ -88,6 +89,20 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 		extraBuilds = append(extraBuilds, contribs.Runtime.ExtraBuilds...)
 	}
 
+	// Collect build stages (user + plugin)
+	var buildStages []plugin.NamedBuildStage
+	for _, s := range cfg.Runtime.BuildStages {
+		buildStages = append(buildStages, plugin.NamedBuildStage{
+			Name:      s.Name,
+			Base:      s.Base,
+			Steps:     s.Steps,
+			Artifacts: s.Artifacts,
+		})
+	}
+	if contribs != nil {
+		buildStages = append(buildStages, contribs.Runtime.BuildStages...)
+	}
+
 	// Marshal CMD
 	var cmd string
 	if len(cfg.Runtime.Entrypoint) > 0 {
@@ -115,6 +130,7 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 		BaseImage:        baseImage,
 		PresetInstalls:   presetInstalls,
 		IsPreset:         isPreset,
+		BuildStages:      buildStages,
 		ExtraBuilds:      extraBuilds,
 		EntrypointPath:   entrypointPath,
 		GatewayRoutePath: gatewayRoutePath,

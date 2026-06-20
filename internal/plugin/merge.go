@@ -15,6 +15,7 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 		if c == nil {
 			continue
 		}
+		merged.Runtime.BuildStages = append(merged.Runtime.BuildStages, c.Runtime.BuildStages...)
 		merged.Runtime.ExtraBuilds = append(merged.Runtime.ExtraBuilds, c.Runtime.ExtraBuilds...)
 		merged.Runtime.PreEntrypoint = append(merged.Runtime.PreEntrypoint, c.Runtime.PreEntrypoint...)
 		merged.Runtime.Ports = append(merged.Runtime.Ports, c.Runtime.Ports...)

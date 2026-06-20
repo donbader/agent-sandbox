@@ -57,6 +57,20 @@ type Config struct {
 	Installations []Installation `yaml:"installations" json:"installations,omitempty" jsonschema:"title=installations,description=Plugins to install"`
 }
 
+// StageArtifact describes a file to COPY from a build stage into the final image.
+type StageArtifact struct {
+	From string `yaml:"from" json:"from" jsonschema:"required,description=Source path in build stage"`
+	To   string `yaml:"to" json:"to" jsonschema:"required,description=Destination path in final image"`
+}
+
+// BuildStageConfig declares an isolated Docker build stage in agent.yaml.
+type BuildStageConfig struct {
+	Name      string          `yaml:"name" json:"name" jsonschema:"required,description=Stage name (Dockerfile stage becomes build-{name})"`
+	Base      string          `yaml:"base" json:"base,omitempty" jsonschema:"description=Base image for this stage (defaults to runtime image)"`
+	Steps     []string        `yaml:"steps" json:"steps,omitempty" jsonschema:"description=Dockerfile instructions for this stage"`
+	Artifacts []StageArtifact `yaml:"artifacts" json:"artifacts,omitempty" jsonschema:"description=Files to COPY from this stage into the final image"`
+}
+
 // RuntimeConfig holds runtime container configuration.
 type RuntimeConfig struct {
 	Image             string            `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
@@ -65,7 +79,8 @@ type RuntimeConfig struct {
 	Entrypoint        []string          `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override"`
 	NamespacedVolumes []string          `yaml:"namespaced_volumes" json:"namespaced_volumes,omitempty" jsonschema:"title=namespaced_volumes,description=Named volumes auto-prefixed with agent name for fleet isolation"`
 	RawVolumes        []string          `yaml:"raw_volumes" json:"raw_volumes,omitempty" jsonschema:"title=raw_volumes,description=Volumes used as-is (bind mounts or intentionally shared named volumes)"`
-	Environment       map[string]string `yaml:"environment" json:"environment,omitempty" jsonschema:"title=environment,description=Environment variables passed to the agent container"`
+	Environment       map[string]string  `yaml:"environment" json:"environment,omitempty" jsonschema:"title=environment,description=Environment variables passed to the agent container"`
+	BuildStages       []BuildStageConfig `yaml:"build_stages" json:"build_stages,omitempty" jsonschema:"title=build_stages,description=Isolated Docker build stages for caching heavy build steps"`
 }
 
 // GatewayConfig holds gateway proxy configuration.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMergeContributions(t *testing.T) {
@@ -121,4 +122,30 @@ func TestMergeContributions_SkipUserns_AllFalse(t *testing.T) {
 	merged := MergeContributions(a, b)
 
 	assert.False(t, merged.Runtime.SkipUserns)
+}
+
+func TestMergeContributions_BuildStages(t *testing.T) {
+	a := &Contributions{
+		Runtime: RuntimeContrib{
+			BuildStages: []NamedBuildStage{
+				{Name: "plugin-a", Base: "golang:1.24", Steps: []string{"RUN go build -o /app ./cmd"}},
+			},
+		},
+	}
+	b := &Contributions{
+		Runtime: RuntimeContrib{
+			BuildStages: []NamedBuildStage{
+				{Name: "plugin-b", Steps: []string{"RUN npm ci"}},
+			},
+		},
+	}
+
+	merged := MergeContributions(a, b)
+
+	require.Len(t, merged.Runtime.BuildStages, 2)
+	assert.Equal(t, "plugin-a", merged.Runtime.BuildStages[0].Name)
+	assert.Equal(t, "golang:1.24", merged.Runtime.BuildStages[0].Base)
+	assert.Equal(t, "plugin-b", merged.Runtime.BuildStages[1].Name)
+	// Order must be preserved
+	assert.Equal(t, []string{"RUN npm ci"}, merged.Runtime.BuildStages[1].Steps)
 }
