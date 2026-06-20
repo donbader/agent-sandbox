@@ -23,7 +23,8 @@ type dockerfileData struct {
 	PresetInstalls   []string
 	IsPreset         bool
 	BuildStages      []plugin.NamedBuildStage
-	ExtraBuilds      []string
+	EarlyBuilds      []string // extra_builds that don't reference build stage artifacts (cacheable)
+	ExtraBuilds      []string // extra_builds that reference artifacts (must come after COPY --from)
 	EntrypointPath   string
 	GatewayRoutePath string
 	CMD              string
@@ -125,13 +126,19 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 		}
 	}
 
+	// Split extra builds: hoist steps that don't reference build stage artifacts
+	// before COPY --from for better layer caching.
+	artifactPaths := collectArtifactPaths(buildStages)
+	earlyBuilds, lateBuilds := splitExtraBuilds(extraBuilds, artifactPaths)
+
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, dockerfileData{
 		BaseImage:        baseImage,
 		PresetInstalls:   presetInstalls,
 		IsPreset:         isPreset,
 		BuildStages:      buildStages,
-		ExtraBuilds:      extraBuilds,
+		EarlyBuilds:      earlyBuilds,
+		ExtraBuilds:      lateBuilds,
 		EntrypointPath:   entrypointPath,
 		GatewayRoutePath: gatewayRoutePath,
 		CMD:              cmd,
@@ -139,4 +146,136 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 		return "", fmt.Errorf("execute Dockerfile template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// collectArtifactPaths returns all destination paths from build stage artifacts,
+// including their parent directories (to catch steps that write to the same dir).
+func collectArtifactPaths(stages []plugin.NamedBuildStage) []string {
+	seen := make(map[string]bool)
+	var paths []string
+	for _, s := range stages {
+		for _, a := range s.Artifacts {
+			if !seen[a.To] {
+				paths = append(paths, a.To)
+				seen[a.To] = true
+			}
+			// Also add parent directory (e.g. /opt/telegram-adapter/dist → /opt/telegram-adapter/)
+			// so steps writing to the same dir are caught.
+			parent := parentDir(a.To)
+			if parent != "" && !seen[parent] {
+				paths = append(paths, parent)
+				seen[parent] = true
+			}
+		}
+	}
+	return paths
+}
+
+// parentDir returns the parent directory of a path, or empty if too shallow.
+// e.g. /opt/telegram-adapter/dist → /opt/telegram-adapter/
+// e.g. /tmp/pi-acp.tgz → "" (too shallow, /tmp/ would match too broadly)
+func parentDir(path string) string {
+	path = strings.TrimSuffix(path, "/")
+	lastSlash := strings.LastIndex(path, "/")
+	if lastSlash <= 0 {
+		return ""
+	}
+	parent := path[:lastSlash+1]
+	// Skip overly broad parents like /tmp/ or /opt/
+	if strings.Count(parent, "/") <= 2 {
+		return ""
+	}
+	return parent
+}
+
+// splitExtraBuilds separates extra_builds into early (hoistable before COPY --from)
+// and late (must come after). Uses a two-pass approach:
+// Pass 1: COPY instructions and artifact-referencing steps go late.
+// Pass 2: steps referencing paths created by late COPYs also go late.
+func splitExtraBuilds(steps []string, artifactPaths []string) (early, late []string) {
+	// Pass 1: initial classification
+	var earlyCandidate []string
+	for _, step := range steps {
+		if isLateBuild(step, artifactPaths) {
+			late = append(late, step)
+		} else {
+			earlyCandidate = append(earlyCandidate, step)
+		}
+	}
+
+	// Pass 2: collect destination paths from late COPY instructions,
+	// then re-check early candidates.
+	var latePaths []string
+	for _, step := range late {
+		if dest := extractCopyDest(step); dest != "" {
+			latePaths = append(latePaths, dest)
+		}
+	}
+	if len(latePaths) == 0 {
+		early = earlyCandidate
+		return
+	}
+	for _, step := range earlyCandidate {
+		if referencesAnyPath(step, latePaths) {
+			late = append(late, step)
+		} else {
+			early = append(early, step)
+		}
+	}
+	return
+}
+
+// extractCopyDest extracts the destination path from a COPY instruction.
+func extractCopyDest(step string) string {
+	trimmed := strings.TrimSpace(step)
+	if !strings.HasPrefix(trimmed, "COPY ") {
+		return ""
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) < 3 {
+		return ""
+	}
+	// Last field is destination
+	dest := parts[len(parts)-1]
+	dest = strings.TrimSuffix(dest, "/")
+	// Return parent dir for files, dir itself for dirs
+	// We return without trailing slash so Contains matches both
+	// "/opt/home-seed" and "/opt/home-seed/"
+	if lastSlash := strings.LastIndex(dest, "/"); lastSlash > 0 {
+		// If dest looks like a dir (no extension, or was originally slash-terminated)
+		// return as-is; otherwise return parent
+		origDest := parts[len(parts)-1]
+		if strings.HasSuffix(origDest, "/") {
+			return dest // dir path without trailing slash
+		}
+		return dest[:lastSlash]
+	}
+	return dest
+}
+
+// referencesAnyPath checks if a step references any of the given paths.
+func referencesAnyPath(step string, paths []string) bool {
+	for _, p := range paths {
+		if strings.Contains(step, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// isLateBuild returns true if a Dockerfile instruction depends on build stage
+// artifacts or build context (COPY), meaning it cannot be hoisted.
+func isLateBuild(step string, artifactPaths []string) bool {
+	// COPY instructions depend on build context (source files that change)
+	trimmed := strings.TrimSpace(step)
+	if strings.HasPrefix(trimmed, "COPY ") {
+		return true
+	}
+	// Check if step references any artifact destination path
+	for _, p := range artifactPaths {
+		if strings.Contains(step, p) {
+			return true
+		}
+	}
+	return false
 }
