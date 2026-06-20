@@ -445,6 +445,12 @@ func buildSidecarService(svc plugin.ComposeService, buildDir string) map[string]
 	if svc.DependsOn != nil {
 		s["depends_on"] = svc.DependsOn
 	}
+	if len(svc.CapAdd) > 0 {
+		s["cap_add"] = svc.CapAdd
+	}
+	if len(svc.SecurityOpt) > 0 {
+		s["security_opt"] = svc.SecurityOpt
+	}
 	return s
 }
 
