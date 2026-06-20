@@ -259,15 +259,44 @@ docker build -t node:20-myapp -f Dockerfile .
 docker run -d --name myapp node:20-myapp
 ```
 
-### Limitations
+### BuildKit Sidecar
 
-The buildx `docker-container` driver creates a **privileged** buildkit container, which the proxy blocks (privileged mode is never allowed). This means:
+When `allow_build: true`, the generator deploys an isolated BuildKit sidecar (`agent-docker-buildkit`) alongside the agent. The agent connects to it via the `remote` buildx driver — no privileged containers needed inside the agent.
 
-- `docker buildx build` with the default driver won't work
-- Dockerfiles using `RUN --mount=type=cache` require BuildKit and won't work with the legacy builder
-- Use `DOCKER_BUILDKIT=0 docker build` for builds through the proxy
+```
+Agent Container              BuildKit Sidecar
++--------------+            +------------------------+
+| docker CLI   |            | buildkitd              |
+| buildx       |--- 8372 -->| - runc worker          |
+| (remote drv) |            | - native snapshotter   |
++--------------+            +------------------------+
+```
 
-Future work: support rootless buildkit (`--oci-worker-no-process-sandbox`) to enable full BuildKit without privileged mode.
+At startup, the agent's pre-entrypoint auto-configures the remote driver:
+```bash
+docker buildx create --name buildkit --driver remote \
+  --driver-opt url=tcp://<agent>-agent-docker-buildkit:8372 --use
+```
+
+This enables full BuildKit features (`RUN --mount=type=cache`, multi-stage parallel builds) without giving the agent container any elevated capabilities.
+
+### BuildKit Sidecar Security
+
+The buildkit sidecar runs with `CAP_SYS_ADMIN` and `security_opt: apparmor=unconfined`. This is required because:
+
+1. **runc needs mount()** — every `RUN` instruction creates a short-lived container. Setting up its rootfs requires bind mounts, which need `CAP_SYS_ADMIN`.
+2. **AppArmor blocks mount** — even with SYS_ADMIN, the default AppArmor profile denies mount syscalls. `apparmor=unconfined` lifts this.
+
+**Why this is acceptable:**
+
+- The **agent container does NOT have SYS_ADMIN** — only the infrastructure sidecar does
+- The agent can only submit build requests via TCP (port 8372) — it cannot exec into or control the sidecar
+- The sidecar has no access to host volumes, Docker socket, or other agents' data
+- Network traffic from the sidecar is routed through the gateway (credentials never leak)
+
+**Threat model:** a compromised agent could submit malicious Dockerfiles to the sidecar. The sidecar builds them in isolation — it cannot escape to the host because it lacks the Docker socket and its network is sandboxed. The worst case is resource abuse (CPU/memory during builds), which is bounded by container resource limits.
+
+**Future:** rootless buildkit (via rootlesskit + fuse-overlayfs) would eliminate the need for SYS_ADMIN entirely, but requires rewriting the sidecar's network routing (iptables → HTTP proxy).
 
 ---
 
