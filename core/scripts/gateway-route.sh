@@ -7,6 +7,9 @@ set -e
 
 : "${GATEWAY_HOST:=gateway}"
 
+# --- Disable IPv6 (force IPv4 so iptables DNAT catches all traffic) ---
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+
 # --- Wait for gateway health ---
 echo "[gateway-route] waiting for gateway ($GATEWAY_HOST)..."
 until curl -sf http://$GATEWAY_HOST:8080/health >/dev/null 2>&1; do
