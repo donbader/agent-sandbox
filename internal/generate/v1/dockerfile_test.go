@@ -15,7 +15,7 @@ var testPresets = map[string]*Preset{
 		Name:      "codex",
 		BaseImage: "node:24-slim",
 		Install: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iproute2 iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @openai/codex@0.136.0 @zed-industries/codex-acp@0.15.0",
 		},
 		CMD: []string{"sleep", "infinity"},
@@ -24,7 +24,7 @@ var testPresets = map[string]*Preset{
 		Name:      "pi",
 		BaseImage: "node:24-slim",
 		Install: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
+			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iproute2 iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
 			"--mount=type=cache,target=/root/.npm npm install -g @earendil-works/pi-coding-agent@0.75.5 pi-acp@0.0.27",
 		},
 		CMD: []string{"sleep", "infinity"},

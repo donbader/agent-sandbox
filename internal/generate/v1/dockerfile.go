@@ -11,38 +11,6 @@ import (
 	"github.com/donbader/agent-sandbox/internal/plugin"
 )
 
-// legacyPresets is a fallback for core versions that don't ship presets/ in the tarball.
-// Remove once all supported core versions include presets (>= core-v0.8.0).
-var legacyPresets = map[string]*Preset{
-	"@builtin/codex": {
-		Name:      "codex",
-		BaseImage: "node:24-slim",
-		Install: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
-			"--mount=type=cache,target=/root/.npm npm install -g @openai/codex@0.136.0 @zed-industries/codex-acp@0.15.0",
-		},
-		CMD: []string{"sleep", "infinity"},
-	},
-	"@builtin/claude-code": {
-		Name:      "claude-code",
-		BaseImage: "node:24-slim",
-		Install: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
-			"--mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code@2.1.161 @agentclientprotocol/claude-agent-acp@0.40.0",
-		},
-		CMD: []string{"sleep", "infinity"},
-	},
-	"@builtin/pi": {
-		Name:      "pi",
-		BaseImage: "node:24-slim",
-		Install: []string{
-			"apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates iptables iputils-ping gosu && rm -rf /var/lib/apt/lists/*",
-			"--mount=type=cache,target=/root/.npm npm install -g @earendil-works/pi-coding-agent@0.75.5 pi-acp@0.0.27",
-		},
-		CMD: []string{"sleep", "infinity"},
-	},
-}
-
 // entrypointData is the template data for entrypoint.sh.tmpl.
 type entrypointData struct {
 	PreEntrypoint string
@@ -113,17 +81,6 @@ func RenderDockerfile(loader *templates.Loader, cfg *config.Config, contribs *pl
 			presetInstalls = preset.Install
 		}
 	}
-	// Fallback: if preset not resolved but image looks like a builtin, use legacy defaults.
-	// This handles older core versions that don't ship presets/ in the tarball.
-	// Remove once all supported core versions include presets (>= core-v0.8.0).
-	if !isPreset && strings.HasPrefix(cfg.Runtime.Image, "@builtin/") {
-		if p, ok := legacyPresets[cfg.Runtime.Image]; ok {
-			isPreset = true
-			baseImage = p.BaseImage
-			presetInstalls = p.Install
-		}
-	}
-
 	// Collect extra builds (user + plugin)
 	var extraBuilds []string
 	extraBuilds = append(extraBuilds, cfg.Runtime.ExtraBuilds...)
