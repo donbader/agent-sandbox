@@ -3,10 +3,10 @@ package v1
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -210,9 +210,10 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 			// Inject system env vars into all sidecars.
 			injectSidecarSystemEnv(sidecar, p.cfg.Name, p.projectName)
 			// Inject config fingerprint to force recreation on env change.
-			injectConfigFingerprint(sidecar)
 			// Inject gateway routing infrastructure (cap_add, certs volume, GATEWAY_HOST).
 			injectSidecarGatewayRouting(sidecar, p.agentName, p.certsVolume)
+			// Config fingerprint MUST be last — hash the final service state.
+			injectConfigFingerprint(sidecar)
 			// Sidecars implicitly depend on the agent service being started.
 			if sidecar["depends_on"] == nil {
 				sidecar["depends_on"] = map[string]any{
@@ -620,25 +621,13 @@ func injectSidecarSystemEnv(sidecar map[string]any, agentName, projectName strin
 	sidecar["environment"] = env
 }
 
-// injectConfigFingerprint adds a label with a hash of the sidecar's environment.
-// This ensures docker compose recreates the container when env vars change,
-// even if the image hasn't changed.
+// injectConfigFingerprint adds a label with a hash of the entire sidecar service config.
+// This ensures docker compose recreates the container when ANY config changes
+// (env, cap_add, security_opt, volumes, image, etc.) — zero maintenance.
 func injectConfigFingerprint(sidecar map[string]any) {
-	env, _ := sidecar["environment"].(map[string]string)
-	// Deterministic hash: sort keys
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var b strings.Builder
-	for _, k := range keys {
-		b.WriteString(k)
-		b.WriteByte('=')
-		b.WriteString(env[k])
-		b.WriteByte('\n')
-	}
-	h := sha256.Sum256([]byte(b.String()))
+	// Marshal the full service config (json sorts map keys for determinism)
+	raw, _ := json.Marshal(sidecar)
+	h := sha256.Sum256(raw)
 	labels, _ := sidecar["labels"].(map[string]string)
 	if labels == nil {
 		labels = make(map[string]string)
