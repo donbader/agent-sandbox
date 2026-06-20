@@ -21,14 +21,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash agent
 ENV HOME=/home/agent
 WORKDIR /home/agent
-{{- range .ExtraBuilds }}
-
-{{ . }}
-{{- end }}
 {{- range $stage := .BuildStages }}
 {{- range $stage.Artifacts }}
 COPY --from=build-{{ $stage.Name }} {{ .From }} {{ .To }}
 {{- end }}
+{{- end }}
+{{- range .ExtraBuilds }}
+
+{{ . }}
 {{- end }}
 
 COPY {{ .EntrypointPath }} /usr/local/bin/entrypoint.sh

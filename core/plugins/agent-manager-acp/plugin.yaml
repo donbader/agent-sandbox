@@ -11,7 +11,14 @@ options:
 
 contributes:
   runtime:
+    build_stage:
+      steps:
+        - "COPY {{ asset \"agent-manager\" }}/ /src/"
+        - "RUN --mount=type=cache,target=/root/.npm cd /src && npm install && npm run build"
+      artifacts:
+        - from: /src/dist
+          to: /opt/agent-manager/dist
+        - from: /src/node_modules
+          to: /opt/agent-manager/node_modules
     extra_builds:
-      - "COPY {{ asset \"agent-manager\" }}/ /opt/agent-manager-src/"
-      - "RUN --mount=type=cache,target=/root/.npm cd /opt/agent-manager-src && npm install && npm run build && mkdir -p /opt/agent-manager && mv dist /opt/agent-manager/dist && mv node_modules /opt/agent-manager/node_modules && rm -rf /opt/agent-manager-src"
       - "RUN echo '{\"acp_command\":{{ toJSON (index .plugin.options \"acp_command\") }},\"cwd\":\"{{ .agent.runtime.cwd }}\"}' > /opt/agent-manager/config.json"
