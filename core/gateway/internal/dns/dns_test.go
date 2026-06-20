@@ -355,14 +355,14 @@ func TestDNS_BlocksAAAA(t *testing.T) {
 	// Send AAAA query
 	conn, err := net.Dial("udp", listenAddr)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	query := buildAAAAQuery(0xABCD)
 	_, err = conn.Write(query)
 	require.NoError(t, err)
 
 	buf := make([]byte, 4096)
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	n, err := conn.Read(buf)
 	require.NoError(t, err)
 
