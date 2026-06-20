@@ -127,6 +127,17 @@ func (s *Server) ListenAndServe() error {
 func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query []byte) {
 	slog.Debug("dns query", "client", clientAddr.String(), "size", len(query))
 
+	// Block AAAA (IPv6) queries: the gateway only has IPv4 DNAT rules,
+	// so IPv6 addresses would bypass routing and fail with "network unreachable".
+	if isAAAAQuery(query) {
+		if resp := synthesizeEmptyResponse(query); resp != nil {
+			if _, err := conn.WriteToUDP(resp, clientAddr); err != nil {
+				slog.Error("dns write client (AAAA block)", "error", err)
+			}
+			return
+		}
+	}
+
 	resp := make([]byte, 4096)
 
 	upstreamMu.RLock()
@@ -168,4 +179,49 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 	}
 
 	slog.Error("dns all upstreams failed", "client", clientAddr.String())
+}
+
+// isAAAAQuery checks if a DNS query is asking for AAAA records (type 28).
+// DNS wire format: 12-byte header, then question section (QNAME + QTYPE + QCLASS).
+func isAAAAQuery(query []byte) bool {
+	if len(query) < 14 { // minimum: 12 header + 1 label byte + 1 null
+		return false
+	}
+	// Skip header (12 bytes), walk QNAME labels
+	i := 12
+	for i < len(query) {
+		labelLen := int(query[i])
+		if labelLen == 0 {
+			i++ // skip null terminator
+			break
+		}
+		i += 1 + labelLen
+	}
+	// QTYPE is next 2 bytes
+	if i+2 > len(query) {
+		return false
+	}
+	qtype := uint16(query[i])<<8 | uint16(query[i+1])
+	return qtype == 28 // AAAA
+}
+
+// synthesizeEmptyResponse creates a DNS response with zero answers for the given query.
+// This tells the client "no records of this type exist" without hitting upstream.
+func synthesizeEmptyResponse(query []byte) []byte {
+	if len(query) < 12 {
+		return nil
+	}
+	resp := make([]byte, len(query))
+	copy(resp, query)
+	// Set QR bit (response), keep RD, set RA
+	resp[2] = resp[2] | 0x80 // QR = 1
+	resp[3] = resp[3] | 0x80 // RA = 1
+	// Zero out answer/authority/additional counts
+	resp[6] = 0
+	resp[7] = 0
+	resp[8] = 0
+	resp[9] = 0
+	resp[10] = 0
+	resp[11] = 0
+	return resp
 }

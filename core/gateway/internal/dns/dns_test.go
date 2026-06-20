@@ -304,3 +304,75 @@ func TestInitUpstreamServers_EmptyResolvConf(t *testing.T) {
 
 	assert.Equal(t, PublicDNSFallbacks, servers)
 }
+
+func buildAAAAQuery(id uint16) []byte {
+	header := []byte{
+		byte(id >> 8), byte(id & 0xff),
+		0x01, 0x00, // Flags: standard query, recursion desired
+		0x00, 0x01, // QDCOUNT: 1
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	question := []byte{
+		0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+		0x03, 'c', 'o', 'm',
+		0x00,       // root label
+		0x00, 0x1c, // QTYPE: AAAA (28)
+		0x00, 0x01, // QCLASS: IN
+	}
+	return append(header, question...)
+}
+
+func TestIsAAAAQuery(t *testing.T) {
+	assert.True(t, isAAAAQuery(buildAAAAQuery(0x1234)))
+	assert.False(t, isAAAAQuery(buildDNSQuery(0x1234)))
+	assert.False(t, isAAAAQuery([]byte{0x00})) // too short
+	assert.False(t, isAAAAQuery(nil))
+}
+
+func TestDNS_BlocksAAAA(t *testing.T) {
+	// Mock upstream should NOT be called for AAAA queries
+	upstreamCalled := false
+	upstream := startMockDNS(t, func(q []byte) []byte {
+		upstreamCalled = true
+		return q // echo back
+	})
+
+	upstreamMu.Lock()
+	original := upstreamServers
+	upstreamServers = []string{upstream}
+	upstreamMu.Unlock()
+	defer func() {
+		upstreamMu.Lock()
+		upstreamServers = original
+		upstreamMu.Unlock()
+	}()
+
+	listenAddr := getFreeUDPAddr(t)
+	srv := NewServer(listenAddr)
+	go srv.ListenAndServe() //nolint:errcheck
+	time.Sleep(50 * time.Millisecond)
+
+	// Send AAAA query
+	conn, err := net.Dial("udp", listenAddr)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	query := buildAAAAQuery(0xABCD)
+	_, err = conn.Write(query)
+	require.NoError(t, err)
+
+	buf := make([]byte, 4096)
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := conn.Read(buf)
+	require.NoError(t, err)
+
+	// Should get a response (empty answer)
+	assert.True(t, n >= 12)
+	// QR bit set (response)
+	assert.Equal(t, byte(0x81), buf[2]&0x80|buf[2]&0x01)
+	// ANCOUNT = 0
+	assert.Equal(t, byte(0), buf[6])
+	assert.Equal(t, byte(0), buf[7])
+	// Upstream was NOT contacted
+	assert.False(t, upstreamCalled, "AAAA query should not reach upstream")
+}
