@@ -129,6 +129,8 @@ type ComposeService struct {
 	DependsOn   any               `yaml:"depends_on"`
 	Healthcheck *Healthcheck      `yaml:"healthcheck"`
 	Networks    []string          `yaml:"networks"`
+	CapAdd      []string          `yaml:"cap_add"`
+	SecurityOpt []string          `yaml:"security_opt"`
 }
 
 type Healthcheck struct {
