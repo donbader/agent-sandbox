@@ -1,9 +1,12 @@
 package v1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -206,6 +209,8 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 			sidecar := buildSidecarService(svc, p.buildDir)
 			// Inject system env vars into all sidecars.
 			injectSidecarSystemEnv(sidecar, p.cfg.Name, p.projectName)
+			// Inject config fingerprint to force recreation on env change.
+			injectConfigFingerprint(sidecar)
 			// Inject gateway routing infrastructure (cap_add, certs volume, GATEWAY_HOST).
 			injectSidecarGatewayRouting(sidecar, p.agentName, p.certsVolume)
 			// Sidecars implicitly depend on the agent service being started.
@@ -607,6 +612,33 @@ func injectSidecarSystemEnv(sidecar map[string]any, agentName, projectName strin
 	env["SANDBOX_NETWORK"] = projectName + "_sandbox"
 	env["AGENT_NAME"] = agentName
 	sidecar["environment"] = env
+}
+
+// injectConfigFingerprint adds a label with a hash of the sidecar's environment.
+// This ensures docker compose recreates the container when env vars change,
+// even if the image hasn't changed.
+func injectConfigFingerprint(sidecar map[string]any) {
+	env, _ := sidecar["environment"].(map[string]string)
+	// Deterministic hash: sort keys
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(env[k])
+		b.WriteByte('\n')
+	}
+	h := sha256.Sum256([]byte(b.String()))
+	labels, _ := sidecar["labels"].(map[string]string)
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels["com.agent-sandbox.config-hash"] = hex.EncodeToString(h[:8])
+	sidecar["labels"] = labels
 }
 
 // injectSidecarGatewayRouting adds gateway routing infrastructure to all sidecar services.
