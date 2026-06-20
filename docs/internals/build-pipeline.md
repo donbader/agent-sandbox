@@ -91,6 +91,58 @@ The agent Dockerfile combines:
 - User creation and permissions
 - Entrypoint script
 
+## Docker Layer Cache Optimization
+
+The generator automatically reorders Dockerfile instructions for optimal layer caching. The key insight: heavy tool installations (docker, playwright, nix, python) should not be invalidated when plugin source code changes.
+
+### Generated Dockerfile Structure
+
+```
+# 1. Parallel build stages (plugins compile independently)
+FROM node:24-slim AS build-plugin-a
+...
+FROM node:24-slim AS build-plugin-b
+...
+
+# 2. Final image — base packages
+FROM node:24-slim
+RUN apt-get install ...
+
+# 3. EARLY: heavy installs (auto-hoisted, cached)
+RUN curl -fsSL https://get.docker.com | sh
+RUN npm install -g agent-browser && npx playwright install
+RUN <nix install>
+RUN apt-get install python3 && pip install ...
+
+# 4. COPY --from (plugin artifacts — changes on code updates)
+COPY --from=build-plugin-a /src/dist /opt/plugin-a/dist
+COPY --from=build-plugin-b /src/out.tgz /tmp/out.tgz
+
+# 5. LATE: config steps (depend on artifacts or build context)
+COPY dorey-home /opt/home-seed/
+RUN npm install -g /tmp/out.tgz
+RUN echo '{...}' > /opt/plugin-a/config.json
+```
+
+When plugin code changes, only sections 4 and 5 rebuild. Section 3 stays cached.
+
+### Auto-Hoist Heuristic
+
+The generator splits `extra_builds` into early (hoistable) and late (must come after COPY --from) using a two-pass approach:
+
+1. **Pass 1:** COPY instructions → late. Steps referencing build stage artifact paths → late. Everything else → early candidate.
+2. **Pass 2:** Collect destination paths from late COPY instructions. Re-check early candidates — any that reference those paths also go late.
+
+Artifact paths include both direct paths (`/opt/foo/dist`) and their parent directories (`/opt/foo/`) to catch config writes to the same directory.
+
+No plugin.yaml changes needed — existing plugins benefit automatically.
+
+### Config Fingerprint
+
+Sidecar containers include a `com.agent-sandbox.config-hash` label containing a SHA256 of their entire service definition (serialized as JSON). When any config field changes (environment, cap_add, security_opt, volumes, image, etc.), the hash changes and `docker compose up -d` recreates the container.
+
+The fingerprint is computed last, after all service mutations (gateway routing injection, capability additions).
+
 ## Secret Resolution
 
 Secrets in plugin options (`${ENV_VAR}`) are resolved at generate-time from:
