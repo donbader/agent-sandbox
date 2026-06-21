@@ -271,6 +271,11 @@ if [ -f /shared/certs/ca.crt ]; then
     fi
     export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 fi
+
+# DNS — point at gateway's forwarder, keep Docker DNS as fallback.
+if [ -w /etc/resolv.conf ]; then
+    printf 'nameserver %s\nnameserver 127.0.0.11\n' "$GATEWAY_IP" > /etc/resolv.conf
+fi
 `
 
 	if err := os.WriteFile(gatewayRouteScriptPath, []byte(script), 0755); err != nil {
