@@ -279,11 +279,13 @@ ip route replace default via "$GATEWAY_IP" 2>/dev/null || true
 # iptables DNAT — rewrite outbound TCP to gateway:8443.
 # Required because Docker's internal:true isolation drops packets destined for
 # non-local IPs at the host level. DNAT makes them local (gateway:8443).
-if command -v iptables >/dev/null 2>&1; then
-    SANDBOX_CIDR=$(ip route 2>/dev/null | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1)
-    [ -z "$SANDBOX_CIDR" ] && SANDBOX_CIDR="$GATEWAY_IP/32"
-    iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "$GATEWAY_IP:8443" 2>/dev/null || true
+if ! command -v iptables >/dev/null 2>&1; then
+    echo "[gateway-route] ERROR: iptables not found — sidecar will have no outbound network" >&2
+    exit 1
 fi
+SANDBOX_CIDR=$(ip route 2>/dev/null | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1)
+[ -z "$SANDBOX_CIDR" ] && SANDBOX_CIDR="$GATEWAY_IP/32"
+iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "$GATEWAY_IP:8443" 2>/dev/null || true
 
 # CA certificate — enables HTTPS through gateway MITM.
 if [ -f /shared/certs/ca.crt ]; then
