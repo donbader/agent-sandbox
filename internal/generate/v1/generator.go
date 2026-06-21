@@ -246,23 +246,12 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		return nil, fmt.Errorf("write entrypoint.sh: %w", err)
 	}
 
-	// Copy shared gateway routing script into agent build context.
-	// Gracefully skip if not available (e.g., tests with no coreDir).
+	// Copy shared gateway routing script into agent build context only.
+	// Sidecars source from the shared certs volume at runtime.
 	if g.coreDir != "" {
 		gwRouteScript, err := os.ReadFile(filepath.Join(g.coreDir, "scripts", "gateway-route.sh"))
 		if err == nil {
 			_ = os.WriteFile(filepath.Join(buildDir, "gateway-route.sh"), gwRouteScript, 0755)
-			// Copy into sidecar build contexts so their Dockerfiles can COPY it.
-			for _, svc := range merged.Sidecar.Services {
-				if svc.Build == "" {
-					continue
-				}
-				svcBuildDir := svc.Build
-				if !filepath.IsAbs(svcBuildDir) {
-					svcBuildDir = filepath.Join(g.projectDir, svcBuildDir)
-				}
-				_ = os.WriteFile(filepath.Join(svcBuildDir, "gateway-route.sh"), gwRouteScript, 0755)
-			}
 		}
 	}
 
