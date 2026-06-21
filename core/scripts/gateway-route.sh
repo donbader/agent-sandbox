@@ -34,11 +34,9 @@ if [ -z "$GATEWAY_IP" ]; then
     exit 1
 fi
 
-# Default route
-if ! ip route show 2>/dev/null | grep -q "^default"; then
-    ip route add default via "$GATEWAY_IP" 2>/dev/null || true
-    echo "[gateway-route] added default route via ${GATEWAY_IP}"
-fi
+# Default route — replace any existing Docker-assigned route with gateway.
+ip route replace default via "$GATEWAY_IP" 2>/dev/null || true
+echo "[gateway-route] default route via ${GATEWAY_IP}"
 
 # CA certificate
 if [ -f /shared/certs/ca.crt ]; then
