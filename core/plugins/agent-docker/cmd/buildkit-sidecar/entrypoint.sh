@@ -16,7 +16,6 @@ else
     echo "[buildkit-entrypoint] WARNING: $ROUTE_SCRIPT not found after ${TIMEOUT}s — no outbound network" >&2
 fi
 
-# Switch to rootless user and start buildkitd via rootlesskit.
-exec su-exec user rootlesskit buildkitd \
+exec buildkitd \
   --addr tcp://0.0.0.0:8372 \
-  --oci-worker-no-process-sandbox
+  --root /var/lib/buildkit

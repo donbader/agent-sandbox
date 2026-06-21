@@ -72,3 +72,9 @@ contributes:
           ALLOWED_CAPABILITIES: '{{ toJSON .plugin.options.allowed_capabilities }}'
       agent-docker-buildkit:
         build: {{ asset "cmd/buildkit-sidecar" }}
+        cap_add:
+          - SYS_ADMIN
+        security_opt:
+          - apparmor=unconfined
+        tmpfs:
+          - /sys/fs/cgroup
