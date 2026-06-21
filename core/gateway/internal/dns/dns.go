@@ -212,26 +212,35 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 			continue
 		}
 
-		// If Docker DNS returned an answer, use it immediately (container name resolution).
-		// If NXDOMAIN from Docker DNS:
-		//   - In interceptAll mode: respond with gateway IP (attract traffic to gateway).
-		//   - Otherwise: try next upstream (public DNS).
 		hasAnswer := n > 7 && (resp[6] > 0 || resp[7] > 0)
 		isLast := i == len(upstreams)-1
 
 		if hasAnswer {
+			// In interceptAll mode: only pass through private IPs (container names).
+			// Public IPs mean Docker DNS forwarded externally — override with gateway IP.
+			if s.interceptAll != nil && isAQuery(query) {
+				if ip := extractFirstARecord(resp[:n]); ip != nil && !isPrivateIP(ip) {
+					if synth := synthesizeAResponse(query, s.interceptAll); synth != nil {
+						name := extractQName(query)
+						slog.Debug("dns intercept-all", "domain", name, "real_ip", ip, "gateway_ip", s.interceptAll)
+						if _, err := conn.WriteToUDP(synth, clientAddr); err != nil {
+							slog.Error("dns write client (intercept-all)", "error", err)
+						}
+						return
+					}
+				}
+			}
 			if _, err := conn.WriteToUDP(resp[:n], clientAddr); err != nil {
 				slog.Error("dns write client", "error", err)
 			}
 			return
 		}
 
-		// No answer from this upstream — in interceptAll mode, respond with gateway IP
-		// instead of trying public DNS (all external traffic should go through gateway).
+		// No answer — in interceptAll mode, respond with gateway IP
 		if s.interceptAll != nil && isAQuery(query) {
 			if synth := synthesizeAResponse(query, s.interceptAll); synth != nil {
 				name := extractQName(query)
-				slog.Debug("dns intercept-all", "domain", name, "ip", s.interceptAll)
+				slog.Debug("dns intercept-all (nxdomain)", "domain", name, "ip", s.interceptAll)
 				if _, err := conn.WriteToUDP(synth, clientAddr); err != nil {
 					slog.Error("dns write client (intercept-all)", "error", err)
 				}
@@ -392,4 +401,89 @@ func synthesizeEmptyResponse(query []byte) []byte {
 	resp[10] = 0
 	resp[11] = 0
 	return resp
+}
+
+// extractFirstARecord extracts the first A record IP from a DNS response.
+// Returns nil if no A record is found.
+func extractFirstARecord(resp []byte) net.IP {
+	if len(resp) < 12 {
+		return nil
+	}
+	// Skip header
+	anCount := int(resp[6])<<8 | int(resp[7])
+	if anCount == 0 {
+		return nil
+	}
+	// Skip question section
+	i := 12
+	for i < len(resp) {
+		labelLen := int(resp[i])
+		if labelLen == 0 {
+			i++ // null terminator
+			break
+		}
+		i += 1 + labelLen
+	}
+	i += 4 // QTYPE + QCLASS
+
+	// Walk answer records
+	for an := 0; an < anCount && i < len(resp); an++ {
+		// Name: pointer (2 bytes) or labels
+		if i+2 > len(resp) {
+			return nil
+		}
+		if resp[i]&0xC0 == 0xC0 {
+			i += 2 // pointer
+		} else {
+			for i < len(resp) {
+				labelLen := int(resp[i])
+				if labelLen == 0 {
+					i++
+					break
+				}
+				i += 1 + labelLen
+			}
+		}
+		// TYPE(2) + CLASS(2) + TTL(4) + RDLENGTH(2) = 10
+		if i+10 > len(resp) {
+			return nil
+		}
+		rtype := uint16(resp[i])<<8 | uint16(resp[i+1])
+		rdlen := int(resp[i+8])<<8 | int(resp[i+9])
+		i += 10
+		if i+rdlen > len(resp) {
+			return nil
+		}
+		if rtype == 1 && rdlen == 4 { // A record
+			return net.IP(resp[i : i+4])
+		}
+		i += rdlen
+	}
+	return nil
+}
+
+// isPrivateIP returns true if the IP is in a private/reserved range
+// (container names resolve to these; external domains don't).
+func isPrivateIP(ip net.IP) bool {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	// 10.0.0.0/8
+	if ip4[0] == 10 {
+		return true
+	}
+	// 172.16.0.0/12
+	if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
+		return true
+	}
+	// 192.168.0.0/16
+	if ip4[0] == 192 && ip4[1] == 168 {
+		return true
+	}
+	// 127.0.0.0/8
+	if ip4[0] == 127 {
+		return true
+	}
+	return false
 }
