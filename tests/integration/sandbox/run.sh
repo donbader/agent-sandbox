@@ -124,6 +124,10 @@ fi
 echo ""
 echo "--- BuildKit build verification ---"
 
+# Set up the buildx builder (init_steps don't run in test because entrypoint is sleep infinity).
+"$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
+  docker buildx create --name buildkit --driver remote --driver-opt "url=tcp://${BUILDKIT_SERVICE}:8372" --use 2>/dev/null || true
+
 # Verify the buildkit sidecar can actually execute RUN commands (catches cgroup issues).
 BUILD_RESULT=""
 for attempt in 1 2 3; do
