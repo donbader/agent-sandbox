@@ -26,6 +26,8 @@ const (
 	sharedCertPath = "/shared/certs/ca.crt"
 	// privateKeyPath is where the CA key is stored (persistent on shared volume, 0600).
 	privateKeyPath = "/shared/certs/ca.key"
+	// gatewayRouteScriptPath is the routing script written for sandbox containers.
+	gatewayRouteScriptPath = "/shared/certs/gateway-route.sh"
 )
 
 func main() {
@@ -175,6 +177,12 @@ func main() {
 		}()
 	}
 
+	// Write routing script to shared volume for sandbox containers
+	if err := writeGatewayRouteScript(); err != nil {
+		slog.Error("write gateway route script", "error", err)
+		os.Exit(1)
+	}
+
 	// Health + route handler endpoint
 	healthAddr := ":8080"
 	go func() {
@@ -203,6 +211,73 @@ func main() {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
 	slog.Info("shutting down")
+}
+
+// getSandboxIP returns the gateway's IP on the sandbox network.
+// It prefers the GATEWAY_SANDBOX_IP env var; otherwise it detects from interfaces.
+func getSandboxIP() (string, error) {
+	if ip := os.Getenv("GATEWAY_SANDBOX_IP"); ip != "" {
+		return ip, nil
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", fmt.Errorf("list interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ipNet.IP.To4() != nil {
+				return ipNet.IP.String(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no non-loopback IPv4 address found")
+}
+
+// writeGatewayRouteScript writes the routing script to the shared volume.
+// Sandbox containers source this script to configure their default route and CA trust.
+func writeGatewayRouteScript() error {
+	ip, err := getSandboxIP()
+	if err != nil {
+		return fmt.Errorf("detect sandbox IP: %w", err)
+	}
+
+	script := `#!/bin/sh
+# Gateway-authored routing for sandbox containers.
+# Single source of truth — do not duplicate this logic elsewhere.
+# Written by gateway at startup. IP is baked in.
+GATEWAY_IP="` + ip + `"
+
+# Default route — required because internal:true strips it.
+if ! ip route show 2>/dev/null | grep -q "^default"; then
+    ip route add default via "$GATEWAY_IP" 2>/dev/null || true
+fi
+
+# CA certificate — enables HTTPS through gateway MITM.
+if [ -f /shared/certs/ca.crt ]; then
+    if ! grep -qF "$(sed -n '2p' /shared/certs/ca.crt)" /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
+        cat /shared/certs/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+    fi
+    export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+fi
+`
+
+	if err := os.WriteFile(gatewayRouteScriptPath, []byte(script), 0755); err != nil {
+		return fmt.Errorf("write %s: %w", gatewayRouteScriptPath, err)
+	}
+	slog.Info("wrote gateway route script", "path", gatewayRouteScriptPath, "gateway_ip", ip)
+	return nil
 }
 
 // expandEnvVars replaces all ${VAR} patterns in s with os.Getenv(VAR).
