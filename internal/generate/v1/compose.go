@@ -219,6 +219,8 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 			// Inject config fingerprint to force recreation on env change.
 			// Inject gateway routing infrastructure (cap_add, certs volume, GATEWAY_HOST).
 			injectSidecarGatewayRouting(sidecar, p.agentName, p.certsVolume)
+			// Healthcheck: verify sidecar can reach gateway (DNS + routing).
+			injectSidecarHealthcheck(sidecar, p.agentName)
 			// Config fingerprint MUST be last — hash the final service state.
 			injectConfigFingerprint(sidecar)
 			// Sidecars implicitly depend on the agent service being started.
@@ -676,4 +678,21 @@ func injectSidecarGatewayRouting(sidecar map[string]any, agentName, certsVolume 
 	env["NODE_USE_SYSTEM_CA"] = "1"
 	env["SSL_CERT_FILE"] = "/etc/ssl/certs/ca-certificates.crt"
 	sidecar["environment"] = env
+}
+
+// injectSidecarHealthcheck adds a healthcheck that verifies the sidecar can reach
+// the gateway. Works on Alpine (wget) and Debian (curl) based images.
+func injectSidecarHealthcheck(sidecar map[string]any, agentName string) {
+	// Don't override user-defined healthchecks.
+	if _, ok := sidecar["healthcheck"]; ok {
+		return
+	}
+	gatewayHost := agentName + "-gateway"
+	sidecar["healthcheck"] = map[string]any{
+		"test":         []string{"CMD-SHELL", "wget -q --spider --timeout=5 http://" + gatewayHost + ":8080/health || curl -sf --max-time 5 http://" + gatewayHost + ":8080/health"},
+		"interval":     "30s",
+		"timeout":      "10s",
+		"retries":      3,
+		"start_period": "15s",
+	}
 }

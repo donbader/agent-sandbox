@@ -30,6 +30,36 @@ agent-sandbox compose logs gateway
 agent-sandbox compose exec agent ping -c1 gateway
 ```
 
+### Sidecar can't reach the internet (e.g., buildkit pull fails)
+
+Sidecars route traffic through the gateway via iptables DNAT. If networking is broken, the compose healthcheck will report `unhealthy`.
+
+**Quick check:**
+```bash
+# See if sidecar is healthy
+agent-sandbox compose ps
+
+# Look for (unhealthy) next to the sidecar service
+```
+
+**Layer-by-layer diagnosis:**
+```bash
+# Run the network diagnostics script inside the sidecar
+agent-sandbox compose exec <sidecar-name> /usr/local/bin/network-check.sh
+
+# Or manually check each layer:
+agent-sandbox compose exec <sidecar-name> ip route           # default route?
+agent-sandbox compose exec <sidecar-name> iptables -t nat -L OUTPUT -n  # DNAT rules?
+agent-sandbox compose exec <sidecar-name> wget -q --spider http://gateway:8080/health  # gateway reachable?
+agent-sandbox compose exec <sidecar-name> wget -qO- --timeout=10 https://registry-1.docker.io/v2/  # end-to-end?
+```
+
+**Common causes:**
+- Default route points to Docker bridge instead of gateway → fix: `ip route replace` in gateway-route.sh
+- iptables DNAT not set → sidecar missing NET_ADMIN capability or gateway-route.sh failed
+- CA cert not trusted → TLS handshake fails even though routing works
+- Gateway not forwarding → check gateway logs for errors on port 8443
+
 ### MITM certificate errors (TLS handshake failure)
 
 The sandbox CA certificate isn't trusted inside the agent container. This affects MITM'd hosts only (e.g., github.com when using the github-pat plugin).
