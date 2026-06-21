@@ -8,7 +8,8 @@
 #   1. Fallback if the volume script doesn't exist (shouldn't happen in production)
 #   2. Documentation of the expected script contract
 #
-# Requires: ip (iproute2 or BusyBox)
+# Requirements: ip (BusyBox or iproute2) — no iptables needed.
+# The gateway handles traffic interception via PREROUTING on its side.
 set -e
 
 # If gateway-authored script exists on volume, use it and return.
@@ -34,9 +35,9 @@ if [ -z "$GATEWAY_IP" ]; then
     exit 1
 fi
 
-# Default route — replace any existing Docker-assigned route with gateway.
-ip route replace default via "$GATEWAY_IP" 2>/dev/null || true
-echo "[gateway-route] default route via ${GATEWAY_IP}"
+# Default route — send all traffic to the gateway.
+# On internal:true networks there is no pre-existing default route.
+ip route add default via "$GATEWAY_IP" 2>/dev/null || ip route replace default via "$GATEWAY_IP" 2>/dev/null || true
 
 # CA certificate
 if [ -f /shared/certs/ca.crt ]; then

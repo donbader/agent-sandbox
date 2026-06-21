@@ -25,7 +25,7 @@ fi
 
 # 2. Gateway health
 echo "--- Layer 2: Gateway Health ---"
-if curl -sf "http://${GATEWAY_HOST}:8080/health" >/dev/null 2>&1; then
+if wget -q --spider --timeout=5 "http://${GATEWAY_HOST}:8080/health" 2>/dev/null || curl -sf --max-time 5 "http://${GATEWAY_HOST}:8080/health" >/dev/null 2>&1; then
     pass "Gateway health endpoint reachable"
 else
     fail "Gateway health endpoint unreachable (http://${GATEWAY_HOST}:8080/health)"
@@ -42,25 +42,11 @@ if [ -n "$DEFAULT_ROUTE" ]; then
         fail "Default route does NOT point to gateway ($GW_IP): $DEFAULT_ROUTE"
     fi
 else
-    fail "No default route"
+    fail "No default route (traffic cannot reach gateway)"
 fi
 
-# 4. iptables DNAT
-echo "--- Layer 4: iptables DNAT ---"
-if command -v iptables >/dev/null 2>&1; then
-    DNAT_RULES=$(iptables -t nat -L OUTPUT -n 2>/dev/null | grep -c DNAT || true)
-    if [ "$DNAT_RULES" -gt 0 ]; then
-        DNAT_TARGET=$(iptables -t nat -L OUTPUT -n 2>/dev/null | grep DNAT | awk '{print $NF}' | head -1)
-        pass "iptables DNAT active ($DNAT_RULES rules, target: $DNAT_TARGET)"
-    else
-        fail "No iptables DNAT rules in OUTPUT chain"
-    fi
-else
-    fail "iptables not available"
-fi
-
-# 5. CA certificate
-echo "--- Layer 5: TLS CA ---"
+# 4. CA certificate
+echo "--- Layer 4: TLS CA ---"
 if [ -f /shared/certs/ca.crt ]; then
     pass "Gateway CA cert exists at /shared/certs/ca.crt"
     if grep -qF "$(sed -n '2p' /shared/certs/ca.crt)" /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
@@ -72,15 +58,13 @@ else
     fail "No CA cert at /shared/certs/ca.crt"
 fi
 
-# 6. End-to-end HTTPS
-echo "--- Layer 6: End-to-End HTTPS ---"
-if curl -sf --max-time 10 "https://registry-1.docker.io/v2/" >/dev/null 2>&1; then
+# 5. End-to-end HTTPS
+echo "--- Layer 5: End-to-End HTTPS ---"
+if wget -qO /dev/null --timeout=10 "https://registry-1.docker.io/v2/" 2>/dev/null || curl -sf --max-time 10 "https://registry-1.docker.io/v2/" >/dev/null 2>&1; then
     pass "HTTPS to registry-1.docker.io works (end-to-end OK)"
-elif curl -sfk --max-time 10 "https://registry-1.docker.io/v2/" >/dev/null 2>&1; then
-    fail "HTTPS works only with -k (CA cert not trusted by curl)"
 else
     # Try a simpler target
-    if curl -sf --max-time 10 "https://github.com" >/dev/null 2>&1; then
+    if wget -qO /dev/null --timeout=10 "https://github.com" 2>/dev/null || curl -sf --max-time 10 "https://github.com" >/dev/null 2>&1; then
         pass "HTTPS to github.com works (registry might be down)"
     else
         fail "HTTPS completely broken (cannot reach any external host)"
