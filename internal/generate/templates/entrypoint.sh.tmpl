@@ -6,7 +6,7 @@ set -e
 : "${AGENT_HOME:=/home/agent}"
 
 # Shared gateway routing (iptables DNAT, DNS, CA cert).
-. /usr/local/bin/gateway-route.sh
+. /shared/certs/gateway-route.sh
 {{- if .PreEntrypoint }}
 
 # Plugin pre-entrypoint commands
