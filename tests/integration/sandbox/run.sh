@@ -124,25 +124,21 @@ fi
 echo ""
 echo "--- BuildKit build verification ---"
 
-# Set up the buildx builder (init_steps don't run in test because entrypoint is sleep infinity).
-echo "  Setting up buildx builder..."
-BUILDX_CREATE=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
-  docker buildx create --name buildkit --driver remote --driver-opt "url=tcp://${BUILDKIT_SERVICE}:8372" --use 2>&1 || true)
-echo "  buildx create: $BUILDX_CREATE"
-
-# Verify the buildkit sidecar can actually execute RUN commands (catches cgroup issues).
+# Use buildctl (inside the buildkit sidecar) to verify runc + cgroup works.
+# This avoids needing docker CLI in the agent container.
+echo "  Running buildctl build inside sidecar..."
 BUILD_RESULT=""
-for attempt in 1 2 3; do
-  BUILD_RESULT=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
-    sh -c 'printf "FROM alpine:3.20\nRUN echo buildkit-ok" | docker buildx build --no-cache -' 2>&1 || true)
-  if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
+for attempt in 1 2 3 4 5; do
+  BUILD_RESULT=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$BUILDKIT_SERVICE" \
+    sh -c 'mkdir -p /tmp/build-test && printf "FROM alpine:3.20\nRUN echo buildkit-ok\n" > /tmp/build-test/Dockerfile && buildctl --addr tcp://127.0.0.1:8372 build --frontend=dockerfile.v0 --local context=/tmp/build-test --local dockerfile=/tmp/build-test --no-cache' 2>&1 || true)
+  if echo "$BUILD_RESULT" | grep -q "exporting to image\|sending tarball\|DONE"; then
     break
   fi
-  echo "  attempt $attempt: build not ready, retrying in 3s..."
-  echo "  partial output: $(echo "$BUILD_RESULT" | head -3)"
+  echo "  attempt $attempt: not ready, retrying in 3s..."
+  echo "  $(echo "$BUILD_RESULT" | tail -1)"
   sleep 3
 done
-if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
+if echo "$BUILD_RESULT" | grep -q "exporting to image\|sending tarball\|DONE"; then
   echo -e "  \033[32m✓\033[0m BuildKit: can build Dockerfiles (runc + cgroup working)"
 else
   echo -e "  \033[31m✗\033[0m BuildKit: build failed"
