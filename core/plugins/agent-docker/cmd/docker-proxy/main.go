@@ -25,6 +25,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load gateway routing script (written by gateway at startup).
+	// In compose mode, spawned containers need this for transparent proxy setup.
+	if cfg.AllowCompose {
+		if err := loadGatewayRouteScript(cfg); err != nil {
+			slog.Error("load gateway route script", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("loaded gateway route script", "gateway_ip", cfg.GatewayIP)
+	}
+
 	proxy, err := NewDockerProxy(cfg)
 	if err != nil {
 		slog.Error("create proxy", "error", err)

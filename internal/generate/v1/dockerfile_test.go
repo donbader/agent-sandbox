@@ -165,7 +165,7 @@ func TestBuildDockerfile_BuildStages(t *testing.T) {
 func TestEntrypointScript_NoPreEntrypoint(t *testing.T) {
 	script := EntrypointScript(nil, "/home/agent/workspace")
 	assert.Contains(t, script, `exec gosu "$AGENT_USER" "$@"`)
-	assert.Contains(t, script, `. /usr/local/bin/gateway-route.sh`)
+	assert.Contains(t, script, `. /shared/certs/gateway-route.sh`)
 	assert.Contains(t, script, "/home/agent/workspace")
 	assert.NotContains(t, script, "pre-entrypoint")
 }

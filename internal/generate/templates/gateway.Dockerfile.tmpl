@@ -1,5 +1,5 @@
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates wget
+RUN apk add --no-cache ca-certificates wget iptables
 ARG GATEWAY_HASH
 COPY gateway /usr/local/bin/gateway
 COPY config.yaml /etc/gateway/config.yaml

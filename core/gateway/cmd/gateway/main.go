@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -26,6 +27,8 @@ const (
 	sharedCertPath = "/shared/certs/ca.crt"
 	// privateKeyPath is where the CA key is stored (persistent on shared volume, 0600).
 	privateKeyPath = "/shared/certs/ca.key"
+	// gatewayRouteScriptPath is the routing script written for sandbox containers.
+	gatewayRouteScriptPath = "/shared/certs/gateway-route.sh"
 )
 
 func main() {
@@ -175,6 +178,20 @@ func main() {
 		}()
 	}
 
+	// Write routing script to shared volume for sandbox containers
+	if err := writeGatewayRouteScript(); err != nil {
+		slog.Error("write gateway route script", "error", err)
+		os.Exit(1)
+	}
+
+	// Set up iptables PREROUTING to redirect forwarded traffic (port 443) to proxy (port 8443).
+	// Sandbox containers route all traffic via this gateway; packets arrive with dest port 443
+	// and need to be redirected to the local proxy listener on 8443.
+	if err := setupIptables(); err != nil {
+		slog.Error("setup iptables", "error", err)
+		os.Exit(1)
+	}
+
 	// Health + route handler endpoint
 	healthAddr := ":8080"
 	go func() {
@@ -203,6 +220,92 @@ func main() {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
 	slog.Info("shutting down")
+}
+
+// getSandboxIP returns the gateway's IP on the sandbox network.
+// It prefers the GATEWAY_SANDBOX_IP env var; otherwise it detects from interfaces.
+func getSandboxIP() (string, error) {
+	if ip := os.Getenv("GATEWAY_SANDBOX_IP"); ip != "" {
+		return ip, nil
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", fmt.Errorf("list interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ipNet.IP.To4() != nil {
+				return ipNet.IP.String(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no non-loopback IPv4 address found")
+}
+
+// writeGatewayRouteScript writes the routing script to the shared volume.
+// Sandbox containers source this script to configure their default route and CA trust.
+func writeGatewayRouteScript() error {
+	ip, err := getSandboxIP()
+	if err != nil {
+		return fmt.Errorf("detect sandbox IP: %w", err)
+	}
+
+	script := `#!/bin/sh
+# Gateway-authored routing for sandbox containers.
+# Single source of truth — do not duplicate this logic elsewhere.
+# Written by gateway at startup. IP is baked in.
+GATEWAY_IP="` + ip + `"
+
+# Default route — required because internal:true strips it.
+if ! ip route show 2>/dev/null | grep -q "^default"; then
+    ip route add default via "$GATEWAY_IP" 2>/dev/null || true
+fi
+
+# CA certificate — enables HTTPS through gateway MITM.
+if [ -f /shared/certs/ca.crt ]; then
+    if ! grep -qF "$(sed -n '2p' /shared/certs/ca.crt)" /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
+        cat /shared/certs/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+    fi
+    export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+fi
+
+# DNS — point at gateway's forwarder, keep Docker DNS as fallback.
+if [ -w /etc/resolv.conf ]; then
+    printf 'nameserver %s\nnameserver 127.0.0.11\n' "$GATEWAY_IP" > /etc/resolv.conf
+fi
+`
+
+	if err := os.WriteFile(gatewayRouteScriptPath, []byte(script), 0755); err != nil {
+		return fmt.Errorf("write %s: %w", gatewayRouteScriptPath, err)
+	}
+	slog.Info("wrote gateway route script", "path", gatewayRouteScriptPath, "gateway_ip", ip)
+	return nil
+}
+
+// setupIptables configures PREROUTING to redirect forwarded HTTPS traffic to the proxy.
+// Sandbox containers set their default route to the gateway. When they connect to
+// external_ip:443, the packet is forwarded to the gateway which must redirect it
+// to the local proxy listener on 8443.
+func setupIptables() error {
+	cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
+		"-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-port", "8443")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("iptables PREROUTING: %w: %s", err, out)
+	}
+	slog.Info("iptables: PREROUTING tcp/443 → 8443")
+	return nil
 }
 
 // expandEnvVars replaces all ${VAR} patterns in s with os.Getenv(VAR).

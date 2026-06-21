@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 )
 
 // Mutator applies forced values to container create requests.
@@ -89,30 +90,28 @@ func randomSuffix() string {
 }
 
 // injectInitWrapper adds transparent proxy setup to a spawned container.
-// Inlines iptables DNAT setup into the entrypoint — no external files or volumes needed.
+// Uses the gateway-authored routing script (cached at startup) as the entrypoint wrapper.
 func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
-	// Add NET_ADMIN capability for iptables
+	// Add NET_ADMIN capability for ip route manipulation
 	capAdd, _ := hc["CapAdd"].([]any)
 	capAdd = append(capAdd, "NET_ADMIN")
 	hc["CapAdd"] = capAdd
 
-	// Add gateway hostname env var
-	gatewayHost := m.cfg.AgentName + "-gateway"
-	env, _ := body["Env"].([]any)
-	env = append(env, "SANDBOX_GATEWAY_HOST="+gatewayHost)
-	body["Env"] = env
+	// Set DNS to gateway IP so containers resolve through the gateway
+	hc["Dns"] = []string{m.cfg.GatewayIP}
 
-	// Inline transparent proxy setup as entrypoint wrapper.
-	// Resolves gateway IP, sets up iptables DNAT, configures DNS, then execs original cmd.
-	initCmd := `GW=$(getent hosts "$SANDBOX_GATEWAY_HOST" 2>/dev/null | awk '{print $1}' | head -1); ` +
-		`if [ -z "$GW" ]; then GW=$(ping -c1 -W2 "$SANDBOX_GATEWAY_HOST" 2>/dev/null | head -1 | sed -n 's/.*(\([0-9.]*\)).*/\1/p'); fi; ` +
-		`if [ -n "$GW" ]; then ` +
-		`CIDR=$(ip route 2>/dev/null | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1); ` +
-		`[ -z "$CIDR" ] && CIDR="$GW/32"; ` +
-		`iptables -t nat -A OUTPUT -p tcp ! -d "$CIDR" -j DNAT --to-destination "$GW:8443" 2>/dev/null || true; ` +
-		`[ -w /etc/resolv.conf ] && printf 'nameserver %s\nnameserver 127.0.0.11\n' "$GW" > /etc/resolv.conf; ` +
-		`fi; ` +
-		`exec "$@"`
+	// Mount certs volume (read-only) for CA cert access
+	mounts, _ := hc["Mounts"].([]any)
+	mounts = append(mounts, map[string]any{
+		"Type":     "volume",
+		"Source":   m.certsVolumeName(),
+		"Target":   "/shared/certs",
+		"ReadOnly": true,
+	})
+	hc["Mounts"] = mounts
+
+	// Use the cached gateway route script content + exec "$@" as init command
+	initCmd := m.cfg.GatewayRouteScript + "\nexec \"$@\""
 
 	// Collect original entrypoint + cmd into args for exec "$@"
 	var originalCmd []any
@@ -132,4 +131,12 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 		// Remove Cmd so Docker uses the image's default CMD as args to exec "$@".
 		delete(body, "Cmd")
 	}
+}
+
+// certsVolumeName returns the Docker volume name for the certs volume.
+// Compose names volumes as {projectName}_{volumeName}. The volume is declared as
+// {agentName}-certs in the compose file.
+func (m *Mutator) certsVolumeName() string {
+	projectName := strings.TrimSuffix(m.cfg.NetworkName, "_sandbox")
+	return projectName + "_" + m.cfg.AgentName + "-certs"
 }
