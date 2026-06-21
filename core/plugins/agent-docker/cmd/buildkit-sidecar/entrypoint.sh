@@ -22,5 +22,4 @@ fi
 
 exec buildkitd \
   --addr tcp://0.0.0.0:8372 \
-  --root /var/lib/buildkit \
-  --oci-worker-no-process-sandbox
+  --root /var/lib/buildkit
