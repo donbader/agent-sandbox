@@ -16,6 +16,9 @@ else
     echo "[buildkit-entrypoint] WARNING: $ROUTE_SCRIPT not found after ${TIMEOUT}s — no outbound network" >&2
 fi
 
+# Mount cgroup2 for runc process isolation (requires SYS_ADMIN + tmpfs at /sys/fs/cgroup).
+mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || echo "[buildkit-entrypoint] WARNING: cgroup2 mount failed" >&2
+
 exec buildkitd \
   --addr tcp://0.0.0.0:8372 \
   --root /var/lib/buildkit
