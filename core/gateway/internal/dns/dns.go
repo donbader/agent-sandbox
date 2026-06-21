@@ -86,14 +86,46 @@ func parseResolvConf(path string) []string {
 	return servers
 }
 
-// Server is a UDP DNS forwarder.
+// Server is a UDP DNS forwarder that intercepts configured domains.
 type Server struct {
-	listen string
+	listen       string
+	interceptIPs map[string]net.IP // domain → IP to respond with
+	interceptAll net.IP            // if set, respond with this IP for all non-Docker queries
 }
 
 // NewServer creates a DNS server listening on the given address.
 func NewServer(listen string) *Server {
-	return &Server{listen: listen}
+	return &Server{listen: listen, interceptIPs: make(map[string]net.IP)}
+}
+
+// InterceptDomains configures the server to respond to A queries for the
+// given domains with the specified IP address (instead of forwarding upstream).
+// This allows the gateway to attract traffic for MITM domains directly,
+// avoiding reliance on iptables PREROUTING in Docker internal networks.
+func (s *Server) InterceptDomains(domains []string, ip string) {
+	parsed := net.ParseIP(ip).To4()
+	if parsed == nil {
+		slog.Warn("dns: invalid intercept IP, skipping domain interception", "ip", ip)
+		return
+	}
+	for _, d := range domains {
+		// Normalize: ensure trailing dot for comparison with wire format
+		s.interceptIPs[strings.TrimSuffix(strings.ToLower(d), ".")] = parsed
+	}
+	slog.Info("dns: intercepting domains", "count", len(domains), "ip", ip)
+}
+
+// InterceptAll configures the server to respond with the gateway IP for ALL
+// A queries that Docker DNS cannot resolve (i.e. external domains).
+// This is used when a wildcard egress rule ("*") is configured.
+func (s *Server) InterceptAll(ip string) {
+	parsed := net.ParseIP(ip).To4()
+	if parsed == nil {
+		slog.Warn("dns: invalid intercept-all IP", "ip", ip)
+		return
+	}
+	s.interceptAll = parsed
+	slog.Info("dns: intercept-all mode enabled", "ip", ip)
 }
 
 // ListenAndServe starts the DNS server.
@@ -138,6 +170,21 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 		}
 	}
 
+	// Intercept A queries for configured domains (respond with gateway IP).
+	if len(s.interceptIPs) > 0 && isAQuery(query) {
+		if name := extractQName(query); name != "" {
+			if ip, ok := s.interceptIPs[name]; ok {
+				if resp := synthesizeAResponse(query, ip); resp != nil {
+					slog.Debug("dns intercept", "domain", name, "ip", ip)
+					if _, err := conn.WriteToUDP(resp, clientAddr); err != nil {
+						slog.Error("dns write client (intercept)", "error", err)
+					}
+					return
+				}
+			}
+		}
+	}
+
 	resp := make([]byte, 4096)
 
 	upstreamMu.RLock()
@@ -165,12 +212,34 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 			continue
 		}
 
-		// If Docker DNS returned an answer, use it immediately.
-		// If NXDOMAIN from Docker DNS, try next upstream (public DNS).
+		// If Docker DNS returned an answer, use it immediately (container name resolution).
+		// If NXDOMAIN from Docker DNS:
+		//   - In interceptAll mode: respond with gateway IP (attract traffic to gateway).
+		//   - Otherwise: try next upstream (public DNS).
 		hasAnswer := n > 7 && (resp[6] > 0 || resp[7] > 0)
 		isLast := i == len(upstreams)-1
 
-		if hasAnswer || isLast {
+		if hasAnswer {
+			if _, err := conn.WriteToUDP(resp[:n], clientAddr); err != nil {
+				slog.Error("dns write client", "error", err)
+			}
+			return
+		}
+
+		// No answer from this upstream — in interceptAll mode, respond with gateway IP
+		// instead of trying public DNS (all external traffic should go through gateway).
+		if s.interceptAll != nil && isAQuery(query) {
+			if synth := synthesizeAResponse(query, s.interceptAll); synth != nil {
+				name := extractQName(query)
+				slog.Debug("dns intercept-all", "domain", name, "ip", s.interceptAll)
+				if _, err := conn.WriteToUDP(synth, clientAddr); err != nil {
+					slog.Error("dns write client (intercept-all)", "error", err)
+				}
+				return
+			}
+		}
+
+		if isLast {
 			if _, err := conn.WriteToUDP(resp[:n], clientAddr); err != nil {
 				slog.Error("dns write client", "error", err)
 			}
@@ -203,6 +272,105 @@ func isAAAAQuery(query []byte) bool {
 	}
 	qtype := uint16(query[i])<<8 | uint16(query[i+1])
 	return qtype == 28 // AAAA
+}
+
+// isAQuery checks if a DNS query is asking for A records (type 1).
+func isAQuery(query []byte) bool {
+	if len(query) < 14 {
+		return false
+	}
+	i := 12
+	for i < len(query) {
+		labelLen := int(query[i])
+		if labelLen == 0 {
+			i++
+			break
+		}
+		i += 1 + labelLen
+	}
+	if i+2 > len(query) {
+		return false
+	}
+	qtype := uint16(query[i])<<8 | uint16(query[i+1])
+	return qtype == 1 // A
+}
+
+// extractQName extracts the queried domain name from a DNS query in wire format.
+// Returns lowercase name without trailing dot.
+func extractQName(query []byte) string {
+	if len(query) < 13 {
+		return ""
+	}
+	var labels []string
+	i := 12
+	for i < len(query) {
+		labelLen := int(query[i])
+		if labelLen == 0 {
+			break
+		}
+		i++
+		if i+labelLen > len(query) {
+			return ""
+		}
+		labels = append(labels, string(query[i:i+labelLen]))
+		i += labelLen
+	}
+	return strings.ToLower(strings.Join(labels, "."))
+}
+
+// synthesizeAResponse creates a DNS A response with the given IPv4 address.
+func synthesizeAResponse(query []byte, ip net.IP) []byte {
+	if len(query) < 12 {
+		return nil
+	}
+	// Find end of question section (QNAME + QTYPE + QCLASS)
+	i := 12
+	for i < len(query) {
+		labelLen := int(query[i])
+		if labelLen == 0 {
+			i++ // null terminator
+			break
+		}
+		i += 1 + labelLen
+	}
+	i += 4 // QTYPE (2) + QCLASS (2)
+	if i > len(query) {
+		return nil
+	}
+
+	// Build response: header + question + answer
+	resp := make([]byte, i+16) // question section + 16 bytes for A answer
+	copy(resp, query[:i])      // copy header + question
+
+	// Header flags: QR=1, AA=1, RD=1, RA=1
+	resp[2] = 0x85 // QR + AA + RD
+	resp[3] = 0x80 // RA
+	// ANCOUNT = 1
+	resp[6] = 0
+	resp[7] = 1
+	// NSCOUNT = 0, ARCOUNT = 0
+	resp[8] = 0
+	resp[9] = 0
+	resp[10] = 0
+	resp[11] = 0
+
+	// Answer section: pointer to QNAME + type A + class IN + TTL + RDLENGTH + IP
+	ans := resp[i:]
+	ans[0] = 0xC0 // pointer to offset 12 (QNAME)
+	ans[1] = 0x0C
+	ans[2] = 0x00 // TYPE = A (1)
+	ans[3] = 0x01
+	ans[4] = 0x00 // CLASS = IN (1)
+	ans[5] = 0x01
+	ans[6] = 0x00 // TTL = 60 seconds
+	ans[7] = 0x00
+	ans[8] = 0x00
+	ans[9] = 0x3C
+	ans[10] = 0x00 // RDLENGTH = 4
+	ans[11] = 0x04
+	copy(ans[12:16], ip.To4())
+
+	return resp
 }
 
 // synthesizeEmptyResponse creates a DNS response with zero answers for the given query.

@@ -27,3 +27,4 @@ Thumbs.db
 .env
 node_modules/
 .worktrees/
+gateway

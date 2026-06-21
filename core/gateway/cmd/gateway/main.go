@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/donbader/agent-sandbox/core/gateway/internal/ca"
@@ -97,8 +98,34 @@ func main() {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
-	// Start DNS resolver
+	// Start DNS resolver — intercept all egress domains with gateway IP
+	// so traffic arrives directly at the gateway (avoids reliance on iptables).
 	dnsServer := dns.NewServer(cfg.DNSListen)
+	if sandboxIP, err := getSandboxIP(); err == nil {
+		// Collect all domains from egress rules + MITM that aren't wildcards
+		var interceptDomains []string
+		for _, rule := range cfg.EgressRules {
+			for _, h := range rule.Hosts {
+				if h != "*" && !strings.Contains(h, "/") {
+					interceptDomains = append(interceptDomains, h)
+				}
+			}
+		}
+		interceptDomains = append(interceptDomains, cfg.MITMDomains...)
+		// If there's a wildcard egress rule, intercept all non-Docker DNS queries
+		for _, rule := range cfg.EgressRules {
+			for _, h := range rule.Hosts {
+				if h == "*" {
+					dnsServer.InterceptAll(sandboxIP)
+					goto dnsConfigured
+				}
+			}
+		}
+		if len(interceptDomains) > 0 {
+			dnsServer.InterceptDomains(interceptDomains, sandboxIP)
+		}
+	dnsConfigured:
+	}
 	go func() {
 		if err := dnsServer.ListenAndServe(); err != nil {
 			slog.Error("dns server error", "error", err)
@@ -271,7 +298,8 @@ func writeGatewayRouteScript() error {
 # Gateway-authored routing for sandbox containers.
 # Written by gateway at startup. IP is baked in.
 # Containers only need: default route + CA trust + DNS.
-# The gateway handles traffic interception via PREROUTING (no iptables needed here).
+# The gateway's DNS intercepts MITM domains (responds with gateway IP),
+# so traffic arrives directly at the gateway rather than being forwarded.
 GATEWAY_IP="` + ip + `"
 
 # Default route — send all traffic to the gateway.
@@ -301,24 +329,12 @@ fi
 	return nil
 }
 
-// setupIptables configures the gateway as a transparent proxy router.
-// 1. Enable IP forwarding so routed packets are processed.
-// 2. PREROUTING REDIRECT: forwarded tcp/443 → local proxy on 8443.
-// 3. PREROUTING REDIRECT: forwarded tcp/80 → local HTTP handler on 8080.
+// setupIptables configures PREROUTING to redirect port 443/80 traffic to the
+// proxy listener. With DNS interception, traffic arrives addressed to the
+// gateway's own IP (no forwarding needed), but PREROUTING still redirects
+// the port from 443 → 8443 where the proxy listens.
 func setupIptables() error {
-	// Enable IP forwarding (may already be set via Docker sysctls).
-	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0644); err != nil {
-		// Check if ip_forward is already enabled (e.g. via Docker sysctls on a read-only /proc/sys).
-		current, readErr := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
-		if readErr != nil || len(current) == 0 || current[0] != '1' {
-			return fmt.Errorf("enable ip_forward: %w", err)
-		}
-		slog.Info("ip_forward already enabled (read-only /proc/sys)")
-	} else {
-		slog.Info("enabled ip forwarding")
-	}
-
-	// HTTPS: redirect forwarded port 443 → proxy port 8443.
+	// HTTPS: redirect port 443 → proxy port 8443.
 	cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
 		"-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-port", "8443")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -326,7 +342,7 @@ func setupIptables() error {
 	}
 	slog.Info("iptables: PREROUTING tcp/443 → 8443")
 
-	// HTTP: redirect forwarded port 80 → HTTP handler on 8080.
+	// HTTP: redirect port 80 → HTTP handler on 8080.
 	cmd = exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
 		"-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "8080")
 	if out, err := cmd.CombinedOutput(); err != nil {

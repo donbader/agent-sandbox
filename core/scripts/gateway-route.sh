@@ -9,7 +9,8 @@
 #   2. Documentation of the expected script contract
 #
 # Requirements: ip (BusyBox or iproute2) — no iptables needed.
-# The gateway handles traffic interception via PREROUTING on its side.
+# The gateway handles traffic interception via DNS (responds with its own IP
+# for egress domains, so traffic arrives directly at the gateway).
 set -e
 
 # If gateway-authored script exists on volume, use it and return.

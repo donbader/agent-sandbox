@@ -98,6 +98,17 @@ func (g *Generator) copyGatewayBinary(gatewayDir string, buildDir string, resolv
 		// Remove stale binary so a failed rebuild doesn't silently use an old version
 		_ = os.Remove(destPath)
 
+		// Reuse cached binary from a previous agent in this generate run
+		if g.cachedGatewayBinary != "" {
+			data, err := os.ReadFile(g.cachedGatewayBinary)
+			if err == nil {
+				if err := os.WriteFile(destPath, data, 0755); err != nil {
+					return fmt.Errorf("write gateway binary (cached): %w", err)
+				}
+				return nil
+			}
+		}
+
 		// Try building from source (dev mode)
 		srcDir := filepath.Join(g.coreDir, "..")
 		mainPkg := "./core/gateway/cmd/gateway/"
@@ -109,6 +120,7 @@ func (g *Generator) copyGatewayBinary(gatewayDir string, buildDir string, resolv
 				cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0")
 				cmd.Stderr = os.Stderr
 				if err := cmd.Run(); err == nil {
+					g.cachedGatewayBinary = destPath
 					return nil
 				}
 				fmt.Fprintf(os.Stderr, "[dev] Gateway build failed, falling back to pre-built binary\n")

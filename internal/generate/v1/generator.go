@@ -15,13 +15,14 @@ import (
 
 // Generator orchestrates v1 build artifact generation.
 type Generator struct {
-	projectDir  string
-	bundledFS   fs.FS
-	gatewayFS   fs.FS
-	coreDir     string
-	coreVersion string
-	templates   *templates.Loader
-	presets     map[string]*Preset
+	projectDir          string
+	bundledFS           fs.FS
+	gatewayFS           fs.FS
+	coreDir             string
+	coreVersion         string
+	templates           *templates.Loader
+	presets             map[string]*Preset
+	cachedGatewayBinary string // path to binary built in this run (avoid rebuilding per agent)
 }
 
 // AgentResult holds the per-agent generation output.
