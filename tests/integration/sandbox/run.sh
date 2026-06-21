@@ -24,7 +24,15 @@ echo "--- Generating build artifacts ---"
 
 echo ""
 echo "--- Building and starting containers ---"
-"$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" up -d --build --wait --wait-timeout 60
+if ! "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" up -d --build --wait --wait-timeout 60; then
+  echo ""
+  echo "--- COMPOSE UP FAILED — dumping container logs ---"
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" logs 2>&1 | tail -50
+  echo ""
+  echo "--- Container status ---"
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" ps -a 2>&1
+  exit 1
+fi
 
 # Wait for agent entrypoint to complete
 sleep 3
