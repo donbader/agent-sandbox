@@ -273,9 +273,18 @@ func writeGatewayRouteScript() error {
 # Written by gateway at startup. IP is baked in.
 GATEWAY_IP="` + ip + `"
 
-# Default route — required because internal:true strips it.
+# Default route — required for DNAT'd packets to reach the gateway.
 if ! ip route show 2>/dev/null | grep -q "^default"; then
     ip route add default via "$GATEWAY_IP" 2>/dev/null || true
+fi
+
+# iptables DNAT — rewrite outbound TCP to gateway:8443.
+# Required because Docker's internal:true isolation drops packets destined for
+# non-local IPs at the host level. DNAT makes them local (gateway:8443).
+if command -v iptables >/dev/null 2>&1; then
+    SANDBOX_CIDR=$(ip route 2>/dev/null | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1)
+    [ -z "$SANDBOX_CIDR" ] && SANDBOX_CIDR="$GATEWAY_IP/32"
+    iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "$GATEWAY_IP:8443" 2>/dev/null || true
 fi
 
 # CA certificate — enables HTTPS through gateway MITM.
