@@ -98,6 +98,12 @@ func (g *Generator) SetCoreVersion(v string) {
 // RunProject executes the full generation pipeline for any project.
 func (g *Generator) RunProject(project *config.Project) error {
 	buildDir := filepath.Join(g.projectDir, ".build")
+
+	// Clean stale artifacts from previous generations (renamed/deleted files would otherwise persist).
+	if err := os.RemoveAll(buildDir); err != nil {
+		return fmt.Errorf("clean .build dir: %w", err)
+	}
+
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return fmt.Errorf("create .build dir: %w", err)
 	}

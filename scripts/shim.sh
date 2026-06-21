@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SHIM_VERSION="1.10.0"
+SHIM_VERSION="1.11.0"
 GITHUB_REPO="donbader/agent-sandbox"
 SANDBOX_HOME="${AGENT_SANDBOX_HOME:-$HOME/.agent-sandbox}"
 CACHE_DIR="$SANDBOX_HOME/core"
@@ -66,6 +66,32 @@ ensure_cached() {
       die "Failed to download core $1 and no local version available"
     fi
   fi
+}
+
+prune_stale_versions() {
+  # Keep only the active version and the most recent other version (offline fallback).
+  # Also removes orphaned .tmp directories from interrupted downloads.
+  # Runs in the background to avoid slowing down exec.
+  _keep="$1"
+  [ -d "$CACHE_DIR" ] || return
+  # Remove orphaned .tmp directories
+  for _t in "$CACHE_DIR"/*.tmp.*; do
+    [ -e "$_t" ] && rm -rf "$_t"
+  done
+  _versions=$(
+    for _d in "$CACHE_DIR"/*/; do
+      [ -f "${_d}.complete" ] && basename "$_d"
+    done | sort -t. -k1,1n -k2,2n -k3,3n
+  )
+  _count=$(printf '%s\n' "$_versions" | grep -c . || true)
+  [ "$_count" -le 2 ] && return
+  # Remove all except the active version and the newest other
+  _newest=$(printf '%s\n' "$_versions" | grep -v "^${_keep}$" | tail -1)
+  for _v in $_versions; do
+    [ "$_v" = "$_keep" ] && continue
+    [ "$_v" = "$_newest" ] && continue
+    rm -rf "${CACHE_DIR:?}/$_v"
+  done
 }
 
 self_replace() {
@@ -223,4 +249,5 @@ VER="${VER#v}"
 case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) die "Invalid core_version: '$VER'" ;; esac
 
 ensure_cached "$VER"
+prune_stale_versions "$VER" &
 exec "$CACHE_DIR/$VER/agent-sandbox-core" "$@"

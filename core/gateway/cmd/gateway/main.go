@@ -306,11 +306,17 @@ fi
 // 2. PREROUTING REDIRECT: forwarded tcp/443 → local proxy on 8443.
 // 3. PREROUTING REDIRECT: forwarded tcp/80 → local HTTP handler on 8080.
 func setupIptables() error {
-	// Enable IP forwarding.
+	// Enable IP forwarding (may already be set via Docker sysctls).
 	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0644); err != nil {
-		return fmt.Errorf("enable ip_forward: %w", err)
+		// Check if ip_forward is already enabled (e.g. via Docker sysctls on a read-only /proc/sys).
+		current, readErr := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+		if readErr != nil || len(current) == 0 || current[0] != '1' {
+			return fmt.Errorf("enable ip_forward: %w", err)
+		}
+		slog.Info("ip_forward already enabled (read-only /proc/sys)")
+	} else {
+		slog.Info("enabled ip forwarding")
 	}
-	slog.Info("enabled ip forwarding")
 
 	// HTTPS: redirect forwarded port 443 → proxy port 8443.
 	cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
