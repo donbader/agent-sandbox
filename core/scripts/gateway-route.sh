@@ -40,9 +40,18 @@ iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "
 echo "[gateway-route] iptables: outbound TCP (except $SANDBOX_CIDR) → ${GATEWAY_IP}:8443"
 
 # --- Default route (for DNAT reachability on internal networks) ---
-if ! ip route show default >/dev/null 2>&1 || [ -z "$(ip route show default 2>/dev/null)" ]; then
+# Note: BusyBox `ip route show default` dumps ALL routes even when no default exists,
+# so we must grep for an actual "default" line rather than checking for empty output.
+if ! ip route show default 2>/dev/null | grep -q "^default"; then
     ip route add default via "$GATEWAY_IP" 2>/dev/null || route add default gw "$GATEWAY_IP" 2>/dev/null || true
     echo "[gateway-route] added default route via ${GATEWAY_IP}"
+fi
+
+# Post-condition: verify a default route exists. Without one, DNAT'd packets have
+# nowhere to go and all outbound connections will get ENETUNREACH.
+if ! ip route show default 2>/dev/null | grep -q "^default"; then
+    echo "[gateway-route] FATAL: no default route after setup — outbound connectivity will fail" >&2
+    exit 1
 fi
 
 # --- DNS: point at gateway's forwarder ---
