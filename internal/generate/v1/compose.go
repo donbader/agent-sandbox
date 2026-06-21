@@ -95,7 +95,10 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 		},
 		"volumes": agentVolumes,
 		"environment": map[string]string{
-			"GATEWAY_HOST": p.gatewayAlias,
+			"GATEWAY_HOST":        p.gatewayAlias,
+			"NODE_EXTRA_CA_CERTS": "/shared/certs/ca.crt",
+			"NODE_USE_SYSTEM_CA":  "1",
+			"SSL_CERT_FILE":       "/etc/ssl/certs/ca-certificates.crt",
 		},
 	}
 
@@ -663,11 +666,14 @@ func injectSidecarGatewayRouting(sidecar map[string]any, agentName, certsVolume 
 	volumes = append(volumes, certsVolume+":/shared/certs")
 	sidecar["volumes"] = volumes
 
-	// Add GATEWAY_HOST env var.
+	// Add GATEWAY_HOST and CA trust env vars.
 	env, ok := sidecar["environment"].(map[string]string)
 	if !ok || env == nil {
 		env = make(map[string]string)
 	}
 	env["GATEWAY_HOST"] = agentName + "-gateway"
+	env["NODE_EXTRA_CA_CERTS"] = "/shared/certs/ca.crt"
+	env["NODE_USE_SYSTEM_CA"] = "1"
+	env["SSL_CERT_FILE"] = "/etc/ssl/certs/ca-certificates.crt"
 	sidecar["environment"] = env
 }
