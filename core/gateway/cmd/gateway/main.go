@@ -284,6 +284,8 @@ if [ -f /shared/certs/ca.crt ]; then
         cat /shared/certs/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
     fi
     export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+    export NODE_EXTRA_CA_CERTS=/shared/certs/ca.crt
+    export NODE_USE_SYSTEM_CA=1
 fi
 
 # DNS — point at gateway's forwarder, keep Docker DNS as fallback.
