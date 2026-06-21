@@ -16,9 +16,7 @@ else
     echo "[buildkit-entrypoint] WARNING: $ROUTE_SCRIPT not found after ${TIMEOUT}s — no outbound network" >&2
 fi
 
-# Run buildkitd as unprivileged user (rootless mode).
-# --oci-worker-no-process-sandbox: skip cgroup/PID isolation for build processes.
-exec su-exec buildkit buildkitd \
+# Switch to rootless user and start buildkitd via rootlesskit.
+exec su-exec user rootlesskit buildkitd \
   --addr tcp://0.0.0.0:8372 \
-  --root /home/buildkit/.local/share/buildkit \
   --oci-worker-no-process-sandbox
