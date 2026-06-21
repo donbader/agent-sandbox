@@ -64,13 +64,15 @@ func TestMutateCreate_NamespaceContainerName(t *testing.T) {
 
 func TestMutateCreate_ComposeMode_StandaloneRun(t *testing.T) {
 	cfg := &ProxyConfig{
-		SandboxID:    "sandbox-001",
-		AgentName:    "agent",
-		NetworkName:  "sandbox_net",
-		AllowCompose: true,
-		MemoryBytes:  1024,
-		NanoCPUs:     1000,
-		PidsLimit:    100,
+		SandboxID:          "sandbox-001",
+		AgentName:          "agent",
+		NetworkName:        "sandbox_net",
+		AllowCompose:       true,
+		MemoryBytes:        1024,
+		NanoCPUs:           1000,
+		PidsLimit:          100,
+		GatewayIP:          "172.18.0.2",
+		GatewayRouteScript: "#!/bin/sh\nGATEWAY_IP=\"172.18.0.2\"\nip route replace default via $GATEWAY_IP",
 	}
 	m := NewMutator(cfg)
 
@@ -95,15 +97,33 @@ func TestMutateCreate_ComposeMode_StandaloneRun(t *testing.T) {
 	capAdd, _ := hc["CapAdd"].([]any)
 	assert.Contains(t, capAdd, "NET_ADMIN")
 
-	// Should set SANDBOX_GATEWAY_HOST env
+	// Should set DNS to gateway IP
+	dns, _ := hc["Dns"].([]string)
+	assert.Equal(t, []string{"172.18.0.2"}, dns)
+
+	// Should NOT set SANDBOX_GATEWAY_HOST env (no longer needed)
 	env, _ := body["Env"].([]any)
-	assert.Contains(t, env, "SANDBOX_GATEWAY_HOST=agent-gateway")
+	for _, e := range env {
+		if s, ok := e.(string); ok {
+			assert.NotContains(t, s, "SANDBOX_GATEWAY_HOST")
+		}
+	}
+
+	// Should mount certs volume (compose volume name: {project}_{agentName}-certs)
+	mounts, _ := hc["Mounts"].([]any)
+	assert.Len(t, mounts, 1)
+	mount, _ := mounts[0].(map[string]any)
+	assert.Equal(t, "volume", mount["Type"])
+	assert.Equal(t, "sandbox_net_agent-certs", mount["Source"])
+	assert.Equal(t, "/shared/certs", mount["Target"])
+	assert.Equal(t, true, mount["ReadOnly"])
 
 	// Should wrap entrypoint with init script
 	ep, _ := body["Entrypoint"].([]any)
 	assert.Equal(t, "/bin/sh", ep[0])
 	assert.Equal(t, "-c", ep[1])
 	assert.Contains(t, ep[2], "exec \"$@\"")
+	assert.Contains(t, ep[2], "GATEWAY_IP")
 	assert.Equal(t, "--", ep[3])
 
 	// Original entrypoint + cmd preserved in Cmd
@@ -113,13 +133,15 @@ func TestMutateCreate_ComposeMode_StandaloneRun(t *testing.T) {
 
 func TestMutateCreate_ComposeMode_WithNetworks(t *testing.T) {
 	cfg := &ProxyConfig{
-		SandboxID:    "sandbox-001",
-		AgentName:    "agent",
-		NetworkName:  "sandbox_net",
-		AllowCompose: true,
-		MemoryBytes:  1024,
-		NanoCPUs:     1000,
-		PidsLimit:    100,
+		SandboxID:          "sandbox-001",
+		AgentName:          "agent",
+		NetworkName:        "sandbox_net",
+		AllowCompose:       true,
+		MemoryBytes:        1024,
+		NanoCPUs:           1000,
+		PidsLimit:          100,
+		GatewayIP:          "172.18.0.2",
+		GatewayRouteScript: "#!/bin/sh\nGATEWAY_IP=\"172.18.0.2\"\nip route replace default via $GATEWAY_IP",
 	}
 	m := NewMutator(cfg)
 
@@ -151,14 +173,25 @@ func TestMutateCreate_ComposeMode_WithNetworks(t *testing.T) {
 	capAdd, _ := hc["CapAdd"].([]any)
 	assert.Contains(t, capAdd, "NET_ADMIN")
 
+	// Should set DNS to gateway IP
+	dns, _ := hc["Dns"].([]string)
+	assert.Equal(t, []string{"172.18.0.2"}, dns)
+
+	// Should mount certs volume
+	mounts, _ := hc["Mounts"].([]any)
+	assert.Len(t, mounts, 1)
+
 	ep, _ := body["Entrypoint"].([]any)
 	assert.Equal(t, "/bin/sh", ep[0])
-	assert.Contains(t, ep[2], "iptables")
+	assert.Contains(t, ep[2], "GATEWAY_IP")
 }
 
 func TestInjectInitWrapper_NoOriginalCmd(t *testing.T) {
 	cfg := &ProxyConfig{
-		AgentName: "myagent",
+		AgentName:          "myagent",
+		NetworkName:        "myproject_sandbox",
+		GatewayIP:          "172.18.0.5",
+		GatewayRouteScript: "#!/bin/sh\nGATEWAY_IP=\"172.18.0.5\"\nip route replace default via $GATEWAY_IP",
 	}
 	m := NewMutator(cfg)
 
@@ -174,6 +207,11 @@ func TestInjectInitWrapper_NoOriginalCmd(t *testing.T) {
 	assert.Equal(t, "/bin/sh", ep[0])
 	assert.Equal(t, "--", ep[3])
 
+	// Init script should contain the gateway route script content
+	initScript, _ := ep[2].(string)
+	assert.Contains(t, initScript, "GATEWAY_IP")
+	assert.Contains(t, initScript, "exec \"$@\"")
+
 	// Cmd should be deleted (let Docker use image default)
 	_, hasCmd := body["Cmd"]
 	assert.False(t, hasCmd)
@@ -182,14 +220,28 @@ func TestInjectInitWrapper_NoOriginalCmd(t *testing.T) {
 	capAdd, _ := hc["CapAdd"].([]any)
 	assert.Contains(t, capAdd, "NET_ADMIN")
 
-	// Should add env
-	env, _ := body["Env"].([]any)
-	assert.Contains(t, env, "SANDBOX_GATEWAY_HOST=myagent-gateway")
+	// Should set DNS
+	dns, _ := hc["Dns"].([]string)
+	assert.Equal(t, []string{"172.18.0.5"}, dns)
+
+	// Should mount certs volume
+	mounts, _ := hc["Mounts"].([]any)
+	assert.Len(t, mounts, 1)
+	mount, _ := mounts[0].(map[string]any)
+	assert.Equal(t, "myproject_myagent-certs", mount["Source"])
+	assert.Equal(t, "/shared/certs", mount["Target"])
+
+	// Should NOT add SANDBOX_GATEWAY_HOST env
+	_, hasEnv := body["Env"]
+	assert.False(t, hasEnv)
 }
 
 func TestInjectInitWrapper_WithEntrypointAndCmd(t *testing.T) {
 	cfg := &ProxyConfig{
-		AgentName: "myagent",
+		AgentName:          "myagent",
+		NetworkName:        "myproject_sandbox",
+		GatewayIP:          "172.18.0.5",
+		GatewayRouteScript: "#!/bin/sh\nGATEWAY_IP=\"172.18.0.5\"\nip route replace default via $GATEWAY_IP",
 	}
 	m := NewMutator(cfg)
 
@@ -211,4 +263,5 @@ func TestInjectInitWrapper_WithEntrypointAndCmd(t *testing.T) {
 	assert.Equal(t, "/bin/sh", ep[0])
 	initScript, _ := ep[2].(string)
 	assert.Contains(t, initScript, "exec \"$@\"")
+	assert.Contains(t, initScript, "GATEWAY_IP")
 }

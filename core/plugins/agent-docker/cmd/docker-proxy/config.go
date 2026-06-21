@@ -21,6 +21,35 @@ type ProxyConfig struct {
 	AllowCompose        bool
 	AllowBuild          bool
 	AllowedCapabilities []string
+	GatewayIP           string // extracted from gateway-route.sh at startup
+	GatewayRouteScript  string // cached content of /shared/certs/gateway-route.sh
+}
+
+const gatewayRouteScriptPath = "/shared/certs/gateway-route.sh"
+
+// loadGatewayRouteScript reads the gateway-authored routing script and extracts
+// the GATEWAY_IP from it. Called once at startup; the content is cached in ProxyConfig.
+func loadGatewayRouteScript(cfg *ProxyConfig) error {
+	data, err := os.ReadFile(gatewayRouteScriptPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", gatewayRouteScriptPath, err)
+	}
+	cfg.GatewayRouteScript = string(data)
+
+	// Extract GATEWAY_IP from the script (line like: GATEWAY_IP="172.18.0.2")
+	for _, line := range strings.Split(cfg.GatewayRouteScript, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "GATEWAY_IP=") {
+			val := strings.TrimPrefix(line, "GATEWAY_IP=")
+			val = strings.Trim(val, `"'`)
+			cfg.GatewayIP = val
+			break
+		}
+	}
+	if cfg.GatewayIP == "" {
+		return fmt.Errorf("GATEWAY_IP not found in %s", gatewayRouteScriptPath)
+	}
+	return nil
 }
 
 func loadConfigFromEnv() (*ProxyConfig, error) {
