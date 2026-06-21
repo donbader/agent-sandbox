@@ -131,6 +131,7 @@ type ComposeService struct {
 	Networks    []string          `yaml:"networks"`
 	CapAdd      []string          `yaml:"cap_add"`
 	SecurityOpt []string          `yaml:"security_opt"`
+	Tmpfs       []string          `yaml:"tmpfs"`
 }
 
 type Healthcheck struct {
