@@ -269,23 +269,14 @@ func writeGatewayRouteScript() error {
 
 	script := `#!/bin/sh
 # Gateway-authored routing for sandbox containers.
-# Single source of truth — do not duplicate this logic elsewhere.
 # Written by gateway at startup. IP is baked in.
+# Containers only need: default route + CA trust + DNS.
+# The gateway handles traffic interception via PREROUTING (no iptables needed here).
 GATEWAY_IP="` + ip + `"
 
-# Default route — required for DNAT'd packets to reach the gateway.
-ip route replace default via "$GATEWAY_IP" 2>/dev/null || true
-
-# iptables DNAT — rewrite outbound TCP to gateway:8443.
-# Required because Docker's internal:true isolation drops packets destined for
-# non-local IPs at the host level. DNAT makes them local (gateway:8443).
-if ! command -v iptables >/dev/null 2>&1; then
-    echo "[gateway-route] ERROR: iptables not found — sidecar will have no outbound network" >&2
-    exit 1
-fi
-SANDBOX_CIDR=$(ip route 2>/dev/null | grep "dev eth0" | grep -v default | awk '{print $1}' | head -1)
-[ -z "$SANDBOX_CIDR" ] && SANDBOX_CIDR="$GATEWAY_IP/32"
-iptables -t nat -A OUTPUT -p tcp ! -d "$SANDBOX_CIDR" -j DNAT --to-destination "$GATEWAY_IP:8443" 2>/dev/null || true
+# Default route — send all traffic to the gateway.
+# On internal:true networks there is no pre-existing default route.
+ip route add default via "$GATEWAY_IP" 2>/dev/null || ip route replace default via "$GATEWAY_IP" 2>/dev/null || true
 
 # CA certificate — enables HTTPS through gateway MITM.
 if [ -f /shared/certs/ca.crt ]; then
@@ -310,17 +301,35 @@ fi
 	return nil
 }
 
-// setupIptables configures PREROUTING to redirect forwarded HTTPS traffic to the proxy.
-// Sandbox containers set their default route to the gateway. When they connect to
-// external_ip:443, the packet is forwarded to the gateway which must redirect it
-// to the local proxy listener on 8443.
+// setupIptables configures the gateway as a transparent proxy router.
+// 1. Enable IP forwarding so routed packets are processed.
+// 2. PREROUTING REDIRECT: forwarded tcp/443 → local proxy on 8443.
+// 3. PREROUTING REDIRECT: forwarded tcp/80 → local HTTP handler on 8080.
 func setupIptables() error {
+	// Enable IP forwarding.
+	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0644); err != nil {
+		return fmt.Errorf("enable ip_forward: %w", err)
+	}
+	slog.Info("enabled ip forwarding")
+
+	// HTTPS: redirect forwarded port 443 → proxy port 8443.
 	cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
 		"-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-port", "8443")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("iptables PREROUTING: %w: %s", err, out)
+		return fmt.Errorf("iptables PREROUTING 443→8443: %w: %s", err, out)
 	}
 	slog.Info("iptables: PREROUTING tcp/443 → 8443")
+
+	// HTTP: redirect forwarded port 80 → HTTP handler on 8080.
+	cmd = exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
+		"-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "8080")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// HTTP redirect is best-effort; not all gateways handle HTTP proxy.
+		slog.Warn("iptables PREROUTING 80→8080 failed (non-fatal)", "error", fmt.Sprintf("%s: %s", err, out))
+	} else {
+		slog.Info("iptables: PREROUTING tcp/80 → 8080")
+	}
+
 	return nil
 }
 
