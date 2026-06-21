@@ -24,20 +24,21 @@ type composeFile struct {
 
 // agentPairParams holds the varying values between single-agent and fleet compose generation.
 type agentPairParams struct {
-	cfg            *config.Config
-	contribs       *plugin.Contributions
-	agentName      string
-	gatewayName    string
-	agentAlias     string
-	gatewayAlias   string
-	certsVolume    string
-	agentBuild     map[string]any
-	gatewayBuild   map[string]any
-	gatewayVolumes []string
-	sidecarPrefix  string
-	buildDir       string
-	exposeGateway  bool
-	projectName    string
+	cfg              *config.Config
+	contribs         *plugin.Contributions
+	agentName        string
+	gatewayName      string
+	agentAlias       string
+	gatewayAlias     string
+	certsVolume      string
+	agentBuild       map[string]any
+	gatewayBuild     map[string]any
+	gatewayVolumes   []string
+	sidecarPrefix    string
+	buildDir         string
+	exposeGateway    bool
+	projectName      string
+	gatewaySandboxIP string
 }
 
 // agentPairResult holds the services and volumes produced by buildAgentPair.
@@ -155,7 +156,8 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 		"cap_add":  []string{"NET_ADMIN", "NET_BIND_SERVICE"},
 		"networks": map[string]any{
 			"sandbox": map[string]any{
-				"aliases": []string{p.gatewayAlias},
+				"aliases":      []string{p.gatewayAlias},
+				"ipv4_address": p.gatewaySandboxIP,
 			},
 			"external": map[string]any{},
 		},
@@ -176,6 +178,8 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 	if cfg.LogLevel != "" {
 		gatewayEnv = append(gatewayEnv, "LOG_LEVEL="+cfg.LogLevel)
 	}
+	// Provide the gateway's sandbox IP so it can write a reliable routing script.
+	gatewayEnv = append(gatewayEnv, "GATEWAY_SANDBOX_IP="+p.gatewaySandboxIP)
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
 	}
@@ -290,6 +294,11 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			"sandbox": map[string]any{
 				"driver":   "bridge",
 				"internal": true,
+				"ipam": map[string]any{
+					"config": []map[string]any{
+						{"subnet": "172.30.0.0/24"},
+					},
+				},
 			},
 			"external": map[string]any{
 				"driver": "bridge",
@@ -297,11 +306,14 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 		},
 	}
 
-	for _, agent := range agents {
+	for i, agent := range agents {
 		cfg := agent.Config
 		agentName := cfg.Name
 		gatewayName := cfg.Name + "-gateway"
 		certsVolume := agentName + "-certs"
+		// Each gateway gets a unique static IP on the sandbox subnet (172.30.0.2, .3, .4, ...).
+		// This allows the gateway to reliably identify its sandbox IP at startup.
+		gatewaySandboxIP := fmt.Sprintf("172.30.0.%d", i+2)
 
 		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
 		if err != nil {
@@ -329,10 +341,11 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			gatewayVolumes: []string{
 				certsVolume + ":/shared/certs",
 			},
-			sidecarPrefix: agentName,
-			buildDir:      composeDir,
-			projectName:   filepath.Base(projectDir),
-			exposeGateway: false,
+			sidecarPrefix:    agentName,
+			buildDir:         composeDir,
+			projectName:      filepath.Base(projectDir),
+			exposeGateway:    false,
+			gatewaySandboxIP: gatewaySandboxIP,
 		})
 		if err != nil {
 			return "", err
