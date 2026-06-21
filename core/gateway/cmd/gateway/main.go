@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -183,6 +184,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set up iptables PREROUTING to redirect forwarded traffic (port 443) to proxy (port 8443).
+	// Sandbox containers route all traffic via this gateway; packets arrive with dest port 443
+	// and need to be redirected to the local proxy listener on 8443.
+	if err := setupIptables(); err != nil {
+		slog.Error("setup iptables", "error", err)
+		os.Exit(1)
+	}
+
 	// Health + route handler endpoint
 	healthAddr := ":8080"
 	go func() {
@@ -282,6 +291,20 @@ fi
 		return fmt.Errorf("write %s: %w", gatewayRouteScriptPath, err)
 	}
 	slog.Info("wrote gateway route script", "path", gatewayRouteScriptPath, "gateway_ip", ip)
+	return nil
+}
+
+// setupIptables configures PREROUTING to redirect forwarded HTTPS traffic to the proxy.
+// Sandbox containers set their default route to the gateway. When they connect to
+// external_ip:443, the packet is forwarded to the gateway which must redirect it
+// to the local proxy listener on 8443.
+func setupIptables() error {
+	cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
+		"-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-port", "8443")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("iptables PREROUTING: %w: %s", err, out)
+	}
+	slog.Info("iptables: PREROUTING tcp/443 → 8443")
 	return nil
 }
 
