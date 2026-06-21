@@ -122,4 +122,29 @@ else
 fi
 
 echo ""
+echo "--- BuildKit build verification ---"
+
+# Verify the buildkit sidecar can actually execute RUN commands (catches cgroup issues).
+BUILD_RESULT=""
+for attempt in 1 2 3; do
+  BUILD_RESULT=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
+    sh -c 'printf "FROM alpine:3.20\nRUN echo buildkit-ok" | docker buildx build --builder remote --no-cache -' 2>&1 || true)
+  if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
+    break
+  fi
+  echo "  attempt $attempt: build not ready, retrying in 3s..."
+  sleep 3
+done
+if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
+  echo -e "  \033[32m✓\033[0m BuildKit: can build Dockerfiles (runc + cgroup working)"
+else
+  echo -e "  \033[31m✗\033[0m BuildKit: build failed"
+  echo "    Output: $(echo "$BUILD_RESULT" | tail -5)"
+  echo ""
+  echo "--- BuildKit sidecar logs ---"
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" logs "$BUILDKIT_SERVICE" 2>&1 | tail -15
+  exit 1
+fi
+
+echo ""
 echo "=== All checks passed ==="
