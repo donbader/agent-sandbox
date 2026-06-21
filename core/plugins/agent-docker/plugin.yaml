@@ -76,3 +76,5 @@ contributes:
           - SYS_ADMIN
         security_opt:
           - apparmor=unconfined
+        tmpfs:
+          - /sys/fs/cgroup

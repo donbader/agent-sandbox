@@ -470,6 +470,9 @@ func buildSidecarService(svc plugin.ComposeService, buildDir string) map[string]
 	if len(svc.SecurityOpt) > 0 {
 		s["security_opt"] = svc.SecurityOpt
 	}
+	if len(svc.Tmpfs) > 0 {
+		s["tmpfs"] = svc.Tmpfs
+	}
 	return s
 }
 
