@@ -62,4 +62,56 @@ else
 fi
 
 echo ""
+echo "--- Sidecar network connectivity (Alpine/BusyBox) ---"
+BUILDKIT_SERVICE="sandbox-test-agent-docker-buildkit"
+
+# The buildkit sidecar is Alpine-based. If routing works, it can reach httpbin via HTTPS.
+SIDECAR_RESPONSE=""
+for attempt in 1 2 3 4 5; do
+  SIDECAR_RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$BUILDKIT_SERVICE" wget -qO- --timeout=10 https://httpbin.org/get 2>&1 || true)
+  if echo "$SIDECAR_RESPONSE" | grep -q "Host"; then
+    break
+  fi
+  echo "  attempt $attempt: not ready, retrying in 3s..."
+  sleep 3
+done
+if echo "$SIDECAR_RESPONSE" | grep -q "Host"; then
+  echo -e "  \033[32m✓\033[0m Alpine sidecar: HTTPS connectivity works"
+else
+  echo -e "  \033[31m✗\033[0m Alpine sidecar: HTTPS connectivity failed"
+  echo "    Response: $SIDECAR_RESPONSE"
+  echo ""
+  echo "--- Sidecar routing ---"
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$BUILDKIT_SERVICE" ip route 2>&1 || true
+  echo ""
+  echo "--- Container logs (buildkit) ---"
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" logs "$BUILDKIT_SERVICE" 2>&1 | tail -20
+  exit 1
+fi
+
+echo ""
+echo "--- Node.js CA trust ---"
+
+# Node.js must trust the gateway's MITM CA cert (NODE_EXTRA_CA_CERTS / NODE_USE_SYSTEM_CA).
+NODE_RESPONSE=""
+for attempt in 1 2 3 4 5; do
+  NODE_RESPONSE=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" node -e "fetch('https://httpbin.org/get').then(r=>r.text()).then(t=>{console.log(t);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})" 2>&1 || true)
+  if echo "$NODE_RESPONSE" | grep -q "Host"; then
+    break
+  fi
+  echo "  attempt $attempt: not ready, retrying in 3s..."
+  sleep 3
+done
+if echo "$NODE_RESPONSE" | grep -q "Host"; then
+  echo -e "  \033[32m✓\033[0m Node.js: HTTPS with MITM CA trust works"
+else
+  echo -e "  \033[31m✗\033[0m Node.js: HTTPS with MITM CA trust failed"
+  echo "    Response: $NODE_RESPONSE"
+  echo ""
+  echo "--- Agent env (CA vars) ---"
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" env 2>&1 | grep -i "NODE\|SSL\|CA" || true
+  exit 1
+fi
+
+echo ""
 echo "=== All checks passed ==="

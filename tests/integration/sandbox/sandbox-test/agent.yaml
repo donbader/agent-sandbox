@@ -13,3 +13,9 @@ gateway:
       headers:
         Authorization: Bearer ${TEST_SECRET}
     - hosts: ["*"]
+installations:
+  - plugin: "@builtin/agent-docker"
+    options:
+      allowed_images: ["*"]
+      allow_build: true
+      allow_compose: false
