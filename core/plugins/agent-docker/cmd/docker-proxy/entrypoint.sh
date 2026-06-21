@@ -2,7 +2,7 @@
 set -e
 
 # Route all traffic through gateway (iptables DNAT, DNS, CA cert).
-. /usr/local/bin/gateway-route.sh
+. /shared/certs/gateway-route.sh
 
 # Run docker-proxy in foreground.
 exec docker-proxy
