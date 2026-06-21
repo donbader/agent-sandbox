@@ -125,8 +125,10 @@ echo ""
 echo "--- BuildKit build verification ---"
 
 # Set up the buildx builder (init_steps don't run in test because entrypoint is sleep infinity).
-"$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
-  docker buildx create --name buildkit --driver remote --driver-opt "url=tcp://${BUILDKIT_SERVICE}:8372" --use 2>/dev/null || true
+echo "  Setting up buildx builder..."
+BUILDX_CREATE=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
+  docker buildx create --name buildkit --driver remote --driver-opt "url=tcp://${BUILDKIT_SERVICE}:8372" --use 2>&1 || true)
+echo "  buildx create: $BUILDX_CREATE"
 
 # Verify the buildkit sidecar can actually execute RUN commands (catches cgroup issues).
 BUILD_RESULT=""
@@ -137,13 +139,15 @@ for attempt in 1 2 3; do
     break
   fi
   echo "  attempt $attempt: build not ready, retrying in 3s..."
+  echo "  partial output: $(echo "$BUILD_RESULT" | head -3)"
   sleep 3
 done
 if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
   echo -e "  \033[32m✓\033[0m BuildKit: can build Dockerfiles (runc + cgroup working)"
 else
   echo -e "  \033[31m✗\033[0m BuildKit: build failed"
-  echo "    Output: $(echo "$BUILD_RESULT" | tail -5)"
+  echo "    Full output:"
+  echo "$BUILD_RESULT" | sed 's/^/    /'
   echo ""
   echo "--- BuildKit sidecar logs ---"
   "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" logs "$BUILDKIT_SERVICE" 2>&1 | tail -15
