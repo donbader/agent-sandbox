@@ -274,9 +274,7 @@ func writeGatewayRouteScript() error {
 GATEWAY_IP="` + ip + `"
 
 # Default route — required for DNAT'd packets to reach the gateway.
-if ! ip route show 2>/dev/null | grep -q "^default"; then
-    ip route add default via "$GATEWAY_IP" 2>/dev/null || true
-fi
+ip route replace default via "$GATEWAY_IP" 2>/dev/null || true
 
 # iptables DNAT — rewrite outbound TCP to gateway:8443.
 # Required because Docker's internal:true isolation drops packets destined for
