@@ -1,11 +1,10 @@
 FROM moby/buildkit:latest AS buildkit
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates iptables curl runc \
+RUN apk add --no-cache ca-certificates runc \
     && mkdir -p /var/lib/buildkit
 COPY --from=buildkit /usr/bin/buildkitd /usr/local/bin/buildkitd
 COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
-COPY gateway-route.sh /usr/local/bin/gateway-route.sh
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh /usr/local/bin/gateway-route.sh
+RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
