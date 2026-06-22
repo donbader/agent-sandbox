@@ -376,3 +376,21 @@ func TestDNS_BlocksAAAA(t *testing.T) {
 	// Upstream was NOT contacted
 	assert.False(t, upstreamCalled, "AAAA query should not reach upstream")
 }
+
+func TestIsLocalIP(t *testing.T) {
+	_, localNet, _ := net.ParseCIDR("172.30.0.0/24")
+
+	s := NewServer(":0")
+	// Without localNet set, falls back to isPrivateIP
+	assert.True(t, s.isLocalIP(net.ParseIP("10.0.2.2")), "private IP should pass through without localNet")
+	assert.True(t, s.isLocalIP(net.ParseIP("172.30.0.4")), "private IP should pass through without localNet")
+	assert.False(t, s.isLocalIP(net.ParseIP("8.8.8.8")), "public IP should not pass through")
+
+	// With localNet set, only IPs in that subnet pass through
+	s.SetLocalNetwork(localNet)
+	assert.True(t, s.isLocalIP(net.ParseIP("172.30.0.2")), "same-subnet IP should pass through")
+	assert.True(t, s.isLocalIP(net.ParseIP("172.30.0.4")), "same-subnet IP should pass through")
+	assert.False(t, s.isLocalIP(net.ParseIP("10.0.2.2")), "different-subnet private IP should be intercepted")
+	assert.False(t, s.isLocalIP(net.ParseIP("172.30.1.1")), "different /24 should be intercepted")
+	assert.False(t, s.isLocalIP(net.ParseIP("8.8.8.8")), "public IP should be intercepted")
+}
