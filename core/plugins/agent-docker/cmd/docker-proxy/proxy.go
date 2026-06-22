@@ -168,6 +168,10 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Translate network names in NetworkingConfig and HostConfig.NetworkMode
+	// from user names to namespaced names (compose creates namespaced networks).
+	dp.translateNetworkNames(body)
+
 	createReq := extractCreateRequest(body)
 
 	// Validate under lock to prevent TOCTOU race on container count
@@ -282,6 +286,36 @@ func (dp *DockerProxy) resolveImageDefaults(body map[string]any) {
 			imgCmd[i] = s
 		}
 		body["Cmd"] = imgCmd
+	}
+}
+
+// translateNetworkNames resolves user-facing network names in the container
+// create body to their namespaced equivalents. Docker compose creates networks
+// through the proxy (which namespaces them), then references them by the
+// original name in container create requests.
+func (dp *DockerProxy) translateNetworkNames(body map[string]any) {
+	// Translate NetworkingConfig.EndpointsConfig keys
+	if nc, ok := body["NetworkingConfig"].(map[string]any); ok {
+		if ec, ok := nc["EndpointsConfig"].(map[string]any); ok {
+			translated := make(map[string]any, len(ec))
+			for name, cfg := range ec {
+				if resolved := dp.names.Resolve(KindNetwork, name); resolved != "" {
+					translated[resolved] = cfg
+				} else {
+					translated[name] = cfg
+				}
+			}
+			nc["EndpointsConfig"] = translated
+		}
+	}
+
+	// Translate HostConfig.NetworkMode
+	if hc, ok := body["HostConfig"].(map[string]any); ok {
+		if nm, ok := hc["NetworkMode"].(string); ok && nm != "" {
+			if resolved := dp.names.Resolve(KindNetwork, nm); resolved != "" {
+				hc["NetworkMode"] = resolved
+			}
+		}
 	}
 }
 
