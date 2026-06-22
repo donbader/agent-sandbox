@@ -26,10 +26,10 @@ contributes:
 {{- end }}
 {{- if eq (default .plugin.options.volume_strategy "per_agent") "fleet" }}
     raw_volumes:
-      - "oauth-tokens:/data/plugins/mcp-oauth"
+      - "mcp-oauth-data:/data/plugins/mcp-oauth"
 {{- else if ne (default .plugin.options.volume_strategy "per_agent") "none" }}
     namespaced_volumes:
-      - "oauth-tokens:/data/plugins/mcp-oauth"
+      - "mcp-oauth-data:/data/plugins/mcp-oauth"
 {{- end }}
     routes:
       - path: "/callback"
