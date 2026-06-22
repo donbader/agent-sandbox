@@ -394,3 +394,94 @@ func TestIsLocalIP(t *testing.T) {
 	assert.False(t, s.isLocalIP(net.ParseIP("172.30.1.1")), "different /24 should be intercepted")
 	assert.False(t, s.isLocalIP(net.ParseIP("8.8.8.8")), "public IP should be intercepted")
 }
+
+// TestDNS_InterceptAll_PassesThroughDockerDNS verifies that when interceptAll is
+// enabled and the first upstream returns NXDOMAIN, the server still tries the next
+// upstream (Docker DNS). If that upstream resolves the name to a local IP, the
+// response passes through unchanged (not replaced with gateway IP).
+// This is the critical test for internal service name resolution (e.g.
+// "dorey-002-agent-docker-proxy" must resolve via Docker DNS, not be intercepted).
+func TestDNS_InterceptAll_PassesThroughDockerDNS(t *testing.T) {
+	// First upstream (simulating public DNS): returns NXDOMAIN for container names.
+	publicDNS := startMockDNS(t, func(query []byte) []byte {
+		resp := make([]byte, 12)
+		copy(resp, query[:12])
+		resp[2] |= 0x80 // QR bit
+		resp[6] = 0x00  // ANCOUNT = 0
+		resp[7] = 0x00
+		return resp
+	})
+
+	// Second upstream (simulating Docker DNS): resolves container names to local IP.
+	containerIP := net.IP{172, 30, 0, 5}
+	dockerDNS := startMockDNS(t, func(query []byte) []byte {
+		// Build a proper A response with the container IP
+		return synthesizeAResponse(query, containerIP)
+	})
+
+	setUpstreams(t, []string{publicDNS, dockerDNS})
+
+	// Start DNS server with interceptAll enabled (gateway IP)
+	listenAddr := getFreeUDPAddr(t)
+	srv := NewServer(listenAddr)
+	srv.InterceptAll("172.30.0.3") // gateway IP
+	_, localNet, _ := net.ParseCIDR("172.30.0.0/24")
+	srv.SetLocalNetwork(localNet)
+
+	go func() { _ = srv.ListenAndServe() }()
+	time.Sleep(50 * time.Millisecond)
+
+	query := buildDNSQuery(0x5678)
+	resp, err := sendQuery(t, listenAddr, query, 2*time.Second)
+	require.NoError(t, err, "expected a response")
+	require.GreaterOrEqual(t, len(resp), 12)
+
+	// Should have an answer (ANCOUNT > 0)
+	assert.True(t, resp[6] > 0 || resp[7] > 0, "should have an answer from Docker DNS")
+
+	// Extract the IP from the response — should be container IP, NOT gateway IP
+	ip := extractFirstARecord(resp)
+	require.NotNil(t, ip, "response should contain an A record")
+	assert.Equal(t, containerIP.String(), ip.To4().String(),
+		"should pass through Docker DNS response (container IP), not replace with gateway IP")
+}
+
+// TestDNS_InterceptAll_ReturnsGatewayOnAllNXDOMAIN verifies that when interceptAll
+// is enabled and ALL upstreams return NXDOMAIN, the gateway IP is returned.
+// This is the expected behavior for external domains that no one can resolve.
+func TestDNS_InterceptAll_ReturnsGatewayOnAllNXDOMAIN(t *testing.T) {
+	// Both upstreams return NXDOMAIN.
+	nxdomainHandler := func(query []byte) []byte {
+		resp := make([]byte, 12)
+		copy(resp, query[:12])
+		resp[2] |= 0x80 // QR bit
+		resp[6] = 0x00  // ANCOUNT = 0
+		resp[7] = 0x00
+		return resp
+	}
+	mock1 := startMockDNS(t, nxdomainHandler)
+	mock2 := startMockDNS(t, nxdomainHandler)
+
+	setUpstreams(t, []string{mock1, mock2})
+
+	gatewayIP := net.IP{172, 30, 0, 3}
+	listenAddr := getFreeUDPAddr(t)
+	srv := NewServer(listenAddr)
+	srv.InterceptAll(gatewayIP.String())
+
+	go func() { _ = srv.ListenAndServe() }()
+	time.Sleep(50 * time.Millisecond)
+
+	query := buildDNSQuery(0x9ABC)
+	resp, err := sendQuery(t, listenAddr, query, 2*time.Second)
+	require.NoError(t, err, "expected a response (gateway IP for unresolvable domain)")
+	require.GreaterOrEqual(t, len(resp), 12)
+
+	// Should have an answer (synthesized by interceptAll)
+	assert.True(t, resp[6] > 0 || resp[7] > 0, "should have a synthesized answer")
+
+	ip := extractFirstARecord(resp)
+	require.NotNil(t, ip, "response should contain an A record")
+	assert.Equal(t, gatewayIP.String(), ip.To4().String(),
+		"should return gateway IP when all upstreams return NXDOMAIN")
+}

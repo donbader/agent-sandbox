@@ -248,19 +248,18 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 			return
 		}
 
-		// No answer — in interceptAll mode, respond with gateway IP
-		if s.interceptAll != nil && isAQuery(query) {
-			if synth := synthesizeAResponse(query, s.interceptAll); synth != nil {
-				name := extractQName(query)
-				slog.Debug("dns intercept-all (nxdomain)", "domain", name, "ip", s.interceptAll)
-				if _, err := conn.WriteToUDP(synth, clientAddr); err != nil {
-					slog.Error("dns write client (intercept-all)", "error", err)
-				}
-				return
-			}
-		}
-
+		// No answer — only intercept after all upstreams have been tried.
 		if isLast {
+			if s.interceptAll != nil && isAQuery(query) {
+				if synth := synthesizeAResponse(query, s.interceptAll); synth != nil {
+					name := extractQName(query)
+					slog.Debug("dns intercept-all (nxdomain)", "domain", name, "ip", s.interceptAll)
+					if _, err := conn.WriteToUDP(synth, clientAddr); err != nil {
+						slog.Error("dns write client (intercept-all)", "error", err)
+					}
+					return
+				}
+			}
 			if _, err := conn.WriteToUDP(resp[:n], clientAddr); err != nil {
 				slog.Error("dns write client", "error", err)
 			}
