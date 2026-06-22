@@ -539,6 +539,8 @@ var composeEndpoints = []endpointRule{
 	{"GET", regexp.MustCompile(`^/volumes$`)},
 	{"GET", regexp.MustCompile(`^/volumes/[a-zA-Z0-9_.-]+$`)},
 	{"DELETE", regexp.MustCompile(`^/volumes/[a-zA-Z0-9_.-]+$`)},
+	// Events (compose monitors container lifecycle for --abort-on-container-exit)
+	{"GET", regexp.MustCompile(`^/events$`)},
 }
 
 // extractContainerID pulls the container ID from paths like /containers/{id}/start.
