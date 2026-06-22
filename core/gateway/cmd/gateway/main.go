@@ -102,6 +102,13 @@ func main() {
 	// so traffic arrives directly at the gateway (avoids reliance on iptables).
 	dnsServer := dns.NewServer(cfg.DNSListen)
 	if sandboxIP, err := getSandboxIP(); err == nil {
+		// Always intercept the gateway's own hostname so agent containers
+		// resolve it to the correct network IP (not a Docker-assigned IP on
+		// a different interface that may be unreachable from the agent subnet).
+		if hostname, err := os.Hostname(); err == nil && hostname != "" {
+			dnsServer.InterceptDomains([]string{hostname}, sandboxIP)
+		}
+
 		// Collect all domains from egress rules + MITM that aren't wildcards
 		var interceptDomains []string
 		for _, rule := range cfg.EgressRules {
