@@ -216,7 +216,11 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 			sidecar := buildSidecarService(svc, p.buildDir)
 			// Inject system env vars into all sidecars.
 			injectSidecarSystemEnv(sidecar, p.cfg.Name, p.projectName)
-			// Inject config fingerprint to force recreation on env change.
+			// Namespace named volumes (e.g. "buildkit-data:/path" → "dorey-002-buildkit-data:/path").
+			// Must happen BEFORE injectSidecarGatewayRouting which adds already-namespaced certs volume.
+			if vols, ok := sidecar["volumes"].([]string); ok {
+				sidecar["volumes"] = namespaceVolumes(p.agentName, vols)
+			}
 			// Inject gateway routing infrastructure (cap_add, certs volume, GATEWAY_HOST).
 			injectSidecarGatewayRouting(sidecar, p.agentName, p.certsVolume)
 			// Healthcheck: verify sidecar can reach gateway (DNS + routing).
@@ -275,6 +279,14 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 		for _, v := range contribs.Gateway.RawVolumes {
 			if volName := extractVolumeName(v); volName != "" {
 				result.volumes[volName] = nil
+			}
+		}
+		// Extract named volumes from sidecar services.
+		for _, svc := range contribs.Sidecar.Services {
+			for _, v := range svc.Volumes {
+				if volName := extractVolumeName(v); volName != "" {
+					result.volumes[p.agentName+"-"+volName] = nil
+				}
 			}
 		}
 	}

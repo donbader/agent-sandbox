@@ -81,3 +81,5 @@ contributes:
           - seccomp=unconfined
         tmpfs:
           - /sys/fs/cgroup
+        volumes:
+          - buildkit-data:/var/lib/buildkit
