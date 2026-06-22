@@ -30,15 +30,19 @@ func TestEndpointAllowed(t *testing.T) {
 		{"POST", "/exec/abc123/start", true},
 		{"GET", "/images/json", true},
 		{"POST", "/images/create", true},
-		// Blocked
-		{"GET", "/volumes", false},
-		{"POST", "/volumes/create", false},
-		{"GET", "/networks", false},
+		// Allowed by default (denylist approach — not dangerous)
+		{"GET", "/volumes", true},
+		{"POST", "/volumes/create", true},
+		{"GET", "/networks", true},
+		{"GET", "/secrets", true},
+		{"GET", "/configs", true},
+		{"GET", "/system/info", true},
+		{"GET", "/unknown/endpoint", true},
+		// Always blocked (dangerous system operations)
 		{"GET", "/swarm", false},
-		{"GET", "/secrets", false},
-		{"GET", "/configs", false},
-		{"GET", "/system/info", false},
-		{"GET", "/unknown/endpoint", false},
+		{"POST", "/swarm/init", false},
+		{"GET", "/plugins", false},
+		{"POST", "/containers/prune", false},
 	}
 
 	for _, tc := range cases {
@@ -72,7 +76,7 @@ func TestDockerProxy_BlockedEndpoint(t *testing.T) {
 	}
 	proxy, _ := NewDockerProxy(cfg)
 
-	req := httptest.NewRequest("GET", "/volumes", nil)
+	req := httptest.NewRequest("GET", "/swarm", nil)
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -93,7 +97,7 @@ func TestDockerProxy_VersionPrefixStripped(t *testing.T) {
 	proxy, _ := NewDockerProxy(cfg)
 
 	// Versioned path to a blocked endpoint should still be blocked
-	req := httptest.NewRequest("GET", "/v1.43/volumes", nil)
+	req := httptest.NewRequest("GET", "/v1.43/swarm", nil)
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -248,7 +252,7 @@ func TestDockerProxy_AllowCompose_NetworkEndpoints(t *testing.T) {
 		AllowCompose:  false,
 	})
 	assert.False(t, proxyNoCompose.isEndpointAllowed("POST", "/networks/create"))
-	assert.False(t, proxyNoCompose.isEndpointAllowed("GET", "/networks"))
+	assert.True(t, proxyNoCompose.isEndpointAllowed("GET", "/networks"))
 	assert.False(t, proxyNoCompose.isEndpointAllowed("DELETE", "/networks/abc123"))
 
 	// With AllowCompose, network endpoints are allowed
@@ -338,9 +342,9 @@ func TestDockerProxy_AllowBuild_Endpoints(t *testing.T) {
 		PidsLimit:     256,
 		AllowBuild:    false,
 	})
-	assert.False(t, proxyNoBuild.isEndpointAllowed("GET", "/info"))
+	assert.True(t, proxyNoBuild.isEndpointAllowed("GET", "/info"))
 	assert.False(t, proxyNoBuild.isEndpointAllowed("POST", "/build"))
-	assert.False(t, proxyNoBuild.isEndpointAllowed("GET", "/images/myapp/get"))
+	assert.True(t, proxyNoBuild.isEndpointAllowed("GET", "/images/myapp/get"))
 	assert.False(t, proxyNoBuild.isEndpointAllowed("POST", "/images/load"))
 
 	// With AllowBuild, build endpoints are allowed
