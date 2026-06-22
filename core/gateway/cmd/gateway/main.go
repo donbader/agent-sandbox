@@ -329,16 +329,18 @@ fi
 	return nil
 }
 
-// setupIptables configures PREROUTING to redirect HTTPS traffic to the proxy.
-// Only port 443 is intercepted (MITM proxy on 8443). HTTP (port 80) is
-// forwarded normally via IP forwarding — no interception needed.
+// setupIptables configures PREROUTING to redirect all HTTP/HTTPS traffic to
+// the proxy on port 8443. The proxy auto-detects protocol (TLS vs plain HTTP)
+// by peeking the first byte of each connection.
 func setupIptables() error {
-	cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
-		"-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-port", "8443")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("iptables PREROUTING 443→8443: %w: %s", err, out)
+	for _, port := range []string{"443", "80"} {
+		cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
+			"-p", "tcp", "--dport", port, "-j", "REDIRECT", "--to-port", "8443")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("iptables PREROUTING %s→8443: %w: %s", port, err, out)
+		}
+		slog.Info("iptables: PREROUTING", "rule", fmt.Sprintf("tcp/%s → 8443", port))
 	}
-	slog.Info("iptables: PREROUTING tcp/443 → 8443")
 	return nil
 }
 
