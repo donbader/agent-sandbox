@@ -472,7 +472,7 @@ var allowedEndpoints = []endpointRule{
 	{"GET", regexp.MustCompile(`^/exec/[a-zA-Z0-9_.-]+/json$`)},
 	// Images
 	{"GET", regexp.MustCompile(`^/images/json$`)},
-	{"GET", regexp.MustCompile(`^/images/[a-zA-Z0-9_./-]+/json$`)},
+	{"GET", regexp.MustCompile(`^/images/[a-zA-Z0-9_./:@-]+/json$`)},
 	{"POST", regexp.MustCompile(`^/images/create$`)},
 	// Distribution (used by docker pull for manifest checks)
 	{"GET", regexp.MustCompile(`^/distribution/`)},
