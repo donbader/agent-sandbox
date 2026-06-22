@@ -54,7 +54,7 @@ func generateFleetSchema(outDir string, pluginsFS fs.FS, projectDir string) erro
 }
 
 // enrichInstallations walks the schema to find Installation items and adds
-// oneOf variants with plugin-specific options schemas.
+// if/then conditionals for plugin-specific options autocompletion.
 func enrichInstallations(schema *jsonschema.Schema, pluginsFS fs.FS, projectDir string) {
 	plugins := make(map[string]*plugin.PluginDef)
 
@@ -70,73 +70,56 @@ func enrichInstallations(schema *jsonschema.Schema, pluginsFS fs.FS, projectDir 
 		return
 	}
 
-	// Build oneOf variants for each builtin plugin
-	variants := make([]*jsonschema.Schema, 0, len(plugins)+len(localPlugins)+1)
+	// Collect all plugin names for enum (autocompletion of plugin field)
 	allNames := make([]interface{}, 0, len(plugins)+len(localPlugins))
+
+	// Build if/then conditionals for each plugin
+	conditionals := make([]*jsonschema.Schema, 0, len(plugins)+len(localPlugins))
 
 	for name, def := range plugins {
 		fullName := "@builtin/" + name
 		allNames = append(allNames, fullName)
 
-		variant := &jsonschema.Schema{
-			Type:       "object",
-			Properties: jsonschema.NewProperties(),
-			Required:   []string{"plugin"},
-		}
-		variant.Properties.Set("plugin", &jsonschema.Schema{
-			Type:  "string",
-			Const: fullName,
-		})
 		if len(def.Options) > 0 {
-			variant.Properties.Set("options", optionSchemaToJSON(def.Options))
+			conditionals = append(conditionals, makeIfThen(fullName, def.Options))
 		}
-		variants = append(variants, variant)
 	}
 
-	// Build oneOf variants for each local plugin
 	for refName, def := range localPlugins {
 		allNames = append(allNames, refName)
 
-		variant := &jsonschema.Schema{
-			Type:       "object",
-			Properties: jsonschema.NewProperties(),
-			Required:   []string{"plugin"},
-		}
-		variant.Properties.Set("plugin", &jsonschema.Schema{
-			Type:  "string",
-			Const: refName,
-		})
 		if len(def.Options) > 0 {
-			variant.Properties.Set("options", optionSchemaToJSON(def.Options))
+			conditionals = append(conditionals, makeIfThen(refName, def.Options))
 		}
-		variants = append(variants, variant)
 	}
-
-	// Fallback for unknown plugins — uses "not enum" to exclude all known plugins,
-	// ensuring each installation matches exactly one oneOf branch.
-	fallback := &jsonschema.Schema{
-		Type:       "object",
-		Properties: jsonschema.NewProperties(),
-		Required:   []string{"plugin"},
-	}
-	fallback.Properties.Set("plugin", &jsonschema.Schema{
-		Type:        "string",
-		Description: "Plugin reference. Use @builtin/name for bundled plugins or @fleet/path for local plugins.",
-		Not:         &jsonschema.Schema{Enum: allNames},
-	})
-	fallback.Properties.Set("options", &jsonschema.Schema{
-		Type:        "object",
-		Description: "Plugin-specific configuration options",
-	})
-	variants = append(variants, fallback)
 
 	// Find and replace installations items in schema tree
-	patchInstallationItems(schema, variants)
+	patchInstallationItems(schema, allNames, conditionals)
+}
+
+// makeIfThen creates an if/then schema: if plugin==name, then options has specific shape.
+func makeIfThen(pluginName string, opts map[string]plugin.OptionSchema) *jsonschema.Schema {
+	ifSchema := &jsonschema.Schema{
+		Properties: jsonschema.NewProperties(),
+	}
+	ifSchema.Properties.Set("plugin", &jsonschema.Schema{
+		Const: pluginName,
+	})
+
+	thenSchema := &jsonschema.Schema{
+		Properties: jsonschema.NewProperties(),
+	}
+	thenSchema.Properties.Set("options", optionSchemaToJSON(opts))
+
+	return &jsonschema.Schema{
+		If:   ifSchema,
+		Then: thenSchema,
+	}
 }
 
 // patchInstallationItems recursively searches for the "installations" property
-// and replaces its items schema with oneOf variants.
-func patchInstallationItems(schema *jsonschema.Schema, variants []*jsonschema.Schema) {
+// and replaces its items schema with base properties + if/then conditionals.
+func patchInstallationItems(schema *jsonschema.Schema, pluginNames []interface{}, conditionals []*jsonschema.Schema) {
 	if schema == nil || schema.Properties == nil {
 		return
 	}
@@ -146,17 +129,31 @@ func patchInstallationItems(schema *jsonschema.Schema, variants []*jsonschema.Sc
 		val := pair.Value
 
 		if key == "installations" && val.Items != nil {
-			val.Items.Properties = nil
-			val.Items.Type = ""
-			val.Items.Required = nil
-			val.Items.AdditionalProperties = nil
-			val.Items.OneOf = variants
+			// Base schema: plugin (enum for autocompletion) + options (object)
+			val.Items.Properties = jsonschema.NewProperties()
+			val.Items.Type = "object"
+			val.Items.Required = []string{"plugin"}
+			val.Items.AdditionalProperties = jsonschema.FalseSchema
+
+			val.Items.Properties.Set("plugin", &jsonschema.Schema{
+				Type:        "string",
+				Enum:        pluginNames,
+				Description: "Plugin reference. Use @builtin/name for bundled plugins or @fleet/path for local plugins.",
+			})
+			val.Items.Properties.Set("options", &jsonschema.Schema{
+				Type:        "object",
+				Description: "Plugin-specific configuration options (varies by plugin)",
+			})
+
+			// Conditional options based on plugin value
+			val.Items.AllOf = conditionals
+			val.Items.OneOf = nil
 			return
 		}
 
 		// Recurse into nested objects (e.g. shared.installations in fleet schema)
 		if val.Properties != nil {
-			patchInstallationItems(val, variants)
+			patchInstallationItems(val, pluginNames, conditionals)
 		}
 	}
 }
@@ -187,7 +184,7 @@ func loadPluginSchemas(pluginsFS fs.FS) map[string]*plugin.PluginDef {
 	return plugins
 }
 
-// loadLocalPluginSchemas reads plugin.yaml files from the project's plugins/ directory.
+// loadLocalPluginSchemas recursively scans the project directory for plugin.yaml files.
 // Returns a map keyed by the reference name (e.g. "@fleet/plugins/telegram-v2").
 func loadLocalPluginSchemas(projectDir string) map[string]*plugin.PluginDef {
 	plugins := make(map[string]*plugin.PluginDef)
@@ -195,27 +192,49 @@ func loadLocalPluginSchemas(projectDir string) map[string]*plugin.PluginDef {
 		return plugins
 	}
 
-	pluginsDir := filepath.Join(projectDir, "plugins")
-	entries, err := os.ReadDir(pluginsDir)
-	if err != nil {
-		return plugins
+	// Skip directories that shouldn't contain user plugins
+	skipDirs := map[string]bool{
+		".build":       true,
+		".git":         true,
+		"node_modules": true,
+		"dist":         true,
+		".cache":       true,
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(pluginsDir, entry.Name(), "plugin.yaml"))
+	filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			continue
+			return nil
+		}
+		if info.IsDir() {
+			if skipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.Name() != "plugin.yaml" {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
 		}
 		def, err := plugin.ParsePluginYAML(data)
 		if err != nil {
-			continue
+			return nil
 		}
-		refName := "@fleet/plugins/" + entry.Name()
+
+		// Reference name is @fleet/ + relative path to the directory containing plugin.yaml
+		pluginDir := filepath.Dir(path)
+		relDir, err := filepath.Rel(projectDir, pluginDir)
+		if err != nil {
+			return nil
+		}
+		refName := "@fleet/" + filepath.ToSlash(relDir)
 		plugins[refName] = def
-	}
+		return nil
+	})
+
 	return plugins
 }
 
