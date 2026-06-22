@@ -91,6 +91,7 @@ type Server struct {
 	listen       string
 	interceptIPs map[string]net.IP // domain → IP to respond with
 	interceptAll net.IP            // if set, respond with this IP for all non-Docker queries
+	localNet     *net.IPNet        // gateway's local subnet; only IPs in this range pass through
 }
 
 // NewServer creates a DNS server listening on the given address.
@@ -126,6 +127,16 @@ func (s *Server) InterceptAll(ip string) {
 	}
 	s.interceptAll = parsed
 	slog.Info("dns: intercept-all mode enabled", "ip", ip)
+}
+
+// SetLocalNetwork configures the subnet that should be treated as "local"
+// (container-reachable). DNS responses resolving to IPs within this network
+// pass through unchanged; all other IPs (including private IPs on different
+// subnets) are intercepted. This prevents unreachable cross-network private
+// IPs from being passed through to agent containers.
+func (s *Server) SetLocalNetwork(network *net.IPNet) {
+	s.localNet = network
+	slog.Info("dns: local network set", "cidr", network.String())
 }
 
 // ListenAndServe starts the DNS server.
@@ -216,10 +227,11 @@ func (s *Server) handleQuery(conn *net.UDPConn, clientAddr *net.UDPAddr, query [
 		isLast := i == len(upstreams)-1
 
 		if hasAnswer {
-			// In interceptAll mode: only pass through private IPs (container names).
-			// Public IPs mean Docker DNS forwarded externally — override with gateway IP.
+			// In interceptAll mode: only pass through IPs on the local network.
+			// All other IPs (public or private on a different subnet) are
+			// intercepted and replaced with the gateway IP.
 			if s.interceptAll != nil && isAQuery(query) {
-				if ip := extractFirstARecord(resp[:n]); ip != nil && !isPrivateIP(ip) {
+				if ip := extractFirstARecord(resp[:n]); ip != nil && !s.isLocalIP(ip) {
 					if synth := synthesizeAResponse(query, s.interceptAll); synth != nil {
 						name := extractQName(query)
 						slog.Debug("dns intercept-all", "domain", name, "real_ip", ip, "gateway_ip", s.interceptAll)
@@ -486,4 +498,14 @@ func isPrivateIP(ip net.IP) bool {
 		return true
 	}
 	return false
+}
+
+// isLocalIP returns true if the IP should pass through (not be intercepted).
+// If localNet is configured, only IPs within that subnet pass through.
+// Otherwise falls back to isPrivateIP for backward compatibility.
+func (s *Server) isLocalIP(ip net.IP) bool {
+	if s.localNet != nil {
+		return s.localNet.Contains(ip)
+	}
+	return isPrivateIP(ip)
 }

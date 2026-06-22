@@ -102,11 +102,10 @@ func main() {
 	// so traffic arrives directly at the gateway (avoids reliance on iptables).
 	dnsServer := dns.NewServer(cfg.DNSListen)
 	if sandboxIP, err := getSandboxIP(); err == nil {
-		// Always intercept the gateway's own hostname so agent containers
-		// resolve it to the correct network IP (not a Docker-assigned IP on
-		// a different interface that may be unreachable from the agent subnet).
-		if hostname, err := os.Hostname(); err == nil && hostname != "" {
-			dnsServer.InterceptDomains([]string{hostname}, sandboxIP)
+		// Set the local network so DNS knows which subnet is directly reachable.
+		// IPs outside this subnet (even private ones) get intercepted.
+		if localNet, err := getSandboxNetwork(); err == nil {
+			dnsServer.SetLocalNetwork(localNet)
 		}
 
 		// Collect all domains from egress rules + MITM that aren't wildcards
@@ -291,6 +290,34 @@ func getSandboxIP() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no non-loopback IPv4 address found")
+}
+
+// getSandboxNetwork returns the IPNet (IP + subnet mask) of the gateway's
+// primary network interface. Used to determine which IPs are locally reachable.
+func getSandboxNetwork() (*net.IPNet, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("list interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ipNet.IP.To4() != nil {
+				return ipNet, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no non-loopback IPv4 network found")
 }
 
 // writeGatewayRouteScript writes the routing script to the shared volume.
