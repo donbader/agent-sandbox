@@ -161,13 +161,13 @@ func TestMutateCreate_ComposeMode_WithNetworks(t *testing.T) {
 
 	m.MutateCreate(body, "my-redis")
 
-	// Should NOT inject sandbox network (compose has its own)
+	// Should inject sandbox network alongside compose network (for gateway reachability)
 	hc, _ := body["HostConfig"].(map[string]any)
 	assert.Equal(t, "myapp_default", hc["NetworkMode"])
 	nc, _ := body["NetworkingConfig"].(map[string]any)
 	ec, _ := nc["EndpointsConfig"].(map[string]any)
 	_, hasSandbox := ec["sandbox_net"]
-	assert.False(t, hasSandbox)
+	assert.True(t, hasSandbox)
 
 	// Should still inject init wrapper
 	capAdd, _ := hc["CapAdd"].([]any)
