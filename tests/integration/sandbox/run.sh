@@ -149,5 +149,19 @@ else
   exit 1
 fi
 
+# Test HTTPS access from RUN containers (verifies runc-wrapper CA cert injection).
+echo "  Running HTTPS test inside buildkit RUN container..."
+HTTPS_RESULT=$(
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$BUILDKIT_SERVICE" \
+    sh -c 'mkdir -p /tmp/https-test && printf "FROM alpine:3.20\nRUN wget -q -O /dev/null https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/APKINDEX.tar.gz && echo https-ok\n" > /tmp/https-test/Dockerfile && buildctl --addr tcp://127.0.0.1:8372 build --frontend=dockerfile.v0 --local context=/tmp/https-test --local dockerfile=/tmp/https-test --no-cache' 2>&1 || true)
+if echo "$HTTPS_RESULT" | grep -q "exporting to image\|sending tarball\|DONE"; then
+  echo -e "  \033[32m✓\033[0m BuildKit: HTTPS works in RUN containers (CA cert injected)"
+else
+  echo -e "  \033[31m✗\033[0m BuildKit: HTTPS failed in RUN container (CA cert not trusted?)"
+  echo "    Output (last 5 lines):"
+  echo "$HTTPS_RESULT" | tail -5 | sed 's/^/    /'
+  exit 1
+fi
+
 echo ""
 echo "=== All checks passed ==="
