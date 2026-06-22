@@ -125,7 +125,6 @@ echo ""
 echo "--- BuildKit build verification ---"
 
 # Use buildctl (inside the buildkit sidecar) to verify runc + cgroup works.
-# This avoids needing docker CLI in the agent container.
 echo "  Running buildctl build inside sidecar..."
 BUILD_RESULT=""
 for attempt in 1 2 3 4 5; do
