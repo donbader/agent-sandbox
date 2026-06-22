@@ -13,7 +13,7 @@ import (
 func TestGenerateSchema(t *testing.T) {
 	outDir := t.TempDir()
 
-	err := generateSchema(outDir, nil)
+	err := generateSchema(outDir, nil, "")
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(filepath.Join(outDir, "schema.json"))

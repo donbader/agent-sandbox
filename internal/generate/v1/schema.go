@@ -12,7 +12,7 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func generateSchema(outDir string, pluginsFS fs.FS) error {
+func generateSchema(outDir string, pluginsFS fs.FS, projectDir string) error {
 	reflector := &jsonschema.Reflector{
 		DoNotReference: true,
 	}
@@ -20,9 +20,7 @@ func generateSchema(outDir string, pluginsFS fs.FS) error {
 	schema.Title = "agent-sandbox configuration"
 	schema.Description = "Configuration schema for agent-sandbox agent.yaml"
 
-	if pluginsFS != nil {
-		enrichInstallations(schema, pluginsFS)
-	}
+	enrichInstallations(schema, pluginsFS, projectDir)
 
 	data, err := json.MarshalIndent(schema, "", "  ")
 	if err != nil {
@@ -33,10 +31,10 @@ func generateSchema(outDir string, pluginsFS fs.FS) error {
 		return err
 	}
 
-	return generateFleetSchema(outDir, pluginsFS)
+	return generateFleetSchema(outDir, pluginsFS, projectDir)
 }
 
-func generateFleetSchema(outDir string, pluginsFS fs.FS) error {
+func generateFleetSchema(outDir string, pluginsFS fs.FS, projectDir string) error {
 	reflector := &jsonschema.Reflector{
 		DoNotReference: true,
 	}
@@ -44,9 +42,7 @@ func generateFleetSchema(outDir string, pluginsFS fs.FS) error {
 	schema.Title = "agent-sandbox fleet configuration"
 	schema.Description = "Configuration schema for agent-sandbox fleet.yaml"
 
-	if pluginsFS != nil {
-		enrichInstallations(schema, pluginsFS)
-	}
+	enrichInstallations(schema, pluginsFS, projectDir)
 
 	data, err := json.MarshalIndent(schema, "", "  ")
 	if err != nil {
@@ -58,22 +54,37 @@ func generateFleetSchema(outDir string, pluginsFS fs.FS) error {
 
 // enrichInstallations walks the schema to find Installation items and adds
 // oneOf variants with plugin-specific options schemas.
-func enrichInstallations(schema *jsonschema.Schema, pluginsFS fs.FS) {
-	plugins := loadPluginSchemas(pluginsFS)
-	if len(plugins) == 0 {
+func enrichInstallations(schema *jsonschema.Schema, pluginsFS fs.FS, projectDir string) {
+	plugins := make(map[string]*plugin.PluginDef)
+
+	// Load builtin plugins from bundled FS
+	if pluginsFS != nil {
+		plugins = loadPluginSchemas(pluginsFS)
+	}
+
+	// Load local plugins from project's plugins/ directory
+	localPlugins := loadLocalPluginSchemas(projectDir)
+
+	if len(plugins) == 0 && len(localPlugins) == 0 {
 		return
 	}
 
 	// Build oneOf variants for each builtin plugin
-	variants := make([]*jsonschema.Schema, 0, len(plugins)+1)
+	variants := make([]*jsonschema.Schema, 0, len(plugins)+len(localPlugins)+1)
+	allNames := make([]interface{}, 0, len(plugins)+len(localPlugins))
+
 	for name, def := range plugins {
+		fullName := "@builtin/" + name
+		allNames = append(allNames, fullName)
+
 		variant := &jsonschema.Schema{
-			Type: "object",
+			Type:       "object",
 			Properties: jsonschema.NewProperties(),
+			Required:   []string{"plugin"},
 		}
 		variant.Properties.Set("plugin", &jsonschema.Schema{
 			Type:  "string",
-			Const: "@builtin/" + name,
+			Const: fullName,
 		})
 		if len(def.Options) > 0 {
 			variant.Properties.Set("options", optionSchemaToJSON(def.Options))
@@ -81,14 +92,36 @@ func enrichInstallations(schema *jsonschema.Schema, pluginsFS fs.FS) {
 		variants = append(variants, variant)
 	}
 
-	// Fallback for local plugins (./path)
+	// Build oneOf variants for each local plugin
+	for refName, def := range localPlugins {
+		allNames = append(allNames, refName)
+
+		variant := &jsonschema.Schema{
+			Type:       "object",
+			Properties: jsonschema.NewProperties(),
+			Required:   []string{"plugin"},
+		}
+		variant.Properties.Set("plugin", &jsonschema.Schema{
+			Type:  "string",
+			Const: refName,
+		})
+		if len(def.Options) > 0 {
+			variant.Properties.Set("options", optionSchemaToJSON(def.Options))
+		}
+		variants = append(variants, variant)
+	}
+
+	// Fallback for unknown plugins — uses "not enum" to exclude all known plugins,
+	// ensuring each installation matches exactly one oneOf branch.
 	fallback := &jsonschema.Schema{
-		Type: "object",
+		Type:       "object",
 		Properties: jsonschema.NewProperties(),
+		Required:   []string{"plugin"},
 	}
 	fallback.Properties.Set("plugin", &jsonschema.Schema{
 		Type:        "string",
-		Description: "Plugin reference. Use @builtin/name for bundled plugins or ./path for local plugins.",
+		Description: "Plugin reference. Use @builtin/name for bundled plugins or @fleet/path for local plugins.",
+		Not:         &jsonschema.Schema{Enum: allNames},
 	})
 	fallback.Properties.Set("options", &jsonschema.Schema{
 		Type:        "object",
@@ -115,6 +148,7 @@ func patchInstallationItems(schema *jsonschema.Schema, variants []*jsonschema.Sc
 			val.Items.Properties = nil
 			val.Items.Type = ""
 			val.Items.Required = nil
+			val.Items.AdditionalProperties = nil
 			val.Items.OneOf = variants
 			return
 		}
@@ -152,6 +186,38 @@ func loadPluginSchemas(pluginsFS fs.FS) map[string]*plugin.PluginDef {
 	return plugins
 }
 
+// loadLocalPluginSchemas reads plugin.yaml files from the project's plugins/ directory.
+// Returns a map keyed by the reference name (e.g. "@fleet/plugins/telegram-v2").
+func loadLocalPluginSchemas(projectDir string) map[string]*plugin.PluginDef {
+	plugins := make(map[string]*plugin.PluginDef)
+	if projectDir == "" {
+		return plugins
+	}
+
+	pluginsDir := filepath.Join(projectDir, "plugins")
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return plugins
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(pluginsDir, entry.Name(), "plugin.yaml"))
+		if err != nil {
+			continue
+		}
+		def, err := plugin.ParsePluginYAML(data)
+		if err != nil {
+			continue
+		}
+		refName := "@fleet/plugins/" + entry.Name()
+		plugins[refName] = def
+	}
+	return plugins
+}
+
 // optionSchemaToJSON converts a plugin's option definitions to a JSON Schema object.
 func optionSchemaToJSON(opts map[string]plugin.OptionSchema) *jsonschema.Schema {
 	schema := &jsonschema.Schema{
@@ -184,7 +250,7 @@ func optionToJSONProp(opt plugin.OptionSchema) *jsonschema.Schema {
 		prop.Type = "string"
 	case "boolean":
 		prop.Type = "boolean"
-	case "integer":
+	case "integer", "number":
 		prop.Type = "integer"
 	case "array":
 		prop.Type = "array"
@@ -193,9 +259,20 @@ func optionToJSONProp(opt plugin.OptionSchema) *jsonschema.Schema {
 		prop.Type = "object"
 		if len(opt.Properties) > 0 {
 			prop.Properties = jsonschema.NewProperties()
+			var required []string
 			for k, v := range opt.Properties {
 				prop.Properties.Set(k, optionToJSONProp(v))
+				if v.Required {
+					required = append(required, k)
+				}
 			}
+			if len(required) > 0 {
+				prop.Required = required
+			}
+		}
+		if opt.AdditionalProperties != nil {
+			ap := optionToJSONProp(*opt.AdditionalProperties)
+			prop.AdditionalProperties = ap
 		}
 	default:
 		prop.Type = "string"
