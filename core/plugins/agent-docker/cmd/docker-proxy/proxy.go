@@ -454,28 +454,34 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return r.body.Write(b)
 }
 
-// isEndpointAllowed checks if a method+path combination is in the allowlist.
+// isEndpointAllowed checks if a method+path combination is permitted.
+// Uses a denylist approach: all standard Docker API endpoints are allowed
+// except explicitly blocked ones. The real security boundary is policy
+// validation on container create (image allowlist, caps, privileged, etc.)
 func (dp *DockerProxy) isEndpointAllowed(method, path string) bool {
-	for _, rule := range allowedEndpoints {
+	// Build endpoints require explicit opt-in
+	if !dp.cfg.AllowBuild {
+		for _, rule := range buildOnlyEndpoints {
+			if rule.method == method && rule.pattern.MatchString(path) {
+				return false
+			}
+		}
+	}
+	// Compose/network endpoints require explicit opt-in
+	if !dp.cfg.AllowCompose {
+		for _, rule := range composeOnlyEndpoints {
+			if rule.method == method && rule.pattern.MatchString(path) {
+				return false
+			}
+		}
+	}
+	// Always-blocked endpoints (dangerous system operations)
+	for _, rule := range blockedEndpoints {
 		if rule.method == method && rule.pattern.MatchString(path) {
-			return true
+			return false
 		}
 	}
-	if dp.cfg.AllowCompose {
-		for _, rule := range composeEndpoints {
-			if rule.method == method && rule.pattern.MatchString(path) {
-				return true
-			}
-		}
-	}
-	if dp.cfg.AllowBuild {
-		for _, rule := range buildEndpoints {
-			if rule.method == method && rule.pattern.MatchString(path) {
-				return true
-			}
-		}
-	}
-	return false
+	return true
 }
 
 type endpointRule struct {
@@ -483,64 +489,40 @@ type endpointRule struct {
 	pattern *regexp.Regexp
 }
 
-var allowedEndpoints = []endpointRule{
-	// Docker CLI essentials
-	{"GET", regexp.MustCompile(`^/_ping$`)},
-	{"HEAD", regexp.MustCompile(`^/_ping$`)},
-	{"GET", regexp.MustCompile(`^/version$`)},
-	// Container lifecycle
-	{"POST", regexp.MustCompile(`^/containers/create$`)},
-	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/start$`)},
-	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/stop$`)},
-	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/kill$`)},
-	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/wait$`)},
-	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/resize$`)},
-	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/attach$`)},
-	{"DELETE", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+$`)},
-	{"GET", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/json$`)},
-	{"GET", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/logs$`)},
-	{"GET", regexp.MustCompile(`^/containers/json$`)},
-	// Exec
-	{"POST", regexp.MustCompile(`^/containers/[a-zA-Z0-9_.-]+/exec$`)},
-	{"POST", regexp.MustCompile(`^/exec/[a-zA-Z0-9_.-]+/start$`)},
-	{"GET", regexp.MustCompile(`^/exec/[a-zA-Z0-9_.-]+/json$`)},
-	// Images
-	{"GET", regexp.MustCompile(`^/images/json$`)},
-	{"GET", regexp.MustCompile(`^/images/[a-zA-Z0-9_./:@-]+/json$`)},
-	{"POST", regexp.MustCompile(`^/images/create$`)},
-	// Distribution (used by docker pull for manifest checks)
-	{"GET", regexp.MustCompile(`^/distribution/`)},
+// blockedEndpoints are never allowed regardless of config.
+var blockedEndpoints = []endpointRule{
+	// Swarm management (agent should never join/manage swarm)
+	{"POST", regexp.MustCompile(`^/swarm/`)},
+	{"GET", regexp.MustCompile(`^/swarm$`)},
+	{"POST", regexp.MustCompile(`^/nodes/`)},
+	{"GET", regexp.MustCompile(`^/nodes`)},
+	{"POST", regexp.MustCompile(`^/services/`)},
+	{"GET", regexp.MustCompile(`^/services`)},
+	{"POST", regexp.MustCompile(`^/tasks/`)},
+	{"GET", regexp.MustCompile(`^/tasks`)},
+	// Plugin management
+	{"POST", regexp.MustCompile(`^/plugins/`)},
+	{"GET", regexp.MustCompile(`^/plugins`)},
+	// System-level dangerous operations
+	{"POST", regexp.MustCompile(`^/containers/prune$`)},
+	{"POST", regexp.MustCompile(`^/images/prune$`)},
+	{"POST", regexp.MustCompile(`^/networks/prune$`)},
+	{"POST", regexp.MustCompile(`^/volumes/prune$`)},
+	{"POST", regexp.MustCompile(`^/system/prune$`)},
 }
 
-// buildEndpoints are only allowed when AllowBuild is true.
-var buildEndpoints = []endpointRule{
-	{"GET", regexp.MustCompile(`^/info$`)},
+// buildOnlyEndpoints are blocked unless AllowBuild is true.
+var buildOnlyEndpoints = []endpointRule{
 	{"POST", regexp.MustCompile(`^/build$`)},
-	{"GET", regexp.MustCompile(`^/images/.+/get$`)},
 	{"POST", regexp.MustCompile(`^/images/load$`)},
-	// Tagging images (needed after docker build to assign name:tag)
-	{"POST", regexp.MustCompile(`^/images/.+/tag$`)},
-	// Deleting images (cleanup after build)
-	{"DELETE", regexp.MustCompile(`^/images/.+$`)},
-	// Build history/cache inspection
-	{"GET", regexp.MustCompile(`^/images/.+/history$`)},
 }
 
-// composeEndpoints are only allowed when AllowCompose is true.
-var composeEndpoints = []endpointRule{
+// composeOnlyEndpoints are blocked unless AllowCompose is true.
+var composeOnlyEndpoints = []endpointRule{
 	{"POST", regexp.MustCompile(`^/networks/create$`)},
-	{"DELETE", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+$`)},
-	{"GET", regexp.MustCompile(`^/networks$`)},
-	{"GET", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+$`)},
-	{"POST", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+/connect$`)},
-	{"POST", regexp.MustCompile(`^/networks/[a-zA-Z0-9_.-]+/disconnect$`)},
-	// Volumes (compose needs them for named volumes between inner services)
-	{"POST", regexp.MustCompile(`^/volumes/create$`)},
-	{"GET", regexp.MustCompile(`^/volumes$`)},
-	{"GET", regexp.MustCompile(`^/volumes/[a-zA-Z0-9_.-]+$`)},
-	{"DELETE", regexp.MustCompile(`^/volumes/[a-zA-Z0-9_.-]+$`)},
-	// Events (compose monitors container lifecycle for --abort-on-container-exit)
-	{"GET", regexp.MustCompile(`^/events$`)},
+	{"DELETE", regexp.MustCompile(`^/networks/`)},
+	{"POST", regexp.MustCompile(`^/networks/.+/connect$`)},
+	{"POST", regexp.MustCompile(`^/networks/.+/disconnect$`)},
 }
 
 // extractContainerID pulls the container ID from paths like /containers/{id}/start.
