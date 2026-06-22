@@ -24,10 +24,10 @@ contributes:
         middlewares:
           - "./src/oauth.ts"
 {{- end }}
-{{- if eq (default .plugin.options.volume_strategy "per_agent") "fleet" }}
+{{- if eq (or .plugin.options.volume_strategy "per_agent") "fleet" }}
     raw_volumes:
       - "mcp-oauth-data:/data/plugins/mcp-oauth"
-{{- else if ne (default .plugin.options.volume_strategy "per_agent") "none" }}
+{{- else if ne (or .plugin.options.volume_strategy "per_agent") "none" }}
     namespaced_volumes:
       - "mcp-oauth-data:/data/plugins/mcp-oauth"
 {{- end }}
