@@ -194,6 +194,42 @@ The sandbox network (`internal`) is a Docker bridge — an isolated virtual netw
 
 Future hardening: investigate replacing `NET_ADMIN` with more granular capabilities (`CAP_NET_RAW`, `CAP_NET_BIND_SERVICE`) once iptables usage is audited.
 
+## BuildKit Sidecar Security
+
+When the `docker` plugin is enabled, a BuildKit sidecar is included for image builds. It requires elevated privileges that differ from the rest of the sandbox.
+
+### Capabilities and options
+
+```yaml
+services:
+  buildkit:
+    cap_add: [SYS_ADMIN]
+    security_opt:
+      - apparmor=unconfined
+      - seccomp=unconfined
+    tmpfs:
+      - /sys/fs/cgroup
+```
+
+### Justification
+
+`runc` (the OCI runtime inside BuildKit) requires these to:
+- **`SYS_ADMIN` + `seccomp=unconfined`** — mount cgroup v2 hierarchies and perform mount syscalls during container setup
+- **`apparmor=unconfined`** — avoid AppArmor profile conflicts when runc exec's into build containers
+- **`tmpfs: /sys/fs/cgroup`** — provide a writable cgroup namespace for runc's cgroup management
+- **Session keyring** — `SYS_ADMIN` is needed for `KEYCTL_JOIN_SESSION_KEYRING` used by runc for credential isolation
+
+Without these, `buildkit` RUN steps fail immediately when runc attempts to set up the container's namespaces.
+
+### Mitigations
+
+The elevated privileges are contained by design:
+- No Docker socket mount — the sidecar cannot spawn arbitrary containers on the host
+- No host volume mounts — filesystem access is limited to the build context and `buildkit-data` volume
+- No user-facing network — the sidecar is on the internal Docker network only, not reachable from outside
+- No credential access — real tokens live in the gateway container; the sidecar has none
+- The `buildkit-data` volume is dedicated to BuildKit state and not shared with other services
+
 ## Plugin Option Validation
 
 ### Path Traversal (mcp-oauth `token_dir`)

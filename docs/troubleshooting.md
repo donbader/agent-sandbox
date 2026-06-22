@@ -140,6 +140,45 @@ Without a channel plugin (e.g., telegram), the default CMD is `sleep infinity`. 
 1. Your runtime's `cmd` field in runtime.yaml
 2. Whether you have a channel configured but the channel manager is crashing (check logs)
 
+## BuildKit Issues
+
+### BuildKit RUN step fails with SSL certificate error
+
+Symptom: a `RUN npm install` or `RUN pip install` step fails with a TLS/certificate error like `unable to get local issuer certificate` or `CERTIFICATE_VERIFY_FAILED`.
+
+The runc-wrapper should automatically inject the gateway CA cert into every BuildKit RUN container. If it's not working:
+
+**Checks:**
+```bash
+# Verify the shared CA cert exists on the host volume
+agent-sandbox compose exec buildkit ls /shared/certs/ca.crt
+
+# Check runc-wrapper logs
+agent-sandbox compose logs buildkit | grep -i 'runc\|cert\|inject'
+```
+
+If `/shared/certs/ca.crt` is missing, the gateway hasn't written it yet — make sure the gateway container started and completed its CA initialization before the build ran. Restarting the buildkit sidecar after the gateway is healthy usually resolves this.
+
+### BuildKit build is extremely slow
+
+The first build after container startup populates the layer cache — this is expected to be slow. Subsequent builds reuse cached layers and are significantly faster.
+
+If builds are consistently slow across restarts, check that the `buildkit-data` volume exists and is being used:
+
+```bash
+# Verify the volume is mounted
+agent-sandbox compose exec buildkit df -h /var/lib/buildkit
+```
+
+If the mount shows a small tmpfs or overlayfs instead of a dedicated volume, regenerate the compose file and recreate the sidecar:
+
+```bash
+agent-sandbox generate
+agent-sandbox compose up -d --force-recreate buildkit
+```
+
+The dedicated `buildkit-data` volume avoids nested overlay2 and provides significantly better I/O for layer operations.
+
 ## Shim Issues
 
 ### "command not found" after install
