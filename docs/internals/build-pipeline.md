@@ -159,6 +159,30 @@ If any egress rule requires MITM (has `headers`, `deny_paths`, or `middlewares`)
 3. The agent container trusts this CA (injected into system trust store at boot)
 4. CA persists across gateway restarts (365-day validity, auto-regenerated if expired)
 
+## BuildKit CA Cert Injection
+
+When BuildKit executes a `RUN` step, the runc-wrapper (`--oci-worker-binary`) automatically injects the gateway CA certificate into the container before the build command runs. This ensures that HTTPS requests made during builds (e.g., `npm install`, `pip install`, `curl`) trust the gateway's MITM certificate without any Dockerfile changes.
+
+### What gets injected
+
+| Path | Contents |
+|------|----------|
+| `/etc/ssl/certs/ca-certificates.crt` | Full system CA bundle (includes gateway CA appended) |
+| `/etc/ssl/certs/gateway-ca.crt` | Gateway CA cert only |
+
+### Environment variables set
+
+| Variable | Consumed by |
+|----------|-------------|
+| `NODE_EXTRA_CA_CERTS` | Node.js (`npm`, `node`) |
+| `SSL_CERT_FILE` | curl, nix, Python's `requests` |
+
+These are injected as OCI spec environment variables, so they are visible to the build command but not baked into the resulting image layer.
+
+### Dedicated BuildKit volume
+
+BuildKit state (layer cache, snapshots) is stored on a dedicated `buildkit-data:/var/lib/buildkit` volume. This avoids nested overlay2 (overlay-on-overlay), which Docker does not support on most kernels and would otherwise cause build failures. It also keeps the build cache persistent across sidecar restarts.
+
 ## Dev Mode (`--dev`)
 
 When running from the source repo with `--dev`:

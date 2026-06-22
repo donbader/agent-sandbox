@@ -5,15 +5,19 @@ The gateway is a transparent egress proxy that runs as a separate container alon
 ## Architecture
 
 ```
-Agent outbound TCP :443 → iptables DNAT → Gateway TCP listener (:8443)
-                                               │
-                                               ├─ Read TLS ClientHello
-                                               ├─ Extract SNI (server name)
-                                               │
-                                               ├─ SNI matches MITM domain?
-                                               │    YES → mitm.Handler (terminate TLS, rewrite HTTP, forward)
-                                               │    NO  → passthrough (pipe bytes directly to upstream)
-                                               │
+Agent outbound TCP :443 → iptables DNAT ─┐
+Agent outbound TCP :80  → iptables DNAT ─┤─→ Gateway TCP listener (:8443)
+                                           │
+                                           ├─ Peek first byte
+                                           │
+                                           ├─ 0x16 (TLS) → Read ClientHello → Extract SNI
+                                           │                    │
+                                           │              SNI matches MITM domain?
+                                           │                   YES → mitm.Handler (terminate TLS, rewrite HTTP, forward)
+                                           │                   NO  → passthrough (pipe bytes directly to upstream)
+                                           │
+                                           └─ other → httpHandler (registered handler, middleware support)
+
 Gateway health endpoint (:8080/health) ← Agent entrypoint polls before setting up iptables
 ```
 
@@ -204,13 +208,14 @@ The built-in `auth-headers.ts` plugin is bundled with the gateway binary and sim
 ## Connection Flow
 
 1. Agent makes outbound TCP connection (e.g., `curl https://github.com`)
-2. iptables DNAT rule redirects port 443 → gateway:8443
+2. iptables DNAT rules redirect port 443 and port 80 → gateway:8443
 3. Gateway's TCP listener accepts the connection
-4. Reads first 4096 bytes — expects a TLS ClientHello
-5. Calls `extractSNI()` to parse the server name from the ClientHello
+4. Peeks the first byte to detect protocol: `0x16` = TLS ClientHello, anything else = plain HTTP
+5. **TLS path:** reads the full ClientHello, calls `extractSNI()` to parse the server name
 6. Iterates registered `RequestHandler`s, calling `Matches(serverName)`
 7. **Match found** → delegates to handler (currently only `mitm.Handler`)
 8. **No match** → passthrough: dials `serverName:443`, replays the ClientHello bytes, then pipes bidirectionally (`io.Copy` both directions with half-close)
+9. **HTTP path:** connection is handed off to the registered `httpHandler`, which runs the request through the middleware chain
 
 The passthrough path preserves end-to-end TLS — the gateway never sees plaintext for non-MITM'd hosts.
 
