@@ -21,4 +21,5 @@ mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || echo "[buildkit-entrypoint] 
 
 exec buildkitd \
   --addr tcp://0.0.0.0:8372 \
-  --root /var/lib/buildkit
+  --root /var/lib/buildkit \
+  --oci-worker-binary /usr/local/bin/runc-wrapper
