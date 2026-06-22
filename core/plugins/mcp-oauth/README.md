@@ -93,6 +93,7 @@ curl -s http://<gateway-host>:8080/plugins/mcp-oauth/disconnect/notion
 installations:
   - plugin: "@builtin/mcp-oauth"
     options:
+      volume_strategy: fleet  # per_agent | fleet | none
       providers:
         # Dynamic mode: just provide mcp_url — credentials auto-discovered
         notion:
@@ -113,7 +114,16 @@ installations:
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | `providers` | object | yes | — | Map of provider name to OAuth config |
+| `volume_strategy` | string | no | `per_agent` | Token storage volume strategy (see below) |
 | `token_dir` | string | no | `/data/oauth-tokens` | Directory for OAuth token files |
+
+### Volume Strategy
+
+| Mode | Behavior |
+|------|----------|
+| `per_agent` | Each agent gets its own token volume. Login once per agent. Default. |
+| `fleet` | All agents share one token volume. Login once, entire fleet is authenticated. |
+| `none` | No persistent volume. Tokens live in memory only, lost on container restart. |
 
 ### Provider Config
 
