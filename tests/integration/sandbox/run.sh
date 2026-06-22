@@ -124,22 +124,24 @@ fi
 echo ""
 echo "--- BuildKit build verification ---"
 
-# Use buildctl (inside the buildkit sidecar) to verify runc + cgroup works.
-# This avoids needing docker CLI in the agent container.
-echo "  Running buildctl build inside sidecar..."
+# Set up the buildx builder (pre_entrypoint doesn't run with sleep infinity entrypoint).
+"$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
+  docker buildx create --name buildkit --driver remote --driver-opt "url=tcp://${BUILDKIT_SERVICE}:8372" --use 2>/dev/null || true
+
+# Build a simple Dockerfile via docker buildx (tests full flow: docker CLI → buildkit → runc).
 BUILD_RESULT=""
 for attempt in 1 2 3 4 5; do
-  BUILD_RESULT=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$BUILDKIT_SERVICE" \
-    sh -c 'mkdir -p /tmp/build-test && printf "FROM alpine:3.20\nRUN echo buildkit-ok\n" > /tmp/build-test/Dockerfile && buildctl --addr tcp://127.0.0.1:8372 build --frontend=dockerfile.v0 --local context=/tmp/build-test --local dockerfile=/tmp/build-test --no-cache' 2>&1 || true)
-  if echo "$BUILD_RESULT" | grep -q "exporting to image\|sending tarball\|DONE"; then
+  BUILD_RESULT=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
+    sh -c 'printf "FROM alpine:3.20\nRUN echo buildkit-ok\n" | docker buildx build --no-cache -' 2>&1 || true)
+  if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
     break
   fi
   echo "  attempt $attempt: not ready, retrying in 3s..."
   echo "  $(echo "$BUILD_RESULT" | tail -1)"
   sleep 3
 done
-if echo "$BUILD_RESULT" | grep -q "exporting to image\|sending tarball\|DONE"; then
-  echo -e "  \033[32m✓\033[0m BuildKit: can build Dockerfiles (runc + cgroup working)"
+if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
+  echo -e "  \033[32m✓\033[0m BuildKit: docker buildx build works (full flow verified)"
 else
   echo -e "  \033[31m✗\033[0m BuildKit: build failed"
   echo "    Full output:"

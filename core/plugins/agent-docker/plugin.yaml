@@ -51,6 +51,8 @@ options:
 
 contributes:
   runtime:
+    extra_builds:
+      - "RUN curl -fsSL https://get.docker.com | sh"
     environment:
       DOCKER_HOST: "tcp://{{ .agent.name }}-agent-docker-proxy:2375"
     pre_entrypoint:
