@@ -21,6 +21,7 @@ func generateSchema(outDir string, pluginsFS fs.FS, projectDir string) error {
 	schema.Description = "Configuration schema for agent-sandbox agent.yaml"
 
 	enrichInstallations(schema, pluginsFS, projectDir)
+	enrichRuntimeImage(schema, projectDir)
 
 	data, err := json.MarshalIndent(schema, "", "  ")
 	if err != nil {
@@ -216,6 +217,31 @@ func loadLocalPluginSchemas(projectDir string) map[string]*plugin.PluginDef {
 		plugins[refName] = def
 	}
 	return plugins
+}
+
+// enrichRuntimeImage adds examples for the runtime.image field based on available presets.
+func enrichRuntimeImage(schema *jsonschema.Schema, projectDir string) {
+	// Discover presets from the core directory (look relative to project's .build)
+	presetNames := []string{"@builtin/pi", "@builtin/claude-code", "@builtin/codex"}
+
+	if schema.Properties == nil {
+		return
+	}
+	runtimePair := schema.Properties.GetPair("runtime")
+	if runtimePair == nil || runtimePair.Value.Properties == nil {
+		return
+	}
+	imagePair := runtimePair.Value.Properties.GetPair("image")
+	if imagePair == nil {
+		return
+	}
+
+	examples := make([]interface{}, len(presetNames))
+	for i, name := range presetNames {
+		examples[i] = name
+	}
+	imagePair.Value.Examples = examples
+	imagePair.Value.Description = "Base image. Use a builtin preset (@builtin/pi, @builtin/claude-code, @builtin/codex) or any Docker image (e.g. node:24-slim)."
 }
 
 // optionSchemaToJSON converts a plugin's option definitions to a JSON Schema object.
