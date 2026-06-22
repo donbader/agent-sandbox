@@ -138,6 +138,13 @@ func sanitizeStageName(name string) string {
 
 
 func validateOptions(schema map[string]OptionSchema, opts map[string]any) error {
+	// Check for unknown options not defined in the plugin schema
+	for name := range opts {
+		if _, ok := schema[name]; !ok {
+			return fmt.Errorf("unknown option %q (not defined in plugin.yaml)", name)
+		}
+	}
+
 	for name, s := range schema {
 		if s.Required {
 			if _, ok := opts[name]; !ok {

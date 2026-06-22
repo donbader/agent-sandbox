@@ -201,7 +201,7 @@ func loadLocalPluginSchemas(projectDir string) map[string]*plugin.PluginDef {
 		".cache":       true,
 	}
 
-	filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
