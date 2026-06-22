@@ -39,23 +39,22 @@ func (m *Mutator) MutateCreate(body map[string]any, containerName string) {
 	hc["RestartPolicy"] = map[string]any{"Name": "no"}
 
 	if m.cfg.AllowCompose {
-		// In compose mode: keep the requested networks as-is.
-		// Don't inject the outer sandbox network (breaks DooD/nested scenarios).
-		// Instead, inject transparent proxy init script that routes through
-		// whatever gateway is discoverable on the container's network.
+		// In compose mode: keep the requested networks AND add the sandbox network.
+		// Containers need the sandbox network to reach the gateway (DNS, MITM proxy).
 		existingEndpoints := map[string]any{}
 		if nc, ok := body["NetworkingConfig"].(map[string]any); ok {
 			if ec, ok := nc["EndpointsConfig"].(map[string]any); ok {
 				existingEndpoints = ec
 			}
 		}
-		// Only inject sandbox network if container has NO networks specified
-		// (standalone docker run, not compose)
-		if len(existingEndpoints) == 0 {
-			existingEndpoints[m.cfg.NetworkName] = map[string]any{}
-			body["NetworkingConfig"] = map[string]any{
-				"EndpointsConfig": existingEndpoints,
-			}
+		// Always add sandbox network for gateway reachability.
+		existingEndpoints[m.cfg.NetworkName] = map[string]any{}
+		body["NetworkingConfig"] = map[string]any{
+			"EndpointsConfig": existingEndpoints,
+		}
+		// Set NetworkMode to sandbox only for standalone docker run (no compose networks).
+		// For compose, Docker sets NetworkMode from the compose file.
+		if len(existingEndpoints) == 1 {
 			hc["NetworkMode"] = m.cfg.NetworkName
 		}
 
