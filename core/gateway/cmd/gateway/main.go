@@ -329,29 +329,16 @@ fi
 	return nil
 }
 
-// setupIptables configures PREROUTING to redirect port 443/80 traffic to the
-// proxy listener. With DNS interception, traffic arrives addressed to the
-// gateway's own IP (no forwarding needed), but PREROUTING still redirects
-// the port from 443 → 8443 where the proxy listens.
+// setupIptables configures PREROUTING to redirect HTTPS traffic to the proxy.
+// Only port 443 is intercepted (MITM proxy on 8443). HTTP (port 80) is
+// forwarded normally via IP forwarding — no interception needed.
 func setupIptables() error {
-	// HTTPS: redirect port 443 → proxy port 8443.
 	cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
 		"-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-port", "8443")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("iptables PREROUTING 443→8443: %w: %s", err, out)
 	}
 	slog.Info("iptables: PREROUTING tcp/443 → 8443")
-
-	// HTTP: redirect port 80 → HTTP handler on 8080.
-	cmd = exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
-		"-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", "8080")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		// HTTP redirect is best-effort; not all gateways handle HTTP proxy.
-		slog.Warn("iptables PREROUTING 80→8080 failed (non-fatal)", "error", fmt.Sprintf("%s: %s", err, out))
-	} else {
-		slog.Info("iptables: PREROUTING tcp/80 → 8080")
-	}
-
 	return nil
 }
 
