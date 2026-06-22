@@ -102,11 +102,10 @@ func main() {
 	// so traffic arrives directly at the gateway (avoids reliance on iptables).
 	dnsServer := dns.NewServer(cfg.DNSListen)
 	if sandboxIP, err := getSandboxIP(); err == nil {
-		// Set the local network so DNS knows which subnet is directly reachable.
-		// IPs outside this subnet (even private ones) get intercepted.
-		if localNet, err := getSandboxNetwork(); err == nil {
-			dnsServer.SetLocalNetwork(localNet)
-		}
+		// Don't use SetLocalNetwork — getSandboxNetwork() can return the wrong
+		// interface on multi-homed containers. Fall back to isPrivateIP which
+		// passes through ALL private IPs (Docker container names always resolve
+		// to private IPs, so they'll never be intercepted).
 
 		// Collect all domains from egress rules + MITM that aren't wildcards
 		var interceptDomains []string
@@ -294,31 +293,6 @@ func getSandboxIP() (string, error) {
 
 // getSandboxNetwork returns the IPNet (IP + subnet mask) of the gateway's
 // primary network interface. Used to determine which IPs are locally reachable.
-func getSandboxNetwork() (*net.IPNet, error) {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, fmt.Errorf("list interfaces: %w", err)
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			if ipNet.IP.To4() != nil {
-				return ipNet, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no non-loopback IPv4 network found")
-}
 
 // writeGatewayRouteScript writes the routing script to the shared volume.
 // Sandbox containers source this script to configure their default route and CA trust.
