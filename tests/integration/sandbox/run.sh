@@ -122,4 +122,33 @@ else
 fi
 
 echo ""
+echo "--- BuildKit build verification ---"
+
+# Use buildctl (inside the buildkit sidecar) to verify runc + cgroup works.
+# This avoids needing docker CLI in the agent container.
+echo "  Running buildctl build inside sidecar..."
+BUILD_RESULT=""
+for attempt in 1 2 3 4 5; do
+  BUILD_RESULT=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$BUILDKIT_SERVICE" \
+    sh -c 'mkdir -p /tmp/build-test && printf "FROM alpine:3.20\nRUN echo buildkit-ok\n" > /tmp/build-test/Dockerfile && buildctl --addr tcp://127.0.0.1:8372 build --frontend=dockerfile.v0 --local context=/tmp/build-test --local dockerfile=/tmp/build-test --no-cache' 2>&1 || true)
+  if echo "$BUILD_RESULT" | grep -q "exporting to image\|sending tarball\|DONE"; then
+    break
+  fi
+  echo "  attempt $attempt: not ready, retrying in 3s..."
+  echo "  $(echo "$BUILD_RESULT" | tail -1)"
+  sleep 3
+done
+if echo "$BUILD_RESULT" | grep -q "exporting to image\|sending tarball\|DONE"; then
+  echo -e "  \033[32m✓\033[0m BuildKit: can build Dockerfiles (runc + cgroup working)"
+else
+  echo -e "  \033[31m✗\033[0m BuildKit: build failed"
+  echo "    Full output:"
+  echo "$BUILD_RESULT" | sed 's/^/    /'
+  echo ""
+  echo "--- BuildKit sidecar logs ---"
+  "$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" logs "$BUILDKIT_SERVICE" 2>&1 | tail -15
+  exit 1
+fi
+
+echo ""
 echo "=== All checks passed ==="
