@@ -132,7 +132,7 @@ echo "--- BuildKit build verification ---"
 BUILD_RESULT=""
 for attempt in 1 2 3 4 5; do
   BUILD_RESULT=$("$CLI" -C "$SCRIPT_DIR" compose -f "$SCRIPT_DIR/compose-override.yml" exec "$AGENT_SERVICE" \
-    sh -c 'printf "FROM alpine:3.20\nRUN echo buildkit-ok\n" | docker buildx build --no-cache -' 2>&1 || true)
+    sh -c 'printf "FROM alpine:3.20\nRUN echo buildkit-ok\n" | docker buildx build --builder buildkit --no-cache -' 2>&1 || true)
   if echo "$BUILD_RESULT" | grep -q "buildkit-ok\|exporting to image"; then
     break
   fi
