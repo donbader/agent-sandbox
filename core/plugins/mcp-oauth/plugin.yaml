@@ -10,6 +10,12 @@ options:
     required: false
     description: "Public callback URL (derived from request if not set)"
 
+  volume_strategy:
+    type: string
+    required: false
+    default: "per_agent"
+    description: "Token storage strategy: per_agent (each agent has its own tokens), fleet (all agents share tokens), none (ephemeral, tokens lost on restart)"
+
 contributes:
   gateway:
     egress:
@@ -18,8 +24,13 @@ contributes:
         middlewares:
           - "./src/oauth.ts"
 {{- end }}
+{{- if eq (default .plugin.options.volume_strategy "per_agent") "fleet" }}
+    raw_volumes:
+      - "mcp-oauth-data:/data/plugins/mcp-oauth"
+{{- else if ne (default .plugin.options.volume_strategy "per_agent") "none" }}
     namespaced_volumes:
-      - "oauth-tokens:/data/plugins/mcp-oauth"
+      - "mcp-oauth-data:/data/plugins/mcp-oauth"
+{{- end }}
     routes:
       - path: "/callback"
         handler: "./src/callback.ts"

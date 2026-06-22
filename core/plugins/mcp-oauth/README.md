@@ -7,7 +7,7 @@ Provides full OAuth lifecycle for MCP (Model Context Protocol) providers: automa
 1. **Middleware** (`src/oauth.ts`) intercepts requests to configured domains. If a valid token exists, injects `Authorization: Bearer <token>`. If no token exists, returns 401 with an `authorize_url` for the user to click.
 2. **Login handler** (`src/login.ts`) at `/plugins/mcp-oauth/login/{provider}` performs Dynamic Client Registration and PKCE challenge generation, returning an authorize URL.
 3. **Callback handler** (`src/callback.ts`) at `/plugins/mcp-oauth/callback` receives the OAuth authorization code, exchanges it for tokens (with PKCE via `src/pkce.ts`), and writes the token file to the shared volume.
-4. **Shared volume** (`oauth-tokens`) is mounted into both gateway and agent containers so the MCP client can read tokens written by the gateway.
+4. **Shared volume** (`mcp-oauth-data`) is mounted into both gateway and agent containers so the MCP client can read tokens written by the gateway.
 
 ## Login Flow (Recommended)
 
@@ -93,6 +93,7 @@ curl -s http://<gateway-host>:8080/plugins/mcp-oauth/disconnect/notion
 installations:
   - plugin: "@builtin/mcp-oauth"
     options:
+      volume_strategy: fleet  # per_agent | fleet | none
       providers:
         # Dynamic mode: just provide mcp_url — credentials auto-discovered
         notion:
@@ -113,7 +114,16 @@ installations:
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | `providers` | object | yes | — | Map of provider name to OAuth config |
+| `volume_strategy` | string | no | `per_agent` | Token storage volume strategy (see below) |
 | `token_dir` | string | no | `/data/oauth-tokens` | Directory for OAuth token files |
+
+### Volume Strategy
+
+| Mode | Behavior |
+|------|----------|
+| `per_agent` | Each agent gets its own token volume. Login once per agent. Default. |
+| `fleet` | All agents share one token volume. Login once, entire fleet is authenticated. |
+| `none` | No persistent volume. Tokens live in memory only, lost on container restart. |
 
 ### Provider Config
 
@@ -147,7 +157,7 @@ Mode is auto-detected: if `client_id` is absent, dynamic mode is used.
   - `src/status.ts` — `/plugins/mcp-oauth/status/{provider}` — Connection status check
   - `src/disconnect.ts` — `/plugins/mcp-oauth/disconnect/{provider}` — Token revocation and removal
   - `src/pkce.ts` — PKCE challenge/verifier utilities
-- **Gateway volume:** Shared `oauth-tokens` volume at `token_dir`
+- **Gateway volume:** Shared `mcp-oauth-data` volume at `token_dir`
 
 ## OAuth Flow
 
