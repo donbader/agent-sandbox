@@ -13,6 +13,7 @@ import {
 
 interface ProviderConfig {
   mcp_url?: string;
+  skip_resource?: boolean;
   authorize_endpoint?: string;
   token_endpoint?: string;
   client_id?: string;
@@ -267,7 +268,7 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
     "code_challenge=" + encodeURIComponent(codeChallenge),
     "code_challenge_method=S256",
   ];
-  if (providerCfg.mcp_url) {
+  if (providerCfg.mcp_url && !providerCfg.skip_resource) {
     params.push("resource=" + encodeURIComponent(providerCfg.mcp_url));
   }
   if (providerCfg.scopes) {
