@@ -4,7 +4,7 @@ Provides full OAuth lifecycle for MCP (Model Context Protocol) providers: automa
 
 ## How It Works
 
-1. **Middleware** (`src/oauth.ts`) intercepts requests to configured domains. If a valid token exists, injects `Authorization: Bearer <token>`. If no token exists, returns 401 with an `authorize_url` for the user to click.
+1. **Middleware** (`src/oauth.ts`) intercepts requests to configured domains. If a valid token exists, injects `Authorization: Bearer <token>`. If no token exists, passes the request through unauthenticated (the upstream server will respond normally for public endpoints, or return its own 401 for protected ones).
 2. **Login handler** (`src/login.ts`) at `/plugins/mcp-oauth/login/{provider}` performs Dynamic Client Registration and PKCE challenge generation, returning an authorize URL.
 3. **Callback handler** (`src/callback.ts`) at `/plugins/mcp-oauth/callback` receives the OAuth authorization code, exchanges it for tokens (with PKCE via `src/pkce.ts`), and writes the token file to the shared volume.
 4. **Shared volume** (`mcp-oauth-data`) is mounted into both gateway and agent containers so the MCP client can read tokens written by the gateway.
@@ -150,7 +150,7 @@ Mode is auto-detected: if `client_id` is absent, dynamic mode is used.
 
 ## What It Contributes
 
-- **Gateway middleware:** `src/oauth.ts` — Token injection + 401 with authorize URL when unauthenticated
+- **Gateway middleware:** `src/oauth.ts` — Token injection when authenticated, passthrough when not
 - **Gateway routes:**
   - `src/login.ts` — `/plugins/mcp-oauth/login/{provider}` — PKCE + Dynamic Client Registration
   - `src/callback.ts` — `/plugins/mcp-oauth/callback` — OAuth code exchange handler

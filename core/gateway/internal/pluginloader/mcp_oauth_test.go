@@ -194,15 +194,15 @@ func TestMcpOAuth_OAuthMiddleware(t *testing.T) {
 	all := gateway.All()
 	require.Len(t, all, 1)
 
-	// Request to mcp.notion.com — no token file exists, so it will abort with 401.
-	// The important thing is it doesn't crash with a TypeError on Object.entries.
+	// Request to mcp.notion.com — no token file exists, so it should pass through
+	// without auth (let upstream handle it). No abort, no crash.
 	req, _ := http.NewRequest("GET", "https://mcp.notion.com/mcp", nil)
 	req.Host = "mcp.notion.com"
 	ctx := &gateway.MiddlewareContext{Request: req, Env: os.Getenv}
 	err = all[0].Func(ctx)
 
 	require.NoError(t, err, "middleware should not return a Go error")
-	// Should abort with 401 (no token), not crash
-	assert.Equal(t, 401, ctx.AbortStatus)
-	assert.Contains(t, ctx.AbortBody, "oauth_required")
+	// Should pass through without aborting (no token = let upstream respond)
+	assert.Equal(t, 0, ctx.AbortStatus, "should not abort when no token is stored")
+	assert.Empty(t, ctx.AbortBody)
 }
