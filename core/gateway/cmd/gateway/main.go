@@ -102,10 +102,17 @@ func main() {
 	// so traffic arrives directly at the gateway (avoids reliance on iptables).
 	dnsServer := dns.NewServer(cfg.DNSListen)
 	if sandboxIP, err := getSandboxIP(); err == nil {
-		// Don't use SetLocalNetwork — getSandboxNetwork() can return the wrong
-		// interface on multi-homed containers. Fall back to isPrivateIP which
-		// passes through ALL private IPs (Docker container names always resolve
-		// to private IPs, so they'll never be intercepted).
+		// Use GATEWAY_SANDBOX_CIDR to configure local-network filtering.
+		// Only IPs within the sandbox subnet pass through; all others
+		// (including private IPs on different subnets like 10.0.2.x)
+		// are intercepted and replaced with the gateway's sandbox IP.
+		if cidr := os.Getenv("GATEWAY_SANDBOX_CIDR"); cidr != "" {
+			if _, network, err := net.ParseCIDR(cidr); err == nil {
+				dnsServer.SetLocalNetwork(network)
+			} else {
+				slog.Warn("invalid GATEWAY_SANDBOX_CIDR, falling back to isPrivateIP", "cidr", cidr, "error", err)
+			}
+		}
 
 		// Collect all domains from egress rules + MITM that aren't wildcards
 		var interceptDomains []string
