@@ -201,7 +201,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: agent-sandbox-core-linux
-          path: .
+          path: core
 
       - name: Download gateway binary
         uses: actions/download-artifact@v4
@@ -211,18 +211,18 @@ jobs:
 
       - name: Make binaries executable
         run: |
-          chmod +x ./agent-sandbox-core
+          chmod +x ./core/agent-sandbox-core
           chmod +x ./core/gateway/bin/gateway-linux-amd64
 
       - name: Generate build artifacts
-        run: ./agent-sandbox-core generate -C examples/${{ matrix.example }}
+        run: ./core/agent-sandbox-core generate -C examples/${{ matrix.example }}
 
       - name: Start containers (smoke test)
         env:
           STX_LLM_GATEWAY_API_KEY: test-stub
           TELEGRAM_BOT_TOKEN: test-stub
         run: |
-          ./agent-sandbox-core -C examples/${{ matrix.example }} compose up -d --build || true
+          ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose up -d --build || true
           # Wait for gateway(s) to be healthy — proves mounts, config, and binary work.
           for i in $(seq 1 30); do
             if docker ps --filter "name=gateway" --filter "health=healthy" --format '{{.Names}}' | grep -q gateway; then
@@ -232,16 +232,16 @@ jobs:
             sleep 2
           done
           echo "ERROR: No healthy gateway after 60s"
-          ./agent-sandbox-core -C examples/${{ matrix.example }} compose ps
-          ./agent-sandbox-core -C examples/${{ matrix.example }} compose logs
+          ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose ps
+          ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose logs
           exit 1
 
       - name: Audit security contract
-        run: ./agent-sandbox-core -C examples/${{ matrix.example }} audit || true
+        run: ./core/agent-sandbox-core -C examples/${{ matrix.example }} audit || true
 
       - name: Teardown
         if: always()
-        run: ./agent-sandbox-core -C examples/${{ matrix.example }} compose down -v
+        run: ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose down -v
 
   integration:
     name: Integration
@@ -259,7 +259,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: agent-sandbox-core-linux
-          path: .
+          path: core
 
       - name: Download gateway binary
         uses: actions/download-artifact@v4
@@ -269,10 +269,10 @@ jobs:
 
       - name: Make binaries executable
         run: |
-          chmod +x ./agent-sandbox-core
+          chmod +x ./core/agent-sandbox-core
           chmod +x ./core/gateway/bin/gateway-linux-amd64
 
       - name: Run integration tests
         env:
-          CLI_PATH: ${{ github.workspace }}/agent-sandbox-core
+          CLI_PATH: ${{ github.workspace }}/core/agent-sandbox-core
         run: tests/integration/sandbox/run.sh
