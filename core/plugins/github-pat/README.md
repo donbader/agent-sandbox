@@ -28,6 +28,21 @@ GITHUB_PAT=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `token` | string | yes | GitHub PAT. Use `${ENV_VAR}` to reference `.env` |
+| `deny_paths` | array | no | URL path patterns to block. Format: `METHOD /path/glob` or `/path/glob` |
+
+## Blocking Specific Paths
+
+Use `deny_paths` to block specific GitHub API operations without writing custom middleware. Each entry is a pattern in the format `METHOD /path/glob` (method-specific) or `/path/glob` (any method).
+
+Example — prevent the agent from merging pull requests:
+
+```yaml
+- plugin: "@builtin/github-pat"
+  options:
+    token: ${GITHUB_PAT}
+    deny_paths:
+      - "PUT /repos/*/pulls/*/merge"
+```
 
 ## What It Contributes
 

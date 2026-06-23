@@ -4,6 +4,10 @@ options:
     type: string
     required: true
     description: "GitHub PAT env var reference (e.g. ${GITHUB_PAT})"
+  deny_paths:
+    type: array
+    required: false
+    description: "URL path patterns to block. Format: METHOD /path/glob or /path/glob"
 
 contributes:
   runtime:
@@ -16,3 +20,9 @@ contributes:
       - hosts: ["api.github.com", "github.com"]
         middlewares:
           - "./src/github-auth.ts"
+        {{- if .plugin.options.deny_paths }}
+        deny_paths:
+          {{- range .plugin.options.deny_paths }}
+          - "{{ . }}"
+          {{- end }}
+        {{- end }}
