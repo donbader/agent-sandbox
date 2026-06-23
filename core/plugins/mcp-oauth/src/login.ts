@@ -13,7 +13,6 @@ import {
 
 interface ProviderConfig {
   mcp_url?: string;
-  skip_resource?: boolean;
   authorize_endpoint?: string;
   token_endpoint?: string;
   client_id?: string;
@@ -175,6 +174,32 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
   let clientId = providerCfg.client_id || "";
   let clientSecret = providerCfg.client_secret || "";
 
+  // If we have client_id but missing endpoints, discover them from .well-known metadata
+  if (clientId && (!authorizeEndpoint || !tokenEndpoint) && providerCfg.mcp_url) {
+    const originMatch = providerCfg.mcp_url.match(/^(https?:\/\/[^/]+)/);
+    if (originMatch) {
+      const origin = originMatch[1];
+      try {
+        const metaResp = gw.http.fetch(origin + "/.well-known/oauth-authorization-server", {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+        });
+        if (metaResp.status === 200) {
+          const meta = JSON.parse(metaResp.body);
+          if (!authorizeEndpoint && meta.authorization_endpoint) {
+            authorizeEndpoint = meta.authorization_endpoint;
+          }
+          if (!tokenEndpoint && meta.token_endpoint) {
+            tokenEndpoint = meta.token_endpoint;
+          }
+          gw.log.info("oauth-login: discovered endpoints for " + providerName + " (authorize=" + authorizeEndpoint + ", token=" + tokenEndpoint + ")");
+        }
+      } catch (e: any) {
+        gw.log.error("oauth-login: metadata discovery failed for " + providerName + ": " + e.message);
+      }
+    }
+  }
+
   if (!clientId) {
     // Try cached registration
     const cached = loadCachedRegistration(providerName);
@@ -242,11 +267,32 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
     "code_challenge=" + encodeURIComponent(codeChallenge),
     "code_challenge_method=S256",
   ];
-  if (providerCfg.mcp_url && !providerCfg.skip_resource) {
+  if (providerCfg.mcp_url) {
     params.push("resource=" + encodeURIComponent(providerCfg.mcp_url));
   }
   if (providerCfg.scopes) {
     params.push("scope=" + encodeURIComponent(providerCfg.scopes));
+  } else if (providerCfg.mcp_url) {
+    // Discover scopes from .well-known/oauth-protected-resource (RFC 9728)
+    const originMatch = providerCfg.mcp_url.match(/^(https?:\/\/[^/]+)/);
+    if (originMatch) {
+      try {
+        const prResp = gw.http.fetch(originMatch[1] + "/.well-known/oauth-protected-resource", {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+        });
+        if (prResp.status === 200) {
+          const prMeta = JSON.parse(prResp.body);
+          if (prMeta.scopes_supported && prMeta.scopes_supported.length > 0) {
+            const discoveredScopes = prMeta.scopes_supported.join(" ");
+            params.push("scope=" + encodeURIComponent(discoveredScopes));
+            gw.log.info("oauth-login: discovered scopes for " + providerName + " from protected-resource metadata (" + prMeta.scopes_supported.length + " scopes)");
+          }
+        }
+      } catch (e: any) {
+        gw.log.debug("oauth-login: could not fetch protected-resource metadata for " + providerName + ": " + e.message);
+      }
+    }
   }
 
   const authorizeURL = authorizeEndpoint + "?" + params.join("&");
