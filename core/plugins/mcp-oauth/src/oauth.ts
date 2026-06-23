@@ -153,40 +153,10 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
   // Try to read stored token
   const stored = readToken(matchedName, "");
   if (!stored) {
-    gw.log.info("oauth: no token for " + matchedName + ", returning oauth_required");
-    // No token — check if we have registration info to build authorize URL
-    let authorizeEndpoint = matchedCfg.authorize_endpoint || "";
-    let clientId = matchedCfg.client_id || "";
-    const scopes = matchedCfg.scopes || "";
-
-    if (!authorizeEndpoint || !clientId) {
-      const reg = loadRegistration(matchedName);
-      if (reg) {
-        authorizeEndpoint = reg.authorize_endpoint;
-        clientId = reg.client_id;
-      }
-    }
-
-    if (authorizeEndpoint && clientId) {
-      const authorizeURL = buildAuthorizeURL(providersJSON, matchedName, {
-        authorize_endpoint: authorizeEndpoint,
-        client_id: clientId,
-        scopes: scopes,
-        mcp_url: matchedCfg.mcp_url,
-      }, callbackURL);
-      ctx.abort(401, JSON.stringify({
-        error: "oauth_required",
-        provider: matchedName,
-        authorize_url: authorizeURL,
-        hint: "For PKCE login, use: curl http://<gateway>/plugins/mcp-oauth/login/" + matchedName,
-      }));
-    } else {
-      ctx.abort(401, JSON.stringify({
-        error: "oauth_required",
-        provider: matchedName,
-        hint: "No token found. Use: curl http://<gateway>/plugins/mcp-oauth/login/" + matchedName,
-      }));
-    }
+    gw.log.info("oauth: no token for " + matchedName + ", passing through without auth");
+    // No token — let the request pass through unauthenticated.
+    // The upstream server will return its own response (public endpoints work,
+    // protected endpoints return a proper 401 with OAuth metadata).
     return;
   }
 
@@ -208,13 +178,8 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
       gw.log.info("oauth: injected refreshed token for " + matchedName);
       return;
     }
-    // Refresh failed — return 401
-    gw.log.error("oauth: token expired and refresh failed for " + matchedName);
-    ctx.abort(401, JSON.stringify({
-      error: "oauth_token_expired",
-      provider: matchedName,
-      hint: "Token refresh failed. Re-authenticate: curl http://<gateway>/plugins/mcp-oauth/login/" + matchedName,
-    }));
+    // Refresh failed — pass through without auth, let upstream return 401
+    gw.log.error("oauth: token expired and refresh failed for " + matchedName + ", passing through without auth");
     return;
   }
 
