@@ -272,6 +272,27 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
   }
   if (providerCfg.scopes) {
     params.push("scope=" + encodeURIComponent(providerCfg.scopes));
+  } else if (providerCfg.mcp_url) {
+    // Discover scopes from .well-known/oauth-protected-resource (RFC 9728)
+    const originMatch = providerCfg.mcp_url.match(/^(https?:\/\/[^/]+)/);
+    if (originMatch) {
+      try {
+        const prResp = gw.http.fetch(originMatch[1] + "/.well-known/oauth-protected-resource", {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+        });
+        if (prResp.status === 200) {
+          const prMeta = JSON.parse(prResp.body);
+          if (prMeta.scopes_supported && prMeta.scopes_supported.length > 0) {
+            const discoveredScopes = prMeta.scopes_supported.join(" ");
+            params.push("scope=" + encodeURIComponent(discoveredScopes));
+            gw.log.info("oauth-login: discovered scopes for " + providerName + " from protected-resource metadata (" + prMeta.scopes_supported.length + " scopes)");
+          }
+        }
+      } catch (e: any) {
+        gw.log.debug("oauth-login: could not fetch protected-resource metadata for " + providerName + ": " + e.message);
+      }
+    }
   }
 
   const authorizeURL = authorizeEndpoint + "?" + params.join("&");
