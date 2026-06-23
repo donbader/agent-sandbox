@@ -4,6 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Ensure teardown always runs — even if setup fails.
+trap '"$SCRIPT_DIR/teardown.sh"' EXIT
+
 echo "=== Sandbox Integration Tests ==="
 echo ""
 
@@ -20,9 +23,6 @@ for test_script in "$SCRIPT_DIR"/test_*.sh; do
 done
 
 echo ""
-
-# Teardown (always runs)
-"$SCRIPT_DIR/teardown.sh"
 
 if [ "$FAILED" -ne 0 ]; then
   echo "=== SOME TESTS FAILED ==="
