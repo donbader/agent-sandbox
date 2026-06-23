@@ -17,6 +17,15 @@ options:
         client_secret:
           type: string
           description: "OAuth client secret (optional — uses dynamic registration if omitted)"
+        authorize_endpoint:
+          type: string
+          description: "OAuth authorize URL (optional — discovered from .well-known if omitted)"
+        token_endpoint:
+          type: string
+          description: "OAuth token URL (optional — discovered from .well-known if omitted)"
+        scopes:
+          type: string
+          description: "Space-separated OAuth scopes (optional — uses provider defaults if omitted)"
 
   callback_url:
     type: string

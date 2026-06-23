@@ -129,6 +129,28 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
       }
     }
 
+    // Discover token_endpoint from .well-known metadata if still missing
+    if (!tokenEndpoint && providerCfg.mcp_url) {
+      const originMatch = providerCfg.mcp_url.match(/^(https?:\/\/[^/]+)/);
+      if (originMatch) {
+        try {
+          const metaResp = gw.http.fetch(originMatch[1] + "/.well-known/oauth-authorization-server", {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+          });
+          if (metaResp.status === 200) {
+            const meta = JSON.parse(metaResp.body);
+            if (meta.token_endpoint) {
+              tokenEndpoint = meta.token_endpoint;
+              gw.log.info("oauth-callback: discovered token_endpoint for " + flow.provider + ": " + tokenEndpoint);
+            }
+          }
+        } catch (e: any) {
+          gw.log.error("oauth-callback: metadata discovery failed for " + flow.provider + ": " + e.message);
+        }
+      }
+    }
+
     if (!tokenEndpoint) {
       gw.log.error("oauth-callback: no token endpoint for " + flow.provider);
       ctx.response.status(500);
@@ -181,6 +203,28 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
       tokenEndpoint = reg.token_endpoint;
       clientId = reg.client_id;
       clientSecret = reg.client_secret;
+    }
+  }
+
+  // Discover token_endpoint from .well-known metadata if still missing
+  if (!tokenEndpoint && providerCfg.mcp_url) {
+    const originMatch = providerCfg.mcp_url.match(/^(https?:\/\/[^/]+)/);
+    if (originMatch) {
+      try {
+        const metaResp = gw.http.fetch(originMatch[1] + "/.well-known/oauth-authorization-server", {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+        });
+        if (metaResp.status === 200) {
+          const meta = JSON.parse(metaResp.body);
+          if (meta.token_endpoint) {
+            tokenEndpoint = meta.token_endpoint;
+            gw.log.info("oauth-callback: discovered token_endpoint for " + providerName + ": " + tokenEndpoint);
+          }
+        }
+      } catch (e: any) {
+        gw.log.error("oauth-callback: metadata discovery failed for " + providerName + ": " + e.message);
+      }
     }
   }
 
