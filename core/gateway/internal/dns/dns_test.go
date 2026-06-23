@@ -485,3 +485,42 @@ func TestDNS_InterceptAll_ReturnsGatewayOnAllNXDOMAIN(t *testing.T) {
 	assert.Equal(t, gatewayIP.String(), ip.To4().String(),
 		"should return gateway IP when all upstreams return NXDOMAIN")
 }
+
+// TestDNS_InterceptAll_InterceptsCrossNetworkPrivateIP verifies that when upstream
+// DNS returns a private IP on a DIFFERENT subnet (e.g. gateway's external network
+// IP 10.0.2.2), it gets intercepted and replaced with the gateway's sandbox IP.
+// This is the regression test for the multi-homed gateway DNS resolution bug:
+// Docker DNS can return the gateway's external-network IP for its own hostname,
+// which is private but unreachable from the sandbox network.
+func TestDNS_InterceptAll_InterceptsCrossNetworkPrivateIP(t *testing.T) {
+	// Upstream returns 10.0.2.2 — a private IP on a different subnet.
+	// This simulates Docker DNS returning the gateway's external-network IP.
+	externalIP := net.IP{10, 0, 2, 2}
+	upstream := startMockDNS(t, func(query []byte) []byte {
+		return synthesizeAResponse(query, externalIP)
+	})
+
+	setUpstreams(t, []string{upstream})
+
+	gatewayIP := net.IP{172, 30, 0, 3}
+	listenAddr := getFreeUDPAddr(t)
+	srv := NewServer(listenAddr)
+	srv.InterceptAll(gatewayIP.String())
+	_, localNet, _ := net.ParseCIDR("172.30.0.0/24")
+	srv.SetLocalNetwork(localNet)
+
+	go func() { _ = srv.ListenAndServe() }()
+	time.Sleep(50 * time.Millisecond)
+
+	query := buildDNSQuery(0xBEEF)
+	resp, err := sendQuery(t, listenAddr, query, 2*time.Second)
+	require.NoError(t, err, "expected a response")
+	require.GreaterOrEqual(t, len(resp), 12)
+
+	ip := extractFirstARecord(resp)
+	require.NotNil(t, ip, "response should contain an A record")
+	assert.Equal(t, gatewayIP.String(), ip.To4().String(),
+		"cross-network private IP (10.0.2.2) should be intercepted and replaced with gateway sandbox IP")
+	assert.NotEqual(t, externalIP.String(), ip.To4().String(),
+		"external-network IP must NOT pass through to agent")
+}

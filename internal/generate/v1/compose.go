@@ -16,6 +16,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// sandboxSubnet is the CIDR for the internal sandbox network shared by all
+// agent-gateway pairs. Used in both the compose network definition and passed
+// to the gateway via GATEWAY_SANDBOX_CIDR for DNS local-network filtering.
+const sandboxSubnet = "172.30.0.0/24"
+
 type composeFile struct {
 	Services map[string]any `yaml:"services"`
 	Volumes  map[string]any `yaml:"volumes,omitempty"`
@@ -181,8 +186,10 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 	if cfg.LogLevel != "" {
 		gatewayEnv = append(gatewayEnv, "LOG_LEVEL="+cfg.LogLevel)
 	}
-	// Provide the gateway's sandbox IP so it can write a reliable routing script.
+	// Provide the gateway's sandbox IP and CIDR so it can write a reliable routing
+	// script and configure DNS local-network filtering.
 	gatewayEnv = append(gatewayEnv, "GATEWAY_SANDBOX_IP="+p.gatewaySandboxIP)
+	gatewayEnv = append(gatewayEnv, "GATEWAY_SANDBOX_CIDR="+sandboxSubnet)
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
 	}
@@ -313,7 +320,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 				"internal": true,
 				"ipam": map[string]any{
 					"config": []map[string]any{
-						{"subnet": "172.30.0.0/24"},
+						{"subnet": sandboxSubnet},
 					},
 				},
 			},

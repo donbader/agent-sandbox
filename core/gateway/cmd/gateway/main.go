@@ -102,10 +102,17 @@ func main() {
 	// so traffic arrives directly at the gateway (avoids reliance on iptables).
 	dnsServer := dns.NewServer(cfg.DNSListen)
 	if sandboxIP, err := getSandboxIP(); err == nil {
-		// Don't use SetLocalNetwork — getSandboxNetwork() can return the wrong
-		// interface on multi-homed containers. Fall back to isPrivateIP which
-		// passes through ALL private IPs (Docker container names always resolve
-		// to private IPs, so they'll never be intercepted).
+		// Use GATEWAY_SANDBOX_CIDR to configure local-network filtering.
+		// Only IPs within the sandbox subnet pass through; all others
+		// (including private IPs on different subnets like 10.0.2.x)
+		// are intercepted and replaced with the gateway's sandbox IP.
+		if cidr := os.Getenv("GATEWAY_SANDBOX_CIDR"); cidr != "" {
+			if _, network, err := net.ParseCIDR(cidr); err == nil {
+				dnsServer.SetLocalNetwork(network)
+			} else {
+				slog.Warn("invalid GATEWAY_SANDBOX_CIDR, falling back to isPrivateIP", "cidr", cidr, "error", err)
+			}
+		}
 
 		// Collect all domains from egress rules + MITM that aren't wildcards
 		var interceptDomains []string
@@ -327,6 +334,15 @@ fi
 # DNS — point at gateway's forwarder, keep Docker DNS as fallback.
 if [ -w /etc/resolv.conf ]; then
     printf 'nameserver %s\nnameserver 127.0.0.11\n' "$GATEWAY_IP" > /etc/resolv.conf
+fi
+
+# Hosts entry — pin gateway hostname to sandbox IP.
+# The DNS forwarder uses isPrivateIP to pass through container-name lookups,
+# but on multi-homed gateways Docker DNS may return the external-network IP
+# (e.g. 10.0.2.2) which is private but unreachable from the sandbox network.
+# A /etc/hosts entry takes precedence over DNS and avoids the issue entirely.
+if [ -w /etc/hosts ] && [ -n "$GATEWAY_HOST" ]; then
+    printf '%s %s\n' "$GATEWAY_IP" "$GATEWAY_HOST" >> /etc/hosts
 fi
 `
 
