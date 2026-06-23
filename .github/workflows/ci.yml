@@ -32,6 +32,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       artifacts: ${{ steps.filter.outputs.artifacts }}
+      shim: ${{ steps.filter.outputs.shim }}
     steps:
       - uses: actions/checkout@v6
 
@@ -48,23 +49,25 @@ jobs:
               - '.golangci.yml'
             artifacts:
               - 'internal/generate/**'
-              - 'internal/plugins/**'
+              - 'internal/plugin/**'
               - 'internal/config/**'
-              - 'internal/resolve/**'
+              - 'core/plugins/**'
+              - 'core/gateway/**'
+              - 'core/presets/**'
               - 'cmd/**'
-              - 'gateway/**'
               - 'examples/**'
               - 'tests/integration/**'
-              - 'embed.go'
+              - 'scripts/**'
+            shim:
               - 'scripts/**'
               - 'tests/shim/**'
 
   lint:
-    name: Go (lint)
+    name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.artifacts == 'true'
+    if: needs.changes.outputs.go == 'true'
     steps:
       - uses: actions/checkout@v6
 
@@ -74,13 +77,12 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
 
-  go:
-    name: Go (test, build)
+  test:
+    name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    # Run when Go files change OR when artifacts need the CLI binary
-    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.artifacts == 'true'
+    if: needs.changes.outputs.go == 'true'
     steps:
       - uses: actions/checkout@v6
 
@@ -88,8 +90,21 @@ jobs:
         with:
           go-version: "1.26"
 
-      - name: Test
+      - name: Run tests
         run: go test -race ./...
+
+  codegen:
+    name: Codegen freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
 
       - name: Lint TS annotations
         run: go run ./cmd/lint-ts-annotations
@@ -104,7 +119,20 @@ jobs:
             exit 1
           fi
 
-      - name: Build core binary
+  shim:
+    name: Shim tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: changes
+    if: needs.changes.outputs.shim == 'true'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Build CLI (needed by shim tests)
         run: go build -o agent-sandbox-core ./cmd/agent-sandbox-core/
 
       - name: Lint shell scripts
@@ -121,18 +149,46 @@ jobs:
       - name: Run shim e2e tests
         run: tests/shim/test_shim_e2e.sh
 
-      - name: Upload core binary
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.artifacts == 'true'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Build CLI binary
+        run: go build -o agent-sandbox-core ./cmd/agent-sandbox-core/
+
+      - name: Build gateway binary
+        run: |
+          mkdir -p core/gateway/bin
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o core/gateway/bin/gateway-linux-amd64 ./core/gateway/cmd/gateway/
+
+      - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
           name: agent-sandbox-core-linux
           path: agent-sandbox-core
           retention-days: 1
 
+      - name: Upload gateway binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-linux-amd64
+          path: core/gateway/bin/gateway-linux-amd64
+          retention-days: 1
+
   examples:
-    name: Examples (generate + compose up)
+    name: Examples (${{ matrix.example }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [changes, go]
+    needs: [changes, build]
     if: needs.changes.outputs.artifacts == 'true'
     strategy:
       fail-fast: false
@@ -141,34 +197,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.26"
-
-      - name: Build gateway binary
-        run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o core/gateway/bin/gateway-linux-amd64 ./core/gateway/cmd/gateway/
-
-      - name: Download core binary
+      - name: Download CLI binary
         uses: actions/download-artifact@v4
         with:
           name: agent-sandbox-core-linux
-          path: core
+          path: .
+
+      - name: Download gateway binary
+        uses: actions/download-artifact@v4
+        with:
+          name: gateway-linux-amd64
+          path: core/gateway/bin
 
       - name: Make binaries executable
-        run: chmod +x ./core/agent-sandbox-core
+        run: |
+          chmod +x ./agent-sandbox-core
+          chmod +x ./core/gateway/bin/gateway-linux-amd64
 
       - name: Generate build artifacts
-        run: ./core/agent-sandbox-core generate -C examples/${{ matrix.example }}
+        run: ./agent-sandbox-core generate -C examples/${{ matrix.example }}
 
       - name: Start containers (smoke test)
         env:
           STX_LLM_GATEWAY_API_KEY: test-stub
           TELEGRAM_BOT_TOKEN: test-stub
         run: |
-          ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose up -d --build || true
+          ./agent-sandbox-core -C examples/${{ matrix.example }} compose up -d --build || true
           # Wait for gateway(s) to be healthy — proves mounts, config, and binary work.
-          # Agent and sidecars with stub credentials may crash; that's expected in CI.
           for i in $(seq 1 30); do
             if docker ps --filter "name=gateway" --filter "health=healthy" --format '{{.Names}}' | grep -q gateway; then
               echo "Gateway healthy"
@@ -177,50 +232,47 @@ jobs:
             sleep 2
           done
           echo "ERROR: No healthy gateway after 60s"
-          ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose ps
-          ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose logs
+          ./agent-sandbox-core -C examples/${{ matrix.example }} compose ps
+          ./agent-sandbox-core -C examples/${{ matrix.example }} compose logs
           exit 1
 
-      - name: Wait for agent entrypoint
-        run: sleep 5
-
       - name: Audit security contract
-        run: ./core/agent-sandbox-core -C examples/${{ matrix.example }} audit || true
+        run: ./agent-sandbox-core -C examples/${{ matrix.example }} audit || true
 
       - name: Teardown
         if: always()
-        run: ./core/agent-sandbox-core -C examples/${{ matrix.example }} compose down -v
+        run: ./agent-sandbox-core -C examples/${{ matrix.example }} compose down -v
 
-  sandbox:
-    name: Sandbox (integration)
+  integration:
+    name: Integration
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [changes, go]
+    timeout-minutes: 15
+    needs: [changes, build]
     if: needs.changes.outputs.artifacts == 'true'
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.26"
-
-      - name: Build gateway binary
-        run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o core/gateway/bin/gateway-linux-amd64 ./core/gateway/cmd/gateway/
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Download core binary
+      - name: Download CLI binary
         uses: actions/download-artifact@v4
         with:
           name: agent-sandbox-core-linux
-          path: core
+          path: .
 
-      - name: Make CLI executable
-        run: chmod +x ./core/agent-sandbox-core
+      - name: Download gateway binary
+        uses: actions/download-artifact@v4
+        with:
+          name: gateway-linux-amd64
+          path: core/gateway/bin
 
-      - name: Run sandbox integration tests
+      - name: Make binaries executable
+        run: |
+          chmod +x ./agent-sandbox-core
+          chmod +x ./core/gateway/bin/gateway-linux-amd64
+
+      - name: Run integration tests
         env:
-          CLI_PATH: ${{ github.workspace }}/core/agent-sandbox-core
+          CLI_PATH: ${{ github.workspace }}/agent-sandbox-core
         run: tests/integration/sandbox/run.sh
