@@ -84,7 +84,7 @@ func TestHandle_AbortResponseFraming(t *testing.T) {
 
 	// Create a pipe to simulate the client-server connection
 	clientRaw, serverRaw := net.Pipe()
-	defer clientRaw.Close()
+	defer clientRaw.Close() //nolint:errcheck
 
 	// Build TLS config for client that trusts our test CA
 	caCert, err := x509.ParseCertificate(ca.Certificate[0])
@@ -112,7 +112,7 @@ func TestHandle_AbortResponseFraming(t *testing.T) {
 	// Client side: do TLS handshake directly (handler does tls.Server internally,
 	// but we passed nil initialData so it reads from the conn via prefixConn)
 	clientConn := tls.Client(clientRaw, clientTLSCfg)
-	defer clientConn.Close()
+	defer clientConn.Close() //nolint:errcheck
 
 	err = clientConn.Handshake()
 	require.NoError(t, err)
@@ -123,10 +123,10 @@ func TestHandle_AbortResponseFraming(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read the response with a timeout to catch hangs
-	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(2*time.Second)))
 	resp, err := http.ReadResponse(bufio.NewReader(clientConn), nil)
 	require.NoError(t, err, "response should be readable without hanging")
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Verify response framing
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -143,7 +143,7 @@ func TestHandle_AbortResponseFraming(t *testing.T) {
 	assert.Equal(t, `{"error":"oauth_required","provider":"slack"}`, string(body))
 
 	// Verify connection is closed after response (not kept alive)
-	clientConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
 	_, err = clientConn.Read(make([]byte, 1))
 	assert.ErrorIs(t, err, io.EOF, "connection should be closed after abort response")
 
@@ -167,7 +167,7 @@ func TestHandle_AbortResponseWithCustomContentType(t *testing.T) {
 	handler := NewHandler([]string{"api.example.com"}, ca)
 
 	clientRaw, serverRaw := net.Pipe()
-	defer clientRaw.Close()
+	defer clientRaw.Close() //nolint:errcheck
 
 	caCert, err := x509.ParseCertificate(ca.Certificate[0])
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestHandle_AbortResponseWithCustomContentType(t *testing.T) {
 		ServerName: "api.example.com",
 		RootCAs:    caPool,
 	})
-	defer clientConn.Close()
+	defer clientConn.Close() //nolint:errcheck
 
 	err = clientConn.Handshake()
 	require.NoError(t, err)
@@ -192,10 +192,10 @@ func TestHandle_AbortResponseWithCustomContentType(t *testing.T) {
 	_, err = clientConn.Write([]byte("GET /secret HTTP/1.1\r\nHost: api.example.com\r\n\r\n"))
 	require.NoError(t, err)
 
-	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(2*time.Second)))
 	resp, err := http.ReadResponse(bufio.NewReader(clientConn), nil)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	assert.Equal(t, "text/plain", resp.Header.Get("Content-Type"),
@@ -207,7 +207,7 @@ func TestHandle_AbortResponseWithCustomContentType(t *testing.T) {
 	assert.Equal(t, "access denied", string(body))
 
 	// Verify connection is closed after response
-	clientConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
 	_, err = clientConn.Read(make([]byte, 1))
 	assert.ErrorIs(t, err, io.EOF, "connection should be closed after abort response")
 
