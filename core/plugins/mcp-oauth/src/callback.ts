@@ -18,6 +18,8 @@ interface TokenResponse {
   access_token: string;
   refresh_token?: string;
   expires_in?: number;
+  scope?: string;
+  [key: string]: unknown;
 }
 
 function loadRegistration(provider: string): { token_endpoint: string; client_id: string; client_secret: string } | null {
@@ -75,6 +77,9 @@ function writeToken(provider: string, token: TokenResponse, tokenEndpoint: strin
   };
   if (token.refresh_token) {
     stored.refresh_token = token.refresh_token;
+  }
+  if (token.scope) {
+    stored.scope = token.scope;
   }
   gw.fs.write(`${provider}.json`, JSON.stringify(stored, null, 2));
 }

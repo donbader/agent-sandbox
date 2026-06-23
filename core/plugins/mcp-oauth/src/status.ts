@@ -56,7 +56,11 @@ function getProviderStatus(providerName: string): { connected: boolean; expired:
     const now = Math.floor(Date.now() / 1000);
     const expired = token.expires_at ? token.expires_at < now : false;
     const has_refresh_token = !!token.refresh_token;
-    return { connected: true, expired, has_refresh_token };
+    const result: Record<string, any> = { connected: true, expired, has_refresh_token };
+    if (token.scope) {
+      result.scope = token.scope;
+    }
+    return result as any;
   } catch {
     return { connected: false, expired: false, has_refresh_token: false };
   }
