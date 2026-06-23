@@ -13,7 +13,7 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
 
   // If no provider specified, return status for all
   if (!providerName || providerName === "status") {
-    const statuses: Record<string, { connected: boolean; expired: boolean }> = {};
+    const statuses: Record<string, { connected: boolean; expired: boolean; has_refresh_token: boolean }> = {};
     for (const name of Object.keys(providers)) {
       statuses[name] = getProviderStatus(name);
     }
@@ -39,24 +39,25 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
   ctx.response.body(JSON.stringify(status));
 }
 
-function getProviderStatus(providerName: string): { connected: boolean; expired: boolean } {
+function getProviderStatus(providerName: string): { connected: boolean; expired: boolean; has_refresh_token: boolean } {
   let data: string;
   try {
     data = gw.fs.read(providerName + ".json");
   } catch {
-    return { connected: false, expired: false };
+    return { connected: false, expired: false, has_refresh_token: false };
   }
 
   if (!data || data.trim() === "") {
-    return { connected: false, expired: false };
+    return { connected: false, expired: false, has_refresh_token: false };
   }
 
   try {
     const token = JSON.parse(data);
     const now = Math.floor(Date.now() / 1000);
     const expired = token.expires_at ? token.expires_at < now : false;
-    return { connected: true, expired };
+    const has_refresh_token = !!(token.refresh_token);
+    return { connected: true, expired, has_refresh_token };
   } catch {
-    return { connected: false, expired: false };
+    return { connected: false, expired: false, has_refresh_token: false };
   }
 }

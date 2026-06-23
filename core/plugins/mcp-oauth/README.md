@@ -68,12 +68,18 @@ curl -s "http://<gateway-host>:8080/plugins/mcp-oauth/login/notion?callback_url=
 ```bash
 # Single provider
 curl -s http://<gateway-host>:8080/plugins/mcp-oauth/status/notion
-# {"connected":true,"expired":false}
+# {"connected":true,"expired":false,"has_refresh_token":true}
 
 # All providers
 curl -s http://<gateway-host>:8080/plugins/mcp-oauth/status
-# {"notion":{"connected":true,"expired":false},"jira":{"connected":false,"expired":false}}
+# {"notion":{"connected":true,"expired":false,"has_refresh_token":true},"jira":{"connected":false,"expired":false,"has_refresh_token":false}}
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `connected` | boolean | Whether a token file exists for this provider |
+| `expired` | boolean | Whether the access token has passed its `expires_at` |
+| `has_refresh_token` | boolean | Whether a refresh token is stored (if false, token cannot auto-renew) |
 
 ### Disconnecting a Provider
 
