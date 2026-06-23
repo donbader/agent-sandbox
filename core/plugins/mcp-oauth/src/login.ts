@@ -174,6 +174,32 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
   let clientId = providerCfg.client_id || "";
   let clientSecret = providerCfg.client_secret || "";
 
+  // If we have client_id but missing endpoints, discover them from .well-known metadata
+  if (clientId && (!authorizeEndpoint || !tokenEndpoint) && providerCfg.mcp_url) {
+    const originMatch = providerCfg.mcp_url.match(/^(https?:\/\/[^/]+)/);
+    if (originMatch) {
+      const origin = originMatch[1];
+      try {
+        const metaResp = gw.http.fetch(origin + "/.well-known/oauth-authorization-server", {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+        });
+        if (metaResp.status === 200) {
+          const meta = JSON.parse(metaResp.body);
+          if (!authorizeEndpoint && meta.authorization_endpoint) {
+            authorizeEndpoint = meta.authorization_endpoint;
+          }
+          if (!tokenEndpoint && meta.token_endpoint) {
+            tokenEndpoint = meta.token_endpoint;
+          }
+          gw.log.info("oauth-login: discovered endpoints for " + providerName + " (authorize=" + authorizeEndpoint + ", token=" + tokenEndpoint + ")");
+        }
+      } catch (e: any) {
+        gw.log.error("oauth-login: metadata discovery failed for " + providerName + ": " + e.message);
+      }
+    }
+  }
+
   if (!clientId) {
     // Try cached registration
     const cached = loadCachedRegistration(providerName);
