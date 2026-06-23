@@ -328,6 +328,15 @@ fi
 if [ -w /etc/resolv.conf ]; then
     printf 'nameserver %s\nnameserver 127.0.0.11\n' "$GATEWAY_IP" > /etc/resolv.conf
 fi
+
+# Hosts entry — pin gateway hostname to sandbox IP.
+# The DNS forwarder uses isPrivateIP to pass through container-name lookups,
+# but on multi-homed gateways Docker DNS may return the external-network IP
+# (e.g. 10.0.2.2) which is private but unreachable from the sandbox network.
+# A /etc/hosts entry takes precedence over DNS and avoids the issue entirely.
+if [ -w /etc/hosts ] && [ -n "$GATEWAY_HOST" ]; then
+    printf '%s %s\n' "$GATEWAY_IP" "$GATEWAY_HOST" >> /etc/hosts
+fi
 `
 
 	if err := os.WriteFile(gatewayRouteScriptPath, []byte(script), 0755); err != nil {
