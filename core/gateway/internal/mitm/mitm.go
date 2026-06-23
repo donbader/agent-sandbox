@@ -118,17 +118,22 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 		// If middleware aborted, return the abort response instead of forwarding
 		if ctx != nil && ctx.AbortStatus != 0 {
 			abortResp := &http.Response{
-				StatusCode: ctx.AbortStatus,
-				ProtoMajor: 1,
-				ProtoMinor: 1,
-				Header:     ctx.AbortHeaders,
-				Body:       io.NopCloser(strings.NewReader(ctx.AbortBody)),
+				StatusCode:    ctx.AbortStatus,
+				ProtoMajor:    1,
+				ProtoMinor:    1,
+				Header:        ctx.AbortHeaders,
+				Body:          io.NopCloser(strings.NewReader(ctx.AbortBody)),
+				ContentLength: int64(len(ctx.AbortBody)),
+				Close:         true,
 			}
 			if abortResp.Header == nil {
 				abortResp.Header = make(http.Header)
 			}
+			if abortResp.Header.Get("Content-Type") == "" {
+				abortResp.Header.Set("Content-Type", "application/json")
+			}
 			_ = abortResp.Write(tlsConn)
-			continue
+			return
 		}
 
 		// Forward to real server
