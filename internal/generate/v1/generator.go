@@ -140,7 +140,7 @@ func (g *Generator) RunProject(project *config.Project) error {
 		return fmt.Errorf("write docker-compose.yml: %w", err)
 	}
 
-	if err := generateSchema(buildDir); err != nil {
+	if err := generateSchema(buildDir, g.bundledFS, g.projectDir); err != nil {
 		return fmt.Errorf("generate schema: %w", err)
 	}
 	if err := g.copyGatewayTypes(buildDir); err != nil {

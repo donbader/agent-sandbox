@@ -4,6 +4,19 @@ options:
     type: object
     required: true
     description: "Map of provider name to MCP config (each needs at least mcp_url)"
+    additionalProperties:
+      type: object
+      properties:
+        mcp_url:
+          type: string
+          required: true
+          description: "MCP server URL for this provider"
+        client_id:
+          type: string
+          description: "OAuth client ID (optional — uses dynamic registration if omitted)"
+        client_secret:
+          type: string
+          description: "OAuth client secret (optional — uses dynamic registration if omitted)"
 
   callback_url:
     type: string

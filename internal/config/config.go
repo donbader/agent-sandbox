@@ -75,8 +75,8 @@ type BuildStageConfig struct {
 type RuntimeConfig struct {
 	Image             string            `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
 	CWD               string            `yaml:"cwd" json:"cwd,omitempty" jsonschema:"title=cwd,description=Working directory for agent sessions (default: /home/agent/workspace)"`
-	ExtraBuilds       []string          `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base"`
-	Entrypoint        []string          `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override"`
+	ExtraBuilds       []string          `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base. Each string is a complete Dockerfile line (e.g. 'RUN apt-get install -y foo'). Supports multi-line YAML block scalars with backslash continuations."`
+	Entrypoint        []string          `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override. Array of command and arguments (e.g. ['sh'\\, '-c'\\, 'node app.js'])."`
 	NamespacedVolumes []string          `yaml:"namespaced_volumes" json:"namespaced_volumes,omitempty" jsonschema:"title=namespaced_volumes,description=Named volumes auto-prefixed with agent name for fleet isolation"`
 	RawVolumes        []string          `yaml:"raw_volumes" json:"raw_volumes,omitempty" jsonschema:"title=raw_volumes,description=Volumes used as-is (bind mounts or intentionally shared named volumes)"`
 	Environment       map[string]string  `yaml:"environment" json:"environment,omitempty" jsonschema:"title=environment,description=Environment variables passed to the agent container"`

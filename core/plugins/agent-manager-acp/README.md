@@ -26,7 +26,6 @@ installations:
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | `acp_command` | array | yes | — | Command to spawn the agent via ACP over stdio |
-| `acp_install` | string | no | `"true"` | Shell command to install the ACP adapter (e.g. `npm install -g codex-acp@0.15.0`) |
 
 ### Common `acp_command` values
 

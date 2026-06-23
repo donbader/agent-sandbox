@@ -59,12 +59,13 @@ func (a *AssetEntry) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type OptionSchema struct {
-	Type        string                  `yaml:"type"`
-	Required    bool                    `yaml:"required"`
-	Default     any                     `yaml:"default"`
-	Description string                  `yaml:"description"`
-	Properties  map[string]OptionSchema `yaml:"properties"`
-	Items       *OptionSchema           `yaml:"items"`
+	Type                 string                  `yaml:"type"`
+	Required             bool                    `yaml:"required"`
+	Default              any                     `yaml:"default"`
+	Description          string                  `yaml:"description"`
+	Properties           map[string]OptionSchema `yaml:"properties"`
+	Items                *OptionSchema           `yaml:"items"`
+	AdditionalProperties *OptionSchema           `yaml:"additionalProperties"`
 }
 
 type Contributions struct {
