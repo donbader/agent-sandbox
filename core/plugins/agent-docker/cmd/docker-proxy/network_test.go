@@ -2,11 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
-	"strings"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,21 +32,30 @@ func newProxyWithUpstream(t *testing.T, handler http.Handler, cfg *ProxyConfig) 
 	return proxy
 }
 
-func TestEnsureSandboxNetwork_AlreadyExists(t *testing.T) {
+func TestDiscoverSandboxNetwork_Success(t *testing.T) {
+	hostname, _ := os.Hostname()
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
+		if r.Method == "GET" && r.URL.Path == fmt.Sprintf("/containers/%s/json", hostname) {
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{"Name": "test_sandbox"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"NetworkSettings": map[string]any{
+					"Networks": map[string]any{
+						"my-project_sandbox": map[string]any{
+							"NetworkID": "abc123def456",
+						},
+					},
+				},
+			})
 			return
 		}
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 	})
 
 	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "test",
+		SandboxID:     "my-project-coder",
 		AgentName:     "coder",
-		NetworkName:   "test_sandbox",
-		NetworkSubnet: "172.30.0.0/24",
+		NetworkName:   "my-project_sandbox",
 		AllowedImages: []string{"*"},
 		MaxContainers: 5,
 		MemoryBytes:   2 * 1024 * 1024 * 1024,
@@ -53,33 +63,35 @@ func TestEnsureSandboxNetwork_AlreadyExists(t *testing.T) {
 		PidsLimit:     256,
 	})
 
-	err := proxy.EnsureSandboxNetwork()
+	err := proxy.DiscoverSandboxNetwork()
 	assert.NoError(t, err)
+	assert.Equal(t, "abc123def456", proxy.cfg.NetworkID)
 }
 
-func TestEnsureSandboxNetwork_CreateWithSubnet(t *testing.T) {
-	var createdBody map[string]any
+func TestDiscoverSandboxNetwork_NetworkNotOnContainer(t *testing.T) {
+	hostname, _ := os.Hostname()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
-			return
-		}
-		if r.Method == "POST" && r.URL.Path == "/networks/create" {
-			_ = json.NewDecoder(r.Body).Decode(&createdBody)
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]string{"Id": "net123"})
+		if r.Method == "GET" && r.URL.Path == fmt.Sprintf("/containers/%s/json", hostname) {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"NetworkSettings": map[string]any{
+					"Networks": map[string]any{
+						"some_other_network": map[string]any{
+							"NetworkID": "other999",
+						},
+					},
+				},
+			})
 			return
 		}
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 	})
 
 	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "test",
+		SandboxID:     "my-project-coder",
 		AgentName:     "coder",
-		NetworkName:   "test_sandbox",
-		NetworkSubnet: "172.30.0.0/24",
+		NetworkName:   "my-project_sandbox",
 		AllowedImages: []string{"*"},
 		MaxContainers: 5,
 		MemoryBytes:   2 * 1024 * 1024 * 1024,
@@ -87,126 +99,22 @@ func TestEnsureSandboxNetwork_CreateWithSubnet(t *testing.T) {
 		PidsLimit:     256,
 	})
 
-	err := proxy.EnsureSandboxNetwork()
-	assert.NoError(t, err)
-	assert.Equal(t, "test_sandbox", createdBody["Name"])
-	assert.Equal(t, true, createdBody["Internal"])
-	assert.Equal(t, "bridge", createdBody["Driver"])
-
-	// Verify subnet was passed
-	ipam, ok := createdBody["IPAM"].(map[string]any)
-	require.True(t, ok)
-	configs, ok := ipam["Config"].([]any)
-	require.True(t, ok)
-	require.Len(t, configs, 1)
-	cfg, _ := configs[0].(map[string]any)
-	assert.Equal(t, "172.30.0.0/24", cfg["Subnet"])
-}
-
-func TestEnsureSandboxNetwork_SubnetOverlap_FallbackSucceeds(t *testing.T) {
-	createAttempts := 0
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
-			return
-		}
-		if r.Method == "POST" && r.URL.Path == "/networks/create" {
-			createAttempts++
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-
-			if createAttempts == 1 {
-				// First attempt with subnet — reject with overlap error
-				assert.NotNil(t, body["IPAM"], "first attempt should include IPAM/subnet")
-				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]string{
-					"message": "invalid pool request: Pool overlaps with other one on this address space",
-				})
-				return
-			}
-			// Second attempt without subnet — succeed
-			assert.Nil(t, body["IPAM"], "fallback attempt should not include IPAM")
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]string{"Id": "net456"})
-			return
-		}
-		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-	})
-
-	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "test",
-		AgentName:     "coder",
-		NetworkName:   "test_sandbox",
-		NetworkSubnet: "172.30.0.0/24",
-		AllowedImages: []string{"*"},
-		MaxContainers: 5,
-		MemoryBytes:   2 * 1024 * 1024 * 1024,
-		NanoCPUs:      2000000000,
-		PidsLimit:     256,
-	})
-
-	err := proxy.EnsureSandboxNetwork()
-	assert.NoError(t, err)
-	assert.Equal(t, 2, createAttempts)
-}
-
-func TestEnsureSandboxNetwork_BothCreatesFail(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
-			return
-		}
-		if r.Method == "POST" && r.URL.Path == "/networks/create" {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "daemon error"})
-			return
-		}
-		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-	})
-
-	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "test",
-		AgentName:     "coder",
-		NetworkName:   "test_sandbox",
-		NetworkSubnet: "172.30.0.0/24",
-		AllowedImages: []string{"*"},
-		MaxContainers: 5,
-		MemoryBytes:   2 * 1024 * 1024 * 1024,
-		NanoCPUs:      2000000000,
-		PidsLimit:     256,
-	})
-
-	err := proxy.EnsureSandboxNetwork()
+	err := proxy.DiscoverSandboxNetwork()
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "daemon error")
+	assert.Contains(t, err.Error(), "sandbox network \"my-project_sandbox\" not found")
+	assert.Contains(t, err.Error(), "some_other_network")
 }
 
-func TestEnsureSandboxNetwork_NoSubnetConfigured(t *testing.T) {
-	var createdBody map[string]any
-
+func TestDiscoverSandboxNetwork_InspectFails(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
-			return
-		}
-		if r.Method == "POST" && r.URL.Path == "/networks/create" {
-			_ = json.NewDecoder(r.Body).Decode(&createdBody)
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]string{"Id": "net789"})
-			return
-		}
-		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "no such container"})
 	})
 
 	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "test",
+		SandboxID:     "my-project-coder",
 		AgentName:     "coder",
-		NetworkName:   "test_sandbox",
-		NetworkSubnet: "", // no subnet configured
+		NetworkName:   "my-project_sandbox",
 		AllowedImages: []string{"*"},
 		MaxContainers: 5,
 		MemoryBytes:   2 * 1024 * 1024 * 1024,
@@ -214,8 +122,47 @@ func TestEnsureSandboxNetwork_NoSubnetConfigured(t *testing.T) {
 		PidsLimit:     256,
 	})
 
-	err := proxy.EnsureSandboxNetwork()
+	err := proxy.DiscoverSandboxNetwork()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 404")
+}
+
+func TestDiscoverSandboxNetwork_MultipleNetworks(t *testing.T) {
+	hostname, _ := os.Hostname()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == fmt.Sprintf("/containers/%s/json", hostname) {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"NetworkSettings": map[string]any{
+					"Networks": map[string]any{
+						"bridge": map[string]any{
+							"NetworkID": "bridgenet111",
+						},
+						"my-project_sandbox": map[string]any{
+							"NetworkID": "sandboxnet222",
+						},
+					},
+				},
+			})
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	})
+
+	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
+		SandboxID:     "my-project-coder",
+		AgentName:     "coder",
+		NetworkName:   "my-project_sandbox",
+		AllowedImages: []string{"*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	})
+
+	err := proxy.DiscoverSandboxNetwork()
 	assert.NoError(t, err)
-	assert.Equal(t, "test_sandbox", createdBody["Name"])
-	assert.Nil(t, createdBody["IPAM"], "should not include IPAM when no subnet configured")
+	// Should pick the correct network by name, not the bridge
+	assert.Equal(t, "sandboxnet222", proxy.cfg.NetworkID)
 }

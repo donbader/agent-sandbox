@@ -6,76 +6,64 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 )
 
-// EnsureSandboxNetwork verifies the sandbox network exists on the upstream daemon.
-// If missing (e.g. after daemon restart or prune), it recreates it.
-// This makes the proxy self-healing rather than dependent on external network state.
-func (dp *DockerProxy) EnsureSandboxNetwork() error {
-	// Check if network exists
-	req, _ := http.NewRequest("GET", fmt.Sprintf("/networks/%s", dp.cfg.NetworkName), nil)
+// DiscoverSandboxNetwork finds the sandbox network ID by inspecting the proxy's own
+// container. This is the correct approach because the compose infrastructure creates
+// and manages the network — the proxy just needs to discover which network instance
+// the agent stack is actually on, then attach spawned containers to the same one.
+//
+// Previous design (EnsureSandboxNetwork) was broken: it would create a NEW network
+// with the same name if the original was missing, but the agent container would still
+// be on the old network instance, making spawned containers unreachable.
+func (dp *DockerProxy) DiscoverSandboxNetwork() error {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("get hostname: %w", err)
+	}
+
+	// Inspect our own container to find which networks we're on
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/containers/%s/json", hostname), nil)
 	req.URL.Scheme = "http"
 	req.URL.Host = "docker"
 
 	rec := &responseRecorder{header: make(http.Header)}
 	dp.upstream.ServeHTTP(rec, req)
 
-	if rec.code == http.StatusOK {
-		slog.Info("sandbox network exists", "name", dp.cfg.NetworkName)
-		return nil
+	if rec.code != http.StatusOK {
+		return fmt.Errorf("inspect self (%s): HTTP %d: %s", hostname, rec.code, rec.body.String())
 	}
 
-	// Network not found — recreate it
-	slog.Warn("sandbox network missing, recreating", "name", dp.cfg.NetworkName)
+	var info struct {
+		NetworkSettings struct {
+			Networks map[string]struct {
+				NetworkID string `json:"NetworkID"`
+			} `json:"Networks"`
+		} `json:"NetworkSettings"`
+	}
+	if err := json.Unmarshal(rec.body.Bytes(), &info); err != nil {
+		return fmt.Errorf("parse container inspect: %w", err)
+	}
 
-	// Try with configured subnet first, fall back to no subnet if pool overlaps
-	if dp.cfg.NetworkSubnet != "" {
-		err := dp.createSandboxNetwork(true)
-		if err == nil {
-			return nil
+	// Find the network matching our configured name
+	net, ok := info.NetworkSettings.Networks[dp.cfg.NetworkName]
+	if !ok {
+		// List available networks for debugging
+		available := make([]string, 0, len(info.NetworkSettings.Networks))
+		for name := range info.NetworkSettings.Networks {
+			available = append(available, name)
 		}
-		slog.Warn("create with subnet failed, retrying without subnet", "error", err)
+		return fmt.Errorf("sandbox network %q not found on this container; available: %v",
+			dp.cfg.NetworkName, available)
 	}
 
-	return dp.createSandboxNetwork(false)
-}
-
-func (dp *DockerProxy) createSandboxNetwork(withSubnet bool) error {
-	networkConfig := map[string]any{
-		"Name":     dp.cfg.NetworkName,
-		"Driver":   "bridge",
-		"Internal": true,
-	}
-
-	if withSubnet && dp.cfg.NetworkSubnet != "" {
-		networkConfig["IPAM"] = map[string]any{
-			"Config": []map[string]any{
-				{"Subnet": dp.cfg.NetworkSubnet},
-			},
-		}
-	}
-
-	body, _ := json.Marshal(networkConfig)
-	createReq, _ := http.NewRequest("POST", "/networks/create", strings.NewReader(string(body)))
-	createReq.URL.Scheme = "http"
-	createReq.URL.Host = "docker"
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq.ContentLength = int64(len(body))
-
-	createRec := &responseRecorder{header: make(http.Header)}
-	dp.upstream.ServeHTTP(createRec, createReq)
-
-	if createRec.code != http.StatusCreated {
-		return fmt.Errorf("failed to create sandbox network %s: HTTP %d: %s",
-			dp.cfg.NetworkName, createRec.code, createRec.body.String())
-	}
-
-	subnetInfo := dp.cfg.NetworkSubnet
-	if !withSubnet {
-		subnetInfo = "auto-assigned"
-	}
-	slog.Info("sandbox network recreated", "name", dp.cfg.NetworkName, "subnet", subnetInfo)
+	dp.cfg.NetworkID = net.NetworkID
+	slog.Info("discovered sandbox network",
+		"name", dp.cfg.NetworkName,
+		"id", dp.cfg.NetworkID[:min(12, len(dp.cfg.NetworkID))],
+	)
 	return nil
 }
 

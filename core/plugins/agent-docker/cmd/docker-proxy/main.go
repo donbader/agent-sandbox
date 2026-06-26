@@ -41,10 +41,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Ensure the sandbox network exists on the upstream daemon.
-	// Recreates it if missing (e.g. after daemon restart or network prune).
-	if err := proxy.EnsureSandboxNetwork(); err != nil {
-		slog.Error("ensure sandbox network", "error", err)
+	// Discover the sandbox network ID by inspecting our own container.
+	// This ensures spawned containers join the exact same network instance
+	// the agent is on, regardless of subnet or duplicate network names.
+	if err := proxy.DiscoverSandboxNetwork(); err != nil {
+		slog.Error("discover sandbox network", "error", err)
 		os.Exit(1)
 	}
 
