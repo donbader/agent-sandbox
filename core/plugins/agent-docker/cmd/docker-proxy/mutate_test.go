@@ -11,6 +11,7 @@ func TestMutateCreate(t *testing.T) {
 		SandboxID:   "my-project-coder",
 		AgentName:   "coder",
 		NetworkName: "my-project_sandbox",
+		NetworkID:   "my-project_sandbox",
 		MemoryBytes: 2 * 1024 * 1024 * 1024,
 		NanoCPUs:    2000000000,
 		PidsLimit:   256,
@@ -46,6 +47,7 @@ func TestMutateCreate_NamespaceContainerName(t *testing.T) {
 		SandboxID:   "my-project-coder",
 		AgentName:   "coder",
 		NetworkName: "my-project_sandbox",
+		NetworkID:   "my-project_sandbox",
 		MemoryBytes: 2 * 1024 * 1024 * 1024,
 		NanoCPUs:    2000000000,
 		PidsLimit:   256,
@@ -67,6 +69,7 @@ func TestMutateCreate_ComposeMode_StandaloneRun(t *testing.T) {
 		SandboxID:          "sandbox-001",
 		AgentName:          "agent",
 		NetworkName:        "sandbox_net",
+		NetworkID:          "sandbox_net",
 		AllowCompose:       true,
 		MemoryBytes:        1024,
 		NanoCPUs:           1000,
@@ -136,6 +139,7 @@ func TestMutateCreate_ComposeMode_WithNetworks(t *testing.T) {
 		SandboxID:          "sandbox-001",
 		AgentName:          "agent",
 		NetworkName:        "sandbox_net",
+		NetworkID:          "sandbox_net",
 		AllowCompose:       true,
 		MemoryBytes:        1024,
 		NanoCPUs:           1000,
@@ -190,6 +194,7 @@ func TestInjectInitWrapper_NoOriginalCmd(t *testing.T) {
 	cfg := &ProxyConfig{
 		AgentName:          "myagent",
 		NetworkName:        "myproject_sandbox",
+		NetworkID:          "myproject_sandbox",
 		GatewayIP:          "172.18.0.5",
 		GatewayRouteScript: "#!/bin/sh\nGATEWAY_IP=\"172.18.0.5\"\nip route replace default via $GATEWAY_IP",
 	}
@@ -240,6 +245,7 @@ func TestInjectInitWrapper_WithEntrypointAndCmd(t *testing.T) {
 	cfg := &ProxyConfig{
 		AgentName:          "myagent",
 		NetworkName:        "myproject_sandbox",
+		NetworkID:          "myproject_sandbox",
 		GatewayIP:          "172.18.0.5",
 		GatewayRouteScript: "#!/bin/sh\nGATEWAY_IP=\"172.18.0.5\"\nip route replace default via $GATEWAY_IP",
 	}

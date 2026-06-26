@@ -48,24 +48,24 @@ func (m *Mutator) MutateCreate(body map[string]any, containerName string) {
 			}
 		}
 		// Always add sandbox network for gateway reachability.
-		existingEndpoints[m.cfg.NetworkName] = map[string]any{}
+		existingEndpoints[m.cfg.NetworkID] = map[string]any{}
 		body["NetworkingConfig"] = map[string]any{
 			"EndpointsConfig": existingEndpoints,
 		}
 		// Set NetworkMode to sandbox only for standalone docker run (no compose networks).
 		// For compose, Docker sets NetworkMode from the compose file.
 		if len(existingEndpoints) == 1 {
-			hc["NetworkMode"] = m.cfg.NetworkName
+			hc["NetworkMode"] = m.cfg.NetworkID
 		}
 
 		// Inject transparent proxy init wrapper
 		m.injectInitWrapper(body, hc)
 	} else {
 		// Standard mode: force everything onto sandbox network only
-		hc["NetworkMode"] = m.cfg.NetworkName
+		hc["NetworkMode"] = m.cfg.NetworkID
 		body["NetworkingConfig"] = map[string]any{
 			"EndpointsConfig": map[string]any{
-				m.cfg.NetworkName: map[string]any{},
+				m.cfg.NetworkID: map[string]any{},
 			},
 		}
 	}
