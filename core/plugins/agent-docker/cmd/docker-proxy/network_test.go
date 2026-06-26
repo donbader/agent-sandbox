@@ -35,7 +35,7 @@ func TestEnsureSandboxNetwork_AlreadyExists(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{"Name": "test_sandbox"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"Name": "test_sandbox"})
 			return
 		}
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -63,13 +63,13 @@ func TestEnsureSandboxNetwork_CreateWithSubnet(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
 			return
 		}
 		if r.Method == "POST" && r.URL.Path == "/networks/create" {
-			json.NewDecoder(r.Body).Decode(&createdBody)
+			_ = json.NewDecoder(r.Body).Decode(&createdBody)
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(map[string]string{"Id": "net123"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"Id": "net123"})
 			return
 		}
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -99,7 +99,7 @@ func TestEnsureSandboxNetwork_CreateWithSubnet(t *testing.T) {
 	configs, ok := ipam["Config"].([]any)
 	require.True(t, ok)
 	require.Len(t, configs, 1)
-	cfg := configs[0].(map[string]any)
+	cfg, _ := configs[0].(map[string]any)
 	assert.Equal(t, "172.30.0.0/24", cfg["Subnet"])
 }
 
@@ -109,19 +109,19 @@ func TestEnsureSandboxNetwork_SubnetOverlap_FallbackSucceeds(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
 			return
 		}
 		if r.Method == "POST" && r.URL.Path == "/networks/create" {
 			createAttempts++
 			var body map[string]any
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body)
 
 			if createAttempts == 1 {
 				// First attempt with subnet — reject with overlap error
 				assert.NotNil(t, body["IPAM"], "first attempt should include IPAM/subnet")
 				w.WriteHeader(http.StatusForbidden)
-				json.NewEncoder(w).Encode(map[string]string{
+				_ = json.NewEncoder(w).Encode(map[string]string{
 					"message": "invalid pool request: Pool overlaps with other one on this address space",
 				})
 				return
@@ -129,7 +129,7 @@ func TestEnsureSandboxNetwork_SubnetOverlap_FallbackSucceeds(t *testing.T) {
 			// Second attempt without subnet — succeed
 			assert.Nil(t, body["IPAM"], "fallback attempt should not include IPAM")
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(map[string]string{"Id": "net456"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"Id": "net456"})
 			return
 		}
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -156,12 +156,12 @@ func TestEnsureSandboxNetwork_BothCreatesFail(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
 			return
 		}
 		if r.Method == "POST" && r.URL.Path == "/networks/create" {
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"message": "daemon error"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "daemon error"})
 			return
 		}
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -190,13 +190,13 @@ func TestEnsureSandboxNetwork_NoSubnetConfigured(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/networks/") {
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
 			return
 		}
 		if r.Method == "POST" && r.URL.Path == "/networks/create" {
-			json.NewDecoder(r.Body).Decode(&createdBody)
+			_ = json.NewDecoder(r.Body).Decode(&createdBody)
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(map[string]string{"Id": "net789"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"Id": "net789"})
 			return
 		}
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
