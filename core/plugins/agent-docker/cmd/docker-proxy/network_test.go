@@ -68,7 +68,40 @@ func TestDiscoverSandboxNetwork_Success(t *testing.T) {
 	assert.Equal(t, "abc123def456", proxy.cfg.NetworkID)
 }
 
-func TestDiscoverSandboxNetwork_NetworkNotOnContainer(t *testing.T) {
+func TestDiscoverSandboxNetwork_NetworkNotOnContainer_FallbackBySuffix(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{
+					"chome-matv3-ihbums_sandbox": map[string]any{
+						"NetworkID": "real-net-id-999",
+					},
+					"bridge": map[string]any{
+						"NetworkID": "bridge0",
+					},
+				},
+			},
+		})
+	})
+
+	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "my-agent-team-v3_sandbox",
+		AllowedImages: []string{"*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	})
+
+	err := proxy.DiscoverSandboxNetwork()
+	assert.NoError(t, err)
+	assert.Equal(t, "real-net-id-999", proxy.cfg.NetworkID)
+}
+
+func TestDiscoverSandboxNetwork_NetworkNotOnContainer_NoFallback(t *testing.T) {
 	hostname, _ := os.Hostname()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

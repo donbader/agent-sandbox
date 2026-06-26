@@ -49,19 +49,43 @@ func (dp *DockerProxy) DiscoverSandboxNetwork() error {
 
 	// Find the network matching our configured name
 	net, ok := info.NetworkSettings.Networks[dp.cfg.NetworkName]
-	if !ok {
-		// List available networks for debugging
-		available := make([]string, 0, len(info.NetworkSettings.Networks))
-		for name := range info.NetworkSettings.Networks {
-			available = append(available, name)
-		}
-		return fmt.Errorf("sandbox network %q not found on this container; available: %v",
-			dp.cfg.NetworkName, available)
+	if ok {
+		dp.cfg.NetworkID = net.NetworkID
+		slog.Info("discovered sandbox network",
+			"name", dp.cfg.NetworkName,
+			"id", dp.cfg.NetworkID[:min(12, len(dp.cfg.NetworkID))],
+		)
+		return nil
 	}
 
-	dp.cfg.NetworkID = net.NetworkID
-	slog.Info("discovered sandbox network",
-		"name", dp.cfg.NetworkName,
+	// Exact name match failed. The compose project name at deploy time may differ
+	// from what's in SANDBOX_NETWORK (e.g. directory-based naming, truncation).
+	// Fallback: find any network ending in "_sandbox".
+	var fallbackName string
+	var fallbackID string
+	var candidates []string
+	for name, n := range info.NetworkSettings.Networks {
+		candidates = append(candidates, name)
+		if strings.HasSuffix(name, "_sandbox") {
+			if fallbackName != "" {
+				// Multiple _sandbox networks — ambiguous, can't pick
+				return fmt.Errorf("sandbox network %q not found and multiple _sandbox networks exist: %v",
+					dp.cfg.NetworkName, candidates)
+			}
+			fallbackName = name
+			fallbackID = n.NetworkID
+		}
+	}
+
+	if fallbackName == "" {
+		return fmt.Errorf("sandbox network %q not found on this container; available: %v",
+			dp.cfg.NetworkName, candidates)
+	}
+
+	dp.cfg.NetworkID = fallbackID
+	slog.Warn("sandbox network name mismatch, using fallback",
+		"configured", dp.cfg.NetworkName,
+		"actual", fallbackName,
 		"id", dp.cfg.NetworkID[:min(12, len(dp.cfg.NetworkID))],
 	)
 	return nil
