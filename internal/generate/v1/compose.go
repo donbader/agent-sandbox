@@ -657,6 +657,7 @@ func injectSidecarSystemEnv(sidecar map[string]any, agentName, projectName strin
 	}
 	env["SANDBOX_ID"] = projectName + "-" + agentName
 	env["SANDBOX_NETWORK"] = projectName + "_sandbox"
+	env["SANDBOX_NETWORK_SUBNET"] = sandboxSubnet
 	env["AGENT_NAME"] = agentName
 	sidecar["environment"] = env
 }
