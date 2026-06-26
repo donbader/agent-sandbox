@@ -11,13 +11,10 @@ import (
 )
 
 // DiscoverSandboxNetwork finds the sandbox network ID by inspecting the proxy's own
-// container. This is the correct approach because the compose infrastructure creates
-// and manages the network — the proxy just needs to discover which network instance
-// the agent stack is actually on, then attach spawned containers to the same one.
+// container. The compose infrastructure places this sidecar on the sandbox network,
+// so we just need to find which network we're on that isn't a Docker default.
 //
-// Previous design (EnsureSandboxNetwork) was broken: it would create a NEW network
-// with the same name if the original was missing, but the agent container would still
-// be on the old network instance, making spawned containers unreachable.
+// This approach is robust regardless of compose project naming — no env var matching needed.
 func (dp *DockerProxy) DiscoverSandboxNetwork() error {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -47,24 +44,67 @@ func (dp *DockerProxy) DiscoverSandboxNetwork() error {
 		return fmt.Errorf("parse container inspect: %w", err)
 	}
 
-	// Find the network matching our configured name
-	net, ok := info.NetworkSettings.Networks[dp.cfg.NetworkName]
-	if !ok {
-		// List available networks for debugging
+	// Find the sandbox network: the non-default network this container is on.
+	// Docker defaults are "bridge", "host", "none". Compose puts us on the
+	// project network — that's the one we want.
+	var foundName string
+	var foundID string
+	for name, n := range info.NetworkSettings.Networks {
+		if isDefaultNetwork(name) {
+			continue
+		}
+		if foundName != "" {
+			// Multiple non-default networks. Try exact match on configured name.
+			if net, ok := info.NetworkSettings.Networks[dp.cfg.NetworkName]; ok {
+				dp.cfg.NetworkID = net.NetworkID
+				slog.Info("discovered sandbox network (exact match)",
+					"name", dp.cfg.NetworkName,
+					"id", dp.cfg.NetworkID[:min(12, len(dp.cfg.NetworkID))],
+				)
+				return nil
+			}
+			// Can't determine which is the sandbox network
+			available := make([]string, 0, len(info.NetworkSettings.Networks))
+			for name := range info.NetworkSettings.Networks {
+				available = append(available, name)
+			}
+			return fmt.Errorf("multiple non-default networks found, cannot determine sandbox network; available: %v", available)
+		}
+		foundName = name
+		foundID = n.NetworkID
+	}
+
+	if foundName == "" {
 		available := make([]string, 0, len(info.NetworkSettings.Networks))
 		for name := range info.NetworkSettings.Networks {
 			available = append(available, name)
 		}
-		return fmt.Errorf("sandbox network %q not found on this container; available: %v",
-			dp.cfg.NetworkName, available)
+		return fmt.Errorf("no sandbox network found on this container; available: %v", available)
 	}
 
-	dp.cfg.NetworkID = net.NetworkID
-	slog.Info("discovered sandbox network",
-		"name", dp.cfg.NetworkName,
-		"id", dp.cfg.NetworkID[:min(12, len(dp.cfg.NetworkID))],
-	)
+	dp.cfg.NetworkID = foundID
+	if foundName != dp.cfg.NetworkName {
+		slog.Warn("sandbox network name differs from config (compose project name mismatch)",
+			"configured", dp.cfg.NetworkName,
+			"actual", foundName,
+			"id", dp.cfg.NetworkID[:min(12, len(dp.cfg.NetworkID))],
+		)
+	} else {
+		slog.Info("discovered sandbox network",
+			"name", foundName,
+			"id", dp.cfg.NetworkID[:min(12, len(dp.cfg.NetworkID))],
+		)
+	}
 	return nil
+}
+
+// isDefaultNetwork returns true for Docker's built-in network names.
+func isDefaultNetwork(name string) bool {
+	switch name {
+	case "bridge", "host", "none":
+		return true
+	}
+	return false
 }
 
 // handleNetworkCreate intercepts network creation, namespaces the name, and forces Internal=true.

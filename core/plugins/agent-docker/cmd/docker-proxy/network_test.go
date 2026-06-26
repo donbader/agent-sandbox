@@ -2,12 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
-	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,17 +31,18 @@ func newProxyWithUpstream(t *testing.T, handler http.Handler, cfg *ProxyConfig) 
 	return proxy
 }
 
-func TestDiscoverSandboxNetwork_Success(t *testing.T) {
-	hostname, _ := os.Hostname()
-
+func TestDiscoverSandboxNetwork_SingleNonDefault(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && r.URL.Path == fmt.Sprintf("/containers/%s/json", hostname) {
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/containers/") {
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"NetworkSettings": map[string]any{
 					"Networks": map[string]any{
 						"my-project_sandbox": map[string]any{
 							"NetworkID": "abc123def456",
+						},
+						"bridge": map[string]any{
+							"NetworkID": "bridge0000",
 						},
 					},
 				},
@@ -53,7 +53,7 @@ func TestDiscoverSandboxNetwork_Success(t *testing.T) {
 	})
 
 	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "my-project-coder",
+		SandboxID:     "test",
 		AgentName:     "coder",
 		NetworkName:   "my-project_sandbox",
 		AllowedImages: []string{"*"},
@@ -68,28 +68,95 @@ func TestDiscoverSandboxNetwork_Success(t *testing.T) {
 	assert.Equal(t, "abc123def456", proxy.cfg.NetworkID)
 }
 
-func TestDiscoverSandboxNetwork_NetworkNotOnContainer(t *testing.T) {
-	hostname, _ := os.Hostname()
-
+func TestDiscoverSandboxNetwork_NameMismatch_StillWorks(t *testing.T) {
+	// Compose project name differs from SANDBOX_NETWORK — proxy finds it anyway
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && r.URL.Path == fmt.Sprintf("/containers/%s/json", hostname) {
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"NetworkSettings": map[string]any{
-					"Networks": map[string]any{
-						"some_other_network": map[string]any{
-							"NetworkID": "other999",
-						},
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{
+					"chome-matv3-ihbums_sandbox": map[string]any{
+						"NetworkID": "real-net-id-999",
+					},
+					"bridge": map[string]any{
+						"NetworkID": "bridge0",
 					},
 				},
-			})
-			return
-		}
-		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+			},
+		})
 	})
 
 	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "my-project-coder",
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "my-agent-team-v3_sandbox",
+		AllowedImages: []string{"*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	})
+
+	err := proxy.DiscoverSandboxNetwork()
+	assert.NoError(t, err)
+	assert.Equal(t, "real-net-id-999", proxy.cfg.NetworkID)
+}
+
+func TestDiscoverSandboxNetwork_MultipleNonDefault_ExactMatch(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{
+					"my-project_sandbox": map[string]any{
+						"NetworkID": "sandbox123",
+					},
+					"my-project_default": map[string]any{
+						"NetworkID": "default456",
+					},
+					"bridge": map[string]any{
+						"NetworkID": "bridge0",
+					},
+				},
+			},
+		})
+	})
+
+	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "my-project_sandbox",
+		AllowedImages: []string{"*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	})
+
+	err := proxy.DiscoverSandboxNetwork()
+	assert.NoError(t, err)
+	assert.Equal(t, "sandbox123", proxy.cfg.NetworkID)
+}
+
+func TestDiscoverSandboxNetwork_MultipleNonDefault_NoExactMatch(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{
+					"unknown_net_a": map[string]any{
+						"NetworkID": "aaa",
+					},
+					"unknown_net_b": map[string]any{
+						"NetworkID": "bbb",
+					},
+				},
+			},
+		})
+	})
+
+	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
+		SandboxID:     "test",
 		AgentName:     "coder",
 		NetworkName:   "my-project_sandbox",
 		AllowedImages: []string{"*"},
@@ -101,18 +168,47 @@ func TestDiscoverSandboxNetwork_NetworkNotOnContainer(t *testing.T) {
 
 	err := proxy.DiscoverSandboxNetwork()
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "sandbox network \"my-project_sandbox\" not found")
-	assert.Contains(t, err.Error(), "some_other_network")
+	assert.Contains(t, err.Error(), "multiple non-default networks")
 }
 
-func TestDiscoverSandboxNetwork_InspectFails(t *testing.T) {
+func TestDiscoverSandboxNetwork_OnlyDefaultNetworks(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"message": "no such container"})
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{
+					"bridge": map[string]any{
+						"NetworkID": "bridge0",
+					},
+				},
+			},
+		})
 	})
 
 	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "my-project-coder",
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "my-project_sandbox",
+		AllowedImages: []string{"*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	})
+
+	err := proxy.DiscoverSandboxNetwork()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no sandbox network found")
+}
+
+func TestDiscoverSandboxNetwork_ContainerNotFound(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "No such container"})
+	})
+
+	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
+		SandboxID:     "test",
 		AgentName:     "coder",
 		NetworkName:   "my-project_sandbox",
 		AllowedImages: []string{"*"},
@@ -127,42 +223,11 @@ func TestDiscoverSandboxNetwork_InspectFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP 404")
 }
 
-func TestDiscoverSandboxNetwork_MultipleNetworks(t *testing.T) {
-	hostname, _ := os.Hostname()
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && r.URL.Path == fmt.Sprintf("/containers/%s/json", hostname) {
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"NetworkSettings": map[string]any{
-					"Networks": map[string]any{
-						"bridge": map[string]any{
-							"NetworkID": "bridgenet111",
-						},
-						"my-project_sandbox": map[string]any{
-							"NetworkID": "sandboxnet222",
-						},
-					},
-				},
-			})
-			return
-		}
-		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-	})
-
-	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
-		SandboxID:     "my-project-coder",
-		AgentName:     "coder",
-		NetworkName:   "my-project_sandbox",
-		AllowedImages: []string{"*"},
-		MaxContainers: 5,
-		MemoryBytes:   2 * 1024 * 1024 * 1024,
-		NanoCPUs:      2000000000,
-		PidsLimit:     256,
-	})
-
-	err := proxy.DiscoverSandboxNetwork()
-	assert.NoError(t, err)
-	// Should pick the correct network by name, not the bridge
-	assert.Equal(t, "sandboxnet222", proxy.cfg.NetworkID)
+func TestIsDefaultNetwork(t *testing.T) {
+	assert.True(t, isDefaultNetwork("bridge"))
+	assert.True(t, isDefaultNetwork("host"))
+	assert.True(t, isDefaultNetwork("none"))
+	assert.False(t, isDefaultNetwork("my-project_sandbox"))
+	assert.False(t, isDefaultNetwork("chome-matv3-ihbums_sandbox"))
+	assert.False(t, isDefaultNetwork("custom_network"))
 }
