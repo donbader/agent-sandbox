@@ -29,13 +29,26 @@ func (dp *DockerProxy) EnsureSandboxNetwork() error {
 	// Network not found — recreate it
 	slog.Warn("sandbox network missing, recreating", "name", dp.cfg.NetworkName)
 
+	// Try with configured subnet first, fall back to no subnet if pool overlaps
+	if dp.cfg.NetworkSubnet != "" {
+		err := dp.createSandboxNetwork(true)
+		if err == nil {
+			return nil
+		}
+		slog.Warn("create with subnet failed, retrying without subnet", "error", err)
+	}
+
+	return dp.createSandboxNetwork(false)
+}
+
+func (dp *DockerProxy) createSandboxNetwork(withSubnet bool) error {
 	networkConfig := map[string]any{
 		"Name":     dp.cfg.NetworkName,
 		"Driver":   "bridge",
 		"Internal": true,
 	}
 
-	if dp.cfg.NetworkSubnet != "" {
+	if withSubnet && dp.cfg.NetworkSubnet != "" {
 		networkConfig["IPAM"] = map[string]any{
 			"Config": []map[string]any{
 				{"Subnet": dp.cfg.NetworkSubnet},
@@ -58,7 +71,11 @@ func (dp *DockerProxy) EnsureSandboxNetwork() error {
 			dp.cfg.NetworkName, createRec.code, createRec.body.String())
 	}
 
-	slog.Info("sandbox network recreated", "name", dp.cfg.NetworkName, "subnet", dp.cfg.NetworkSubnet)
+	subnetInfo := dp.cfg.NetworkSubnet
+	if !withSubnet {
+		subnetInfo = "auto-assigned"
+	}
+	slog.Info("sandbox network recreated", "name", dp.cfg.NetworkName, "subnet", subnetInfo)
 	return nil
 }
 
