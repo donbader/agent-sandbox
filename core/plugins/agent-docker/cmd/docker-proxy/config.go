@@ -13,6 +13,7 @@ type ProxyConfig struct {
 	SandboxID           string
 	AgentName           string
 	NetworkName         string
+	NetworkSubnet       string // CIDR for sandbox network (e.g. "172.30.0.0/24")
 	AllowedImages       []string
 	MaxContainers       int
 	MemoryBytes         int64
@@ -84,6 +85,7 @@ func loadConfigFromEnv() (*ProxyConfig, error) {
 	cfg.PidsLimit = int64(envInt("PID_LIMIT", 256))
 	cfg.AllowCompose = os.Getenv("ALLOW_COMPOSE") == "true"
 	cfg.AllowBuild = os.Getenv("ALLOW_BUILD") == "true"
+	cfg.NetworkSubnet = os.Getenv("SANDBOX_NETWORK_SUBNET") // optional; needed to recreate network if missing
 
 	capsJSON := os.Getenv("ALLOWED_CAPABILITIES")
 	if capsJSON != "" && capsJSON != "null" && capsJSON != "[]" {

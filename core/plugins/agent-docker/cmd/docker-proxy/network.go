@@ -9,6 +9,59 @@ import (
 	"strings"
 )
 
+// EnsureSandboxNetwork verifies the sandbox network exists on the upstream daemon.
+// If missing (e.g. after daemon restart or prune), it recreates it.
+// This makes the proxy self-healing rather than dependent on external network state.
+func (dp *DockerProxy) EnsureSandboxNetwork() error {
+	// Check if network exists
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/networks/%s", dp.cfg.NetworkName), nil)
+	req.URL.Scheme = "http"
+	req.URL.Host = "docker"
+
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, req)
+
+	if rec.code == http.StatusOK {
+		slog.Info("sandbox network exists", "name", dp.cfg.NetworkName)
+		return nil
+	}
+
+	// Network not found — recreate it
+	slog.Warn("sandbox network missing, recreating", "name", dp.cfg.NetworkName)
+
+	networkConfig := map[string]any{
+		"Name":     dp.cfg.NetworkName,
+		"Driver":   "bridge",
+		"Internal": true,
+	}
+
+	if dp.cfg.NetworkSubnet != "" {
+		networkConfig["IPAM"] = map[string]any{
+			"Config": []map[string]any{
+				{"Subnet": dp.cfg.NetworkSubnet},
+			},
+		}
+	}
+
+	body, _ := json.Marshal(networkConfig)
+	createReq, _ := http.NewRequest("POST", "/networks/create", strings.NewReader(string(body)))
+	createReq.URL.Scheme = "http"
+	createReq.URL.Host = "docker"
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.ContentLength = int64(len(body))
+
+	createRec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(createRec, createReq)
+
+	if createRec.code != http.StatusCreated {
+		return fmt.Errorf("failed to create sandbox network %s: HTTP %d: %s",
+			dp.cfg.NetworkName, createRec.code, createRec.body.String())
+	}
+
+	slog.Info("sandbox network recreated", "name", dp.cfg.NetworkName, "subnet", dp.cfg.NetworkSubnet)
+	return nil
+}
+
 // handleNetworkCreate intercepts network creation, namespaces the name, and forces Internal=true.
 func (dp *DockerProxy) handleNetworkCreate(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)

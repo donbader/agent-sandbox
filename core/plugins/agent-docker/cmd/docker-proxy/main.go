@@ -41,6 +41,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Ensure the sandbox network exists on the upstream daemon.
+	// Recreates it if missing (e.g. after daemon restart or network prune).
+	if err := proxy.EnsureSandboxNetwork(); err != nil {
+		slog.Error("ensure sandbox network", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize volume translator (discovers agent mounts, checks Docker version)
 	if cfg.AllowCompose {
 		proxy.volumes = proxy.NewVolumeTranslator()
