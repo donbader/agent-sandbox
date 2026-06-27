@@ -119,7 +119,6 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 
 		// Check deny_graphql before processing
 		if h.DenyGraphQLChecker != nil && h.DenyGraphQLChecker(serverName, req) {
-			slog.Warn("mitm: graphql mutation denied", "host", serverName)
 			blockResp := &http.Response{
 				StatusCode: http.StatusForbidden,
 				ProtoMajor: 1,

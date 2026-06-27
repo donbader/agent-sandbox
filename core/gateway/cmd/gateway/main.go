@@ -175,11 +175,11 @@ func main() {
 				if req.Method != http.MethodPost {
 					return false
 				}
-				if !strings.Contains(req.URL.Path, "graphql") {
+				if !strings.Contains(strings.ToLower(req.URL.Path), "graphql") {
 					return false
 				}
 				decision := egressFilter.AllowHost(host)
-				if decision.Rule == nil || decision.Rule.DenyGraphQL == nil {
+				if decision.Rule == nil || decision.Rule.DenyGraphQL == nil || len(decision.Rule.DenyGraphQL.Mutations) == 0 {
 					return false
 				}
 				bodyBytes, err := io.ReadAll(req.Body)
