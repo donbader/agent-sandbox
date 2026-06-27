@@ -8,6 +8,10 @@ options:
     type: array
     required: false
     description: "URL path patterns to block. Format: METHOD /path/glob or /path/glob"
+  deny_graphql:
+    type: object
+    required: false
+    description: "Block specific GraphQL mutations. Object with 'mutations' array of mutation names."
 
 contributes:
   runtime:
@@ -25,4 +29,11 @@ contributes:
           {{- range .plugin.options.deny_paths }}
           - "{{ . }}"
           {{- end }}
+        {{- end }}
+        {{- if .plugin.options.deny_graphql }}
+        deny_graphql:
+          mutations:
+            {{- range (index .plugin.options.deny_graphql "mutations") }}
+            - "{{ . }}"
+            {{- end }}
         {{- end }}
