@@ -53,3 +53,23 @@ func TestExtractGraphQLMutation_EmptyOperationNameFallsBackToQuery(t *testing.T)
 	body := []byte(`{"operationName":"","query":"mutation CreateIssue { createIssue { id } }"}`)
 	assert.Equal(t, "CreateIssue", ExtractGraphQLMutation(body))
 }
+
+// --- TDD: anonymous mutation tests (gh CLI format) ---
+
+func TestExtractGraphQLMutation_AnonymousMutation(t *testing.T) {
+	// gh CLI sends anonymous mutations without operationName
+	body := []byte(`{"query":"mutation { mergePullRequest(input: {pullRequestId: \"PR_123\"}) { pullRequest { merged } } }"}`)
+	assert.Equal(t, "mergePullRequest", ExtractGraphQLMutation(body))
+}
+
+func TestExtractGraphQLMutation_AnonymousMutationWithNewlines(t *testing.T) {
+	// Real gh CLI format with newlines
+	body := []byte(`{"query":"mutation {\n  mergePullRequest(input: {pullRequestId: \"PR_123\"}) {\n    pullRequest { merged }\n  }\n}"}`)
+	assert.Equal(t, "mergePullRequest", ExtractGraphQLMutation(body))
+}
+
+func TestExtractGraphQLMutation_AnonymousMutationDoesNotMatchQuery(t *testing.T) {
+	// Anonymous query (not mutation) should NOT match
+	body := []byte(`{"query":"query { repository(owner: \"foo\", name: \"bar\") { id } }"}`)
+	assert.Equal(t, "", ExtractGraphQLMutation(body))
+}
