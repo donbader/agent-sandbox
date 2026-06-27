@@ -260,6 +260,30 @@ installations:
       token: "${GITHUB_PAT}"
 ```
 
+#### Access control options
+
+The `github-pat` plugin supports optional access control to restrict what the agent can do via the GitHub API:
+
+```yaml
+installations:
+  - plugin: "@builtin/github-pat"
+    options:
+      token: "${GITHUB_PAT}"
+      deny_paths:
+        - "PUT /repos/*/pulls/*/merge"
+        - "DELETE /repos/*/branches/*"
+      deny_graphql:
+        mutations:
+          - "mergePullRequest"
+          - "deleteBranch"
+```
+
+- **`deny_paths`** (array, optional) — URL path patterns to block. Format: `METHOD /path/glob` or `/path/glob` (blocks all methods). The gateway returns 403 for matching requests.
+- **`deny_graphql`** (object, optional) — Block specific GraphQL mutations by name. The gateway inspects the `query` field in POST requests to `/graphql` and returns 403 if a blocked mutation is detected.
+  - `mutations` (array) — List of GraphQL mutation operation names to block (e.g. `mergePullRequest`, `deleteBranch`).
+
+> **Tip:** Use both `deny_paths` and `deny_graphql` together to prevent bypass. For example, blocking `PUT /repos/*/pulls/*/merge` alone still allows merging via the `mergePullRequest` GraphQL mutation.
+
 **Env var expansion** — String values in gateway `services[].headers` support `${ENV_VAR}` syntax, resolved at compose runtime from the `.env` file on the deployment machine.
 
 > **Important:** Plugin options used in `contributes.runtime.extra_builds` are rendered at **generate time** via Go templates. If you use `${VAR}` inside a plugin option value (e.g. in an `object`-type option), it will be baked **literally** into the Dockerfile — the shell variable will NOT be expanded at build time because:
