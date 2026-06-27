@@ -5,7 +5,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
 
@@ -26,9 +24,6 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
-
-// graphqlMutationRe matches the mutation name in a GraphQL query string.
-var graphqlMutationRe = regexp.MustCompile(`(?i)mutation\s+(\w+)`)
 
 const (
 	// sharedCertPath is where the CA cert is written for the agent container (shared volume).
@@ -192,19 +187,7 @@ func main() {
 					return false
 				}
 				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-				var gqlReq struct {
-					Query         string `json:"query"`
-					OperationName string `json:"operationName"`
-				}
-				if err := json.Unmarshal(bodyBytes, &gqlReq); err != nil {
-					return false
-				}
-				mutationName := gqlReq.OperationName
-				if mutationName == "" {
-					if m := graphqlMutationRe.FindStringSubmatch(gqlReq.Query); len(m) > 1 {
-						mutationName = m[1]
-					}
-				}
+				mutationName := mitm.ExtractGraphQLMutation(bodyBytes)
 				if mutationName == "" {
 					return false
 				}

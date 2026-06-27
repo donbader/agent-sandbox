@@ -178,6 +178,40 @@ func TestBuildGatewayConfig_PluginEgressMerged(t *testing.T) {
 	assert.Len(t, gwCfg.AuthHeaders, 2) // api.example.com + github.com
 }
 
+func TestWriteGatewayRuntimeConfig_DenyGraphQL(t *testing.T) {
+	buildDir := t.TempDir()
+
+	gwCfg := &GatewayConfigOutput{
+		EgressRules: []config.EgressRule{
+			{
+				Hosts: []string{"api.github.com"},
+				DenyGraphQL: &config.DenyGraphQL{
+					Mutations: []string{"mergePullRequest", "deleteBranch"},
+				},
+			},
+			{Hosts: []string{"*"}},
+		},
+	}
+
+	err := WriteGatewayRuntimeConfig(buildDir, gwCfg)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(buildDir, "config.yaml"))
+	require.NoError(t, err)
+
+	var rc gatewayRuntimeConfig
+	require.NoError(t, yaml.Unmarshal(data, &rc))
+
+	// deny_graphql implies MITM — host should appear in mitm_domains
+	assert.Contains(t, rc.MITMDomains, "api.github.com")
+	assert.NotContains(t, rc.MITMDomains, "*")
+
+	// deny_graphql config must be preserved in egress rules
+	require.Len(t, rc.EgressRules, 2)
+	require.NotNil(t, rc.EgressRules[0].DenyGraphQL)
+	assert.Equal(t, []string{"mergePullRequest", "deleteBranch"}, rc.EgressRules[0].DenyGraphQL.Mutations)
+}
+
 func TestBuildGatewayConfig_PluginURLNormalization(t *testing.T) {
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{

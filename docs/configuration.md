@@ -144,6 +144,22 @@ For HTTPS hosts with `headers`, the gateway terminates TLS (MITM), injects heade
 
 Rules can also use `deny_paths: [...]` to block specific URL paths on otherwise-allowed hosts.
 
+Rules can also use `deny_graphql:` to block specific GraphQL mutations — useful when `deny_paths` can't distinguish operations since all GraphQL traffic goes to a single `POST /graphql` endpoint:
+
+```yaml
+gateway:
+  egress:
+    - hosts: ["api.github.com"]
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
+      deny_graphql:
+        mutations:
+          - "mergePullRequest"
+          - "deleteBranch"
+```
+
+The gateway inspects POST requests to paths containing `graphql`, extracts the mutation name from `operationName` or the `query` field, and returns 403 if it matches the deny list. Matching is case-insensitive. Requires MITM (auto-enabled).
+
 > **Deprecation note:** `gateway.services` is deprecated but still supported for backward compatibility. It is converted to equivalent egress rules internally. New configs should use `gateway.egress`. See [Gateway Egress Reference](reference/gateway-egress.md) for full details.
 
 ## Plugins (installations)

@@ -171,6 +171,24 @@ func TestValidateEgressRules(t *testing.T) {
 		assert.Len(t, errs, 1)
 		assert.Contains(t, errs[0], "cannot have both deny: true and middlewares")
 	})
+
+	t.Run("deny with deny_graphql", func(t *testing.T) {
+		rules := []EgressRule{
+			{Hosts: []string{"api.github.com"}, Deny: true, DenyGraphQL: &DenyGraphQL{Mutations: []string{"mergePullRequest"}}},
+		}
+		errs := ValidateEgressRules(rules)
+		assert.Len(t, errs, 1)
+		assert.Contains(t, errs[0], "cannot have both deny: true and deny_graphql")
+	})
+
+	t.Run("valid deny_graphql", func(t *testing.T) {
+		rules := []EgressRule{
+			{Hosts: []string{"api.github.com"}, DenyGraphQL: &DenyGraphQL{Mutations: []string{"mergePullRequest", "deleteBranch"}}},
+			{Hosts: []string{"*"}},
+		}
+		errs := ValidateEgressRules(rules)
+		assert.Empty(t, errs)
+	})
 }
 
 func TestMigrateServicesToEgress(t *testing.T) {
@@ -198,6 +216,7 @@ func TestMigrateServicesToEgress(t *testing.T) {
 func TestEgressRule_NeedsMITM(t *testing.T) {
 	assert.True(t, (&EgressRule{Headers: map[string]string{"X": "Y"}}).NeedsMITM())
 	assert.True(t, (&EgressRule{DenyPaths: []string{"/foo"}}).NeedsMITM())
+	assert.True(t, (&EgressRule{DenyGraphQL: &DenyGraphQL{Mutations: []string{"mergePullRequest"}}}).NeedsMITM())
 	assert.False(t, (&EgressRule{Hosts: []string{"*"}}).NeedsMITM())
 	assert.False(t, (&EgressRule{Deny: true}).NeedsMITM())
 }
