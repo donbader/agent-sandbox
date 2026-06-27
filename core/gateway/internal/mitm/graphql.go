@@ -5,12 +5,15 @@ import (
 	"regexp"
 )
 
-// graphqlMutationRe matches the mutation name in a GraphQL query string.
+// graphqlMutationRe matches a named mutation: mutation MergePullRequest(...)
 var graphqlMutationRe = regexp.MustCompile(`(?i)mutation\s+(\w+)`)
 
+// graphqlAnonMutationRe matches an anonymous mutation's first field: mutation { mergePullRequest(...)
+var graphqlAnonMutationRe = regexp.MustCompile(`(?is)mutation\s*\{\s*(\w+)`)
+
 // ExtractGraphQLMutation extracts the mutation name from a GraphQL JSON request body.
-// It first checks the operationName field, then falls back to parsing the query field
-// via regex. Returns "" if the body is not valid JSON or contains no mutation name.
+// Priority: operationName field > named mutation regex > anonymous mutation field name.
+// Returns "" if the body is not valid JSON or contains no mutation name.
 func ExtractGraphQLMutation(body []byte) string {
 	var gqlReq struct {
 		Query         string `json:"query"`
@@ -22,7 +25,12 @@ func ExtractGraphQLMutation(body []byte) string {
 	if gqlReq.OperationName != "" {
 		return gqlReq.OperationName
 	}
+	// Try named mutation: mutation MergePullRequest(...) { ... }
 	if m := graphqlMutationRe.FindStringSubmatch(gqlReq.Query); len(m) > 1 {
+		return m[1]
+	}
+	// Try anonymous mutation: mutation { mergePullRequest(...) { ... } }
+	if m := graphqlAnonMutationRe.FindStringSubmatch(gqlReq.Query); len(m) > 1 {
 		return m[1]
 	}
 	return ""
