@@ -95,6 +95,62 @@ func sampleValue(s plugin.OptionSchema) any {
 	}
 }
 
+// TestGithubPatPlugin_DenyGraphQL verifies that the github-pat plugin renders
+// deny_graphql.mutations correctly into the contributed egress rule.
+func TestGithubPatPlugin_DenyGraphQL(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "core", "plugins", "github-pat", "plugin.yaml"))
+	require.NoError(t, err)
+
+	p, err := plugin.ParsePluginYAML(raw)
+	require.NoError(t, err)
+
+	opts := map[string]any{
+		"token": "${GITHUB_PAT}",
+		"deny_graphql": map[string]any{
+			"mutations": []any{"mergePullRequest"},
+		},
+	}
+	ctx := plugin.RenderContext{
+		Self:      map[string]any{"name": "test-agent"},
+		Generator: map[string]any{"core_version": "v1.0.0"},
+	}
+
+	contribs, err := plugin.RenderContributions(p, opts, ctx)
+	require.NoError(t, err)
+
+	// github-pat contributes exactly one egress rule covering api.github.com and github.com
+	require.Len(t, contribs.Gateway.Egress, 1, "expected one egress rule")
+	rule := contribs.Gateway.Egress[0]
+	require.Contains(t, rule.Hosts, "api.github.com")
+	require.Contains(t, rule.Hosts, "github.com")
+
+	// deny_graphql must be rendered with the provided mutation name
+	require.NotNil(t, rule.DenyGraphQL, "deny_graphql should be present on egress rule")
+	require.Equal(t, []string{"mergePullRequest"}, rule.DenyGraphQL.Mutations)
+}
+
+// TestGithubPatPlugin_NoDenyGraphQL verifies that omitting deny_graphql produces
+// an egress rule with no DenyGraphQL field (template conditional path).
+func TestGithubPatPlugin_NoDenyGraphQL(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "core", "plugins", "github-pat", "plugin.yaml"))
+	require.NoError(t, err)
+
+	p, err := plugin.ParsePluginYAML(raw)
+	require.NoError(t, err)
+
+	opts := map[string]any{"token": "${GITHUB_PAT}"}
+	ctx := plugin.RenderContext{
+		Self:      map[string]any{"name": "test-agent"},
+		Generator: map[string]any{"core_version": "v1.0.0"},
+	}
+
+	contribs, err := plugin.RenderContributions(p, opts, ctx)
+	require.NoError(t, err)
+
+	require.Len(t, contribs.Gateway.Egress, 1)
+	require.Nil(t, contribs.Gateway.Egress[0].DenyGraphQL, "deny_graphql should be absent when not configured")
+}
+
 // sampleFunctions provides stub values for plugins that declare computed functions.
 func sampleFunctions(p *plugin.PluginDef) map[string]string {
 	fns := make(map[string]string)
