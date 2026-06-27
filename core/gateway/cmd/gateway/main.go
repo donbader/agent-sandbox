@@ -4,13 +4,17 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -22,6 +26,9 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
+
+// graphqlMutationRe matches the mutation name in a GraphQL query string.
+var graphqlMutationRe = regexp.MustCompile(`(?i)mutation\s+(\w+)`)
 
 const (
 	// sharedCertPath is where the CA cert is written for the agent container (shared volume).
@@ -159,13 +166,53 @@ func main() {
 
 		mitmHandler := mitm.NewHandler(cfg.MITMDomains, caCert)
 
-		// Wire deny_paths checking from egress rules into MITM handler
+		// Wire deny_paths and deny_graphql checking from egress rules into MITM handler
 		if len(cfg.EgressRules) > 0 {
 			egressFilter := proxy.NewEgressFilter(cfg.EgressRules)
 			mitmHandler.DenyPathChecker = func(host, method, path string) bool {
 				decision := egressFilter.AllowHost(host)
 				if decision.Rule != nil && len(decision.Rule.DenyPaths) > 0 {
 					return !egressFilter.AllowPath(decision.Rule, method, path)
+				}
+				return false
+			}
+			mitmHandler.DenyGraphQLChecker = func(host string, req *http.Request) bool {
+				if req.Method != http.MethodPost {
+					return false
+				}
+				if !strings.Contains(req.URL.Path, "graphql") {
+					return false
+				}
+				decision := egressFilter.AllowHost(host)
+				if decision.Rule == nil || decision.Rule.DenyGraphQL == nil {
+					return false
+				}
+				bodyBytes, err := io.ReadAll(req.Body)
+				if err != nil {
+					return false
+				}
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				var gqlReq struct {
+					Query         string `json:"query"`
+					OperationName string `json:"operationName"`
+				}
+				if err := json.Unmarshal(bodyBytes, &gqlReq); err != nil {
+					return false
+				}
+				mutationName := gqlReq.OperationName
+				if mutationName == "" {
+					if m := graphqlMutationRe.FindStringSubmatch(gqlReq.Query); len(m) > 1 {
+						mutationName = m[1]
+					}
+				}
+				if mutationName == "" {
+					return false
+				}
+				for _, denied := range decision.Rule.DenyGraphQL.Mutations {
+					if strings.EqualFold(denied, mutationName) {
+						slog.Warn("mitm: graphql mutation denied", "host", host, "mutation", mutationName)
+						return true
+					}
 				}
 				return false
 			}

@@ -15,9 +15,15 @@ type EgressRule struct {
 	Deny        bool              `yaml:"deny,omitempty" json:"deny,omitempty" jsonschema:"title=deny,description=If true block matching traffic"`
 	Headers     map[string]string `yaml:"headers,omitempty" json:"headers,omitempty" jsonschema:"title=headers,description=Headers injected by gateway (implies MITM + allow)"`
 	DenyPaths   []string          `yaml:"deny_paths,omitempty" json:"deny_paths,omitempty" jsonschema:"title=deny_paths,description=URL path patterns to block (implies MITM). Format: METHOD /path/glob or /path/glob"`
+	DenyGraphQL *DenyGraphQL      `yaml:"deny_graphql,omitempty" json:"deny_graphql,omitempty" jsonschema:"title=deny_graphql,description=Block specific GraphQL mutations (implies MITM)"`
 	Middlewares []string          `yaml:"middlewares,omitempty" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=TypeScript middleware scripts (implies MITM)"`
 	Network     string            `yaml:"network,omitempty" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach gateway to (for internal services)"`
 	Target      string            `yaml:"target,omitempty" json:"target,omitempty" jsonschema:"title=target,description=Forwarding destination (host:port) for internal services. Omit for standard HTTPS passthrough."`
+}
+
+// DenyGraphQL configures GraphQL mutation blocking for an egress rule.
+type DenyGraphQL struct {
+	Mutations []string `yaml:"mutations" json:"mutations" jsonschema:"description=List of GraphQL mutation names to block"`
 }
 
 // EgressMatch describes the result of matching a host against egress rules.
@@ -174,6 +180,10 @@ func ValidateEgressRules(rules []EgressRule) []string {
 			errs = append(errs, fmt.Sprintf("gateway.egress[%d]: cannot have both deny: true and middlewares", i))
 		}
 
+		if rule.Deny && rule.DenyGraphQL != nil {
+			errs = append(errs, fmt.Sprintf("gateway.egress[%d]: cannot have both deny: true and deny_graphql (entire host is already denied)", i))
+		}
+
 		for j, pattern := range rule.Hosts {
 			if pattern == "" {
 				errs = append(errs, fmt.Sprintf("gateway.egress[%d].hosts[%d]: empty pattern", i, j))
@@ -184,9 +194,9 @@ func ValidateEgressRules(rules []EgressRule) []string {
 	return errs
 }
 
-// NeedsMITM returns true if a rule requires TLS MITM (has headers, deny_paths, or middlewares).
+// NeedsMITM returns true if a rule requires TLS MITM (has headers, deny_paths, deny_graphql, or middlewares).
 func (r *EgressRule) NeedsMITM() bool {
-	return len(r.Headers) > 0 || len(r.DenyPaths) > 0 || len(r.Middlewares) > 0
+	return len(r.Headers) > 0 || len(r.DenyPaths) > 0 || r.DenyGraphQL != nil || len(r.Middlewares) > 0
 }
 
 // IsAllow returns true if the rule allows traffic (not denied).
