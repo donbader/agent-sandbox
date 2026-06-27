@@ -40,11 +40,17 @@ type PortForward struct {
 
 // EgressRule defines an egress access control rule at the gateway runtime level.
 type EgressRule struct {
-	Hosts     []string          `yaml:"hosts"`                // host patterns (domain globs, CIDRs, "*")
-	Deny      bool              `yaml:"deny,omitempty"`       // if true, block matching traffic
-	Headers   map[string]string `yaml:"headers,omitempty"`    // headers to inject (implies allow + MITM)
-	DenyPaths []string          `yaml:"deny_paths,omitempty"` // URL path patterns to block
-	Target    string            `yaml:"target,omitempty"`       // forwarding destination (host:port)
+	Hosts       []string          `yaml:"hosts"`                 // host patterns (domain globs, CIDRs, "*")
+	Deny        bool              `yaml:"deny,omitempty"`        // if true, block matching traffic
+	Headers     map[string]string `yaml:"headers,omitempty"`     // headers to inject (implies allow + MITM)
+	DenyPaths   []string          `yaml:"deny_paths,omitempty"`  // URL path patterns to block
+	DenyGraphQL *DenyGraphQL      `yaml:"deny_graphql,omitempty"` // block specific GraphQL mutations
+	Target      string            `yaml:"target,omitempty"`      // forwarding destination (host:port)
+}
+
+// DenyGraphQL configures GraphQL mutation blocking for an egress rule.
+type DenyGraphQL struct {
+	Mutations []string `yaml:"mutations"` // mutation names to block (case-insensitive)
 }
 
 // RequestHandler intercepts connections to specific hosts.

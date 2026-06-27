@@ -47,11 +47,12 @@ type authHeaderRuntime struct {
 
 // egressRuleRuntime is the runtime representation of an egress rule in config.yaml.
 type egressRuleRuntime struct {
-	Hosts     []string          `yaml:"hosts"`
-	Deny      bool              `yaml:"deny,omitempty"`
-	Headers   map[string]string `yaml:"headers,omitempty"`
-	DenyPaths []string          `yaml:"deny_paths,omitempty"`
-	Target    string            `yaml:"target,omitempty"`
+	Hosts       []string            `yaml:"hosts"`
+	Deny        bool                `yaml:"deny,omitempty"`
+	Headers     map[string]string   `yaml:"headers,omitempty"`
+	DenyPaths   []string            `yaml:"deny_paths,omitempty"`
+	DenyGraphQL *config.DenyGraphQL `yaml:"deny_graphql,omitempty"`
+	Target      string              `yaml:"target,omitempty"`
 }
 
 // BuildGatewayConfig merges user gateway config with plugin contributions.
@@ -177,11 +178,12 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 	// Write egress rules to runtime config
 	for _, rule := range gwCfg.EgressRules {
 		rc.EgressRules = append(rc.EgressRules, egressRuleRuntime{
-			Hosts:     rule.Hosts,
-			Deny:      rule.Deny,
-			Headers:   rule.Headers,
-			DenyPaths: rule.DenyPaths,
-			Target:    rule.Target,
+			Hosts:       rule.Hosts,
+			Deny:        rule.Deny,
+			Headers:     rule.Headers,
+			DenyPaths:   rule.DenyPaths,
+			DenyGraphQL: rule.DenyGraphQL,
+			Target:      rule.Target,
 		})
 	}
 

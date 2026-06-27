@@ -32,6 +32,11 @@ type Handler struct {
 	// Returns true if the request should be blocked.
 	// Set by the gateway main.go wiring after construction.
 	DenyPathChecker func(host, method, path string) bool
+
+	// DenyGraphQLChecker is an optional callback for GraphQL mutation blocking.
+	// Returns true if the request should be blocked.
+	// Set by the gateway main.go wiring after construction.
+	DenyGraphQLChecker func(host string, req *http.Request) bool
 }
 
 // NewHandler creates a MITM handler for the given domains.
@@ -107,6 +112,19 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 				ProtoMinor: 1,
 				Header:     http.Header{"Content-Type": {"text/plain"}},
 				Body:       io.NopCloser(strings.NewReader("path blocked by policy")),
+			}
+			_ = blockResp.Write(tlsConn)
+			continue
+		}
+
+		// Check deny_graphql before processing
+		if h.DenyGraphQLChecker != nil && h.DenyGraphQLChecker(serverName, req) {
+			blockResp := &http.Response{
+				StatusCode: http.StatusForbidden,
+				ProtoMajor: 1,
+				ProtoMinor: 1,
+				Header:     http.Header{"Content-Type": {"text/plain"}},
+				Body:       io.NopCloser(strings.NewReader("graphql mutation blocked by policy")),
 			}
 			_ = blockResp.Write(tlsConn)
 			continue

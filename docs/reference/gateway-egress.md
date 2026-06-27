@@ -27,6 +27,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 | `deny` | `bool` | Block matching traffic at TCP layer (connection reset) |
 | `headers` | `map[string]string` | Inject headers via MITM. Implies allow. |
 | `deny_paths` | `[]string` | Block specific URL paths. Implies MITM. |
+| `deny_graphql` | `object` | Block specific GraphQL mutations. Implies MITM. |
 | `middlewares` | `[]string` | TypeScript middleware scripts. Implies MITM. |
 | `target` | `string` | Forwarding destination (`host:port`) for internal/HTTP services |
 | `network` | `string` | Compose network to attach gateway to (for reaching internal services) |
@@ -37,7 +38,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 |---------|-------|-------|
 | Matching | `hosts` | Which outbound connections trigger this rule |
 | Decision | `deny` | Block at L4 (no TLS termination, cheap) |
-| Request modification | `headers`, `deny_paths`, `middlewares` | Inject creds or block paths at L7 (requires MITM) |
+| Request modification | `headers`, `deny_paths`, `deny_graphql`, `middlewares` | Inject creds or block paths/mutations at L7 (requires MITM) |
 | Routing | `target` | Where to forward traffic (default: passthrough on :443) |
 | Infrastructure | `network` | Docker network attachment for compose generation |
 
@@ -80,6 +81,26 @@ Block specific URL paths while allowing the host. Requires MITM (auto-enabled):
 Formats:
 - `"/path/glob"` — any method
 - `"METHOD /path/glob"` — specific method only
+
+## Deny GraphQL
+
+Block specific GraphQL mutations while allowing the host. Useful when `deny_paths` can't distinguish operations — all GraphQL traffic shares a single `POST /graphql` endpoint. Requires MITM (auto-enabled):
+
+```yaml
+- hosts: ["api.github.com"]
+  headers:
+    Authorization: "Bearer ${GITHUB_PAT}"
+  deny_graphql:
+    mutations:
+      - "mergePullRequest"
+      - "deleteBranch"
+```
+
+The gateway inspects POST requests to paths containing `graphql`, extracts the mutation name from the `operationName` field (preferred) or the `query` field via regex, and returns 403 if it matches the deny list. Matching is case-insensitive.
+
+If the request body cannot be parsed as JSON, the request is passed through (fail open).
+
+`deny_graphql` cannot be combined with `deny: true` — if you want to block the host entirely, use `deny: true` alone.
 
 ## Middlewares
 

@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -159,13 +161,41 @@ func main() {
 
 		mitmHandler := mitm.NewHandler(cfg.MITMDomains, caCert)
 
-		// Wire deny_paths checking from egress rules into MITM handler
+		// Wire deny_paths and deny_graphql checking from egress rules into MITM handler
 		if len(cfg.EgressRules) > 0 {
 			egressFilter := proxy.NewEgressFilter(cfg.EgressRules)
 			mitmHandler.DenyPathChecker = func(host, method, path string) bool {
 				decision := egressFilter.AllowHost(host)
 				if decision.Rule != nil && len(decision.Rule.DenyPaths) > 0 {
 					return !egressFilter.AllowPath(decision.Rule, method, path)
+				}
+				return false
+			}
+			mitmHandler.DenyGraphQLChecker = func(host string, req *http.Request) bool {
+				if req.Method != http.MethodPost {
+					return false
+				}
+				if !strings.Contains(strings.ToLower(req.URL.Path), "graphql") {
+					return false
+				}
+				decision := egressFilter.AllowHost(host)
+				if decision.Rule == nil || decision.Rule.DenyGraphQL == nil || len(decision.Rule.DenyGraphQL.Mutations) == 0 {
+					return false
+				}
+				bodyBytes, err := io.ReadAll(req.Body)
+				if err != nil {
+					return false
+				}
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				mutationName := mitm.ExtractGraphQLMutation(bodyBytes)
+				if mutationName == "" {
+					return false
+				}
+				for _, denied := range decision.Rule.DenyGraphQL.Mutations {
+					if strings.EqualFold(denied, mutationName) {
+						slog.Warn("mitm: graphql mutation denied", "host", host, "mutation", mutationName)
+						return true
+					}
 				}
 				return false
 			}
