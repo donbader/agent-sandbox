@@ -78,15 +78,7 @@ func usedSubnets() []*net.IPNet {
 	// 2. Check system routes (catches host interface subnets in DinD)
 	routeOut, err := exec.Command("ip", "route").Output()
 	if err == nil {
-		for _, line := range splitLines(string(routeOut)) {
-			fields := splitFields(line)
-			if len(fields) > 0 && strings.Contains(fields[0], "/") {
-				_, n, err := net.ParseCIDR(fields[0])
-				if err == nil {
-					nets = append(nets, n)
-				}
-			}
-		}
+		nets = append(nets, parseRouteSubnets(string(routeOut))...)
 	}
 
 	return nets
@@ -131,4 +123,19 @@ func split(s string, sep byte) []string {
 // splitFields splits a string by whitespace (like strings.Fields).
 func splitFields(s string) []string {
 	return strings.Fields(s)
+}
+
+// parseRouteSubnets extracts CIDR subnets from `ip route` output.
+func parseRouteSubnets(output string) []*net.IPNet {
+	var nets []*net.IPNet
+	for _, line := range splitLines(output) {
+		fields := splitFields(line)
+		if len(fields) > 0 && strings.Contains(fields[0], "/") {
+			_, n, err := net.ParseCIDR(fields[0])
+			if err == nil {
+				nets = append(nets, n)
+			}
+		}
+	}
+	return nets
 }

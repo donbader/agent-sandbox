@@ -69,3 +69,55 @@ func TestSplitLines(t *testing.T) {
 		t.Errorf("unexpected lines: %v", lines)
 	}
 }
+
+func TestParseRouteSubnets_DinD(t *testing.T) {
+	// Simulates actual ip route output from a DinD container on 172.30.0.0/24
+	routeOutput := `default via 172.30.0.3 dev eth0
+172.30.0.0/24 dev eth0 proto kernel scope link src 172.30.0.7
+`
+
+	nets := parseRouteSubnets(routeOutput)
+	if len(nets) != 1 {
+		t.Fatalf("expected 1 subnet from routes, got %d", len(nets))
+	}
+	if nets[0].String() != "172.30.0.0/24" {
+		t.Errorf("expected 172.30.0.0/24, got %s", nets[0].String())
+	}
+
+	// Now prove: if this subnet is in 'used', findAvailableSubnet logic skips it
+	_, candidate30, _ := net.ParseCIDR("172.30.0.0/24")
+	_, candidate31, _ := net.ParseCIDR("172.31.0.0/24")
+	if !overlapsAny(candidate30, nets) {
+		t.Error("172.30.0.0/24 should overlap with parsed route")
+	}
+	if overlapsAny(candidate31, nets) {
+		t.Error("172.31.0.0/24 should NOT overlap with 172.30 route")
+	}
+}
+
+func TestParseRouteSubnets_MultipleRoutes(t *testing.T) {
+	routeOutput := `default via 10.0.0.1 dev eth0
+10.0.0.0/24 dev eth0 proto kernel scope link src 10.0.0.5
+172.30.0.0/24 dev docker0 proto kernel scope link src 172.30.0.1
+172.31.0.0/24 dev br-abc123 proto kernel scope link src 172.31.0.1
+`
+
+	nets := parseRouteSubnets(routeOutput)
+	if len(nets) != 3 {
+		t.Fatalf("expected 3 subnets, got %d", len(nets))
+	}
+
+	// Both 172.30 and 172.31 should be detected as used
+	_, c30, _ := net.ParseCIDR("172.30.0.0/24")
+	_, c31, _ := net.ParseCIDR("172.31.0.0/24")
+	_, c32, _ := net.ParseCIDR("172.32.0.0/24")
+	if !overlapsAny(c30, nets) {
+		t.Error("172.30 should be detected as used")
+	}
+	if !overlapsAny(c31, nets) {
+		t.Error("172.31 should be detected as used")
+	}
+	if overlapsAny(c32, nets) {
+		t.Error("172.32 should be free")
+	}
+}
