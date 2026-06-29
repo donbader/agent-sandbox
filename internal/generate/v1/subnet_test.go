@@ -21,7 +21,7 @@ func TestOverlapsAny(t *testing.T) {
 }
 
 func TestFindAvailableSubnet_fallback(t *testing.T) {
-	// When Docker isn't available (e.g. unit test env), should fall back to 172.30
+	// When Docker isn't available (e.g. unit test env), should fall back to 172.30/172.31
 	s := findAvailableSubnet()
 	if s.CIDR == "" {
 		t.Error("CIDR should not be empty")
@@ -29,9 +29,12 @@ func TestFindAvailableSubnet_fallback(t *testing.T) {
 	if s.Prefix == "" {
 		t.Error("Prefix should not be empty")
 	}
-	// In CI without conflicting networks, should get 172.30
-	if s.CIDR != "172.30.0.0/24" {
-		t.Logf("Got non-default subnet %s (Docker networks present)", s.CIDR)
+	if s.ExternalCIDR == "" {
+		t.Error("ExternalCIDR should not be empty")
+	}
+	// Sandbox and external must be different
+	if s.CIDR == s.ExternalCIDR {
+		t.Errorf("sandbox (%s) and external (%s) must use different subnets", s.CIDR, s.ExternalCIDR)
 	}
 }
 

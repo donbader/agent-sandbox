@@ -325,6 +325,11 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			},
 			"external": map[string]any{
 				"driver": "bridge",
+				"ipam": map[string]any{
+					"config": []map[string]any{
+						{"subnet": subnet.ExternalCIDR},
+					},
+				},
 			},
 		},
 	}
