@@ -97,6 +97,13 @@ func composeCmd(dir *string) *cobra.Command {
 			}
 			projectName := filepath.Base(absDir)
 
+			// Pre-flight: validate subnets are actually available in this Docker environment.
+			// If not (e.g. DinD with IPAM conflicts), patch the compose YAML with working subnets.
+			rt := runtimeBinary(*dir)
+			if err := validateAndFixSubnets(composePath, rt); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: subnet validation failed: %v\n", err)
+			}
+
 			composeArgs := []string{"-f", composePath, "--project-name", projectName}
 			// Auto-inject --env-file if .env exists in project dir
 			envPath := filepath.Join(*dir, ".env")
@@ -105,8 +112,7 @@ func composeCmd(dir *string) *cobra.Command {
 			}
 			composeArgs = append(composeArgs, args...)
 
-			runtime := runtimeBinary(*dir)
-			c := exec.Command(runtime, append([]string{"compose"}, composeArgs...)...)
+			c := exec.Command(rt, append([]string{"compose"}, composeArgs...)...)
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr

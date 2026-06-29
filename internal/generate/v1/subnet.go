@@ -10,19 +10,19 @@ import (
 
 // sandboxNet holds the chosen subnets for compose networks.
 type sandboxNet struct {
-	CIDR       string // sandbox network, e.g. "172.30.0.0/24"
-	Prefix     string // for static IPs, e.g. "172.30.0"
-	ExternalCIDR string // external network, e.g. "172.31.0.0/24"
+	CIDR       string // sandbox network, e.g. "172.32.0.0/24"
+	Prefix     string // for static IPs, e.g. "172.32.0"
+	ExternalCIDR string // external network, e.g. "172.33.0.0/24"
 }
 
 // findAvailableSubnet probes Docker for existing networks and returns two
 // consecutive available 172.X.0.0/24 subnets (starting at X=30, up to X=50).
 // One for the sandbox (internal) network, one for the external network.
-// Falls back to 172.30/172.31 if Docker is unavailable.
+// Falls back to 172.32/172.33 if Docker is unavailable.
 func findAvailableSubnet() sandboxNet {
 	used := usedSubnets()
 
-	for x := 30; x <= 49; x++ {
+	for x := 32; x <= 50; x++ {
 		cidr1 := fmt.Sprintf("172.%d.0.0/24", x)
 		cidr2 := fmt.Sprintf("172.%d.0.0/24", x+1)
 		_, c1, _ := net.ParseCIDR(cidr1)
@@ -35,7 +35,7 @@ func findAvailableSubnet() sandboxNet {
 			}
 		}
 	}
-	return sandboxNet{CIDR: "172.30.0.0/24", Prefix: "172.30.0", ExternalCIDR: "172.31.0.0/24"}
+	return sandboxNet{CIDR: "172.32.0.0/24", Prefix: "172.32.0", ExternalCIDR: "172.33.0.0/24"}
 }
 
 // usedSubnets returns all subnets currently allocated by Docker networks

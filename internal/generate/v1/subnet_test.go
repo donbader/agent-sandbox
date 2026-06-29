@@ -21,7 +21,7 @@ func TestOverlapsAny(t *testing.T) {
 }
 
 func TestFindAvailableSubnet_fallback(t *testing.T) {
-	// When Docker isn't available (e.g. unit test env), should fall back to 172.30/172.31
+	// When Docker isn't available (e.g. unit test env), should fall back to 172.32/172.33
 	s := findAvailableSubnet()
 	if s.CIDR == "" {
 		t.Error("CIDR should not be empty")
