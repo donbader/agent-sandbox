@@ -16,10 +16,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// sandboxSubnet is the CIDR for the internal sandbox network shared by all
-// agent-gateway pairs. Used in both the compose network definition and passed
-// to the gateway via GATEWAY_SANDBOX_CIDR for DNS local-network filtering.
-const sandboxSubnet = "172.30.0.0/24"
 
 type composeFile struct {
 	Services map[string]any `yaml:"services"`
@@ -44,6 +40,7 @@ type agentPairParams struct {
 	exposeGateway    bool
 	projectName      string
 	gatewaySandboxIP string
+	sandboxCIDR      string
 }
 
 // agentPairResult holds the services and volumes produced by buildAgentPair.
@@ -189,7 +186,7 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 	// Provide the gateway's sandbox IP and CIDR so it can write a reliable routing
 	// script and configure DNS local-network filtering.
 	gatewayEnv = append(gatewayEnv, "GATEWAY_SANDBOX_IP="+p.gatewaySandboxIP)
-	gatewayEnv = append(gatewayEnv, "GATEWAY_SANDBOX_CIDR="+sandboxSubnet)
+	gatewayEnv = append(gatewayEnv, "GATEWAY_SANDBOX_CIDR="+p.sandboxCIDR)
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
 	}
@@ -311,6 +308,8 @@ type ComposeAgentEntry struct {
 // BuildProjectCompose generates a unified docker-compose.yml for any project (1 or N agents).
 // Gateway port is always exposed for port discovery via `docker compose port`.
 func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string, error) {
+	subnet := findAvailableSubnet()
+
 	compose := composeFile{
 		Services: map[string]any{},
 		Volumes:  map[string]any{},
@@ -320,7 +319,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 				"internal": true,
 				"ipam": map[string]any{
 					"config": []map[string]any{
-						{"subnet": sandboxSubnet},
+						{"subnet": subnet.CIDR},
 					},
 				},
 			},
@@ -335,9 +334,8 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 		agentName := cfg.Name
 		gatewayName := cfg.Name + "-gateway"
 		certsVolume := agentName + "-certs"
-		// Each gateway gets a unique static IP on the sandbox subnet (172.30.0.2, .3, .4, ...).
-		// This allows the gateway to reliably identify its sandbox IP at startup.
-		gatewaySandboxIP := fmt.Sprintf("172.30.0.%d", i+2)
+		// Each gateway gets a unique static IP on the sandbox subnet (.2, .3, .4, ...).
+		gatewaySandboxIP := fmt.Sprintf("%s.%d", subnet.Prefix, i+2)
 
 		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
 		if err != nil {
@@ -370,6 +368,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			projectName:      filepath.Base(projectDir),
 			exposeGateway:    false,
 			gatewaySandboxIP: gatewaySandboxIP,
+			sandboxCIDR:      subnet.CIDR,
 		})
 		if err != nil {
 			return "", err
