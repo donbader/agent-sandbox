@@ -27,11 +27,14 @@ func NewCertCache() *CertCache {
 }
 
 // GetOrCreate returns a cached cert or generates a new one signed by the CA.
+// Expired cached certs are automatically regenerated.
 func (c *CertCache) GetOrCreate(domain string, caCert tls.Certificate) (tls.Certificate, error) {
 	c.mu.RLock()
 	if cert, ok := c.certs[domain]; ok {
-		c.mu.RUnlock()
-		return cert, nil
+		if !certExpired(cert) {
+			c.mu.RUnlock()
+			return cert, nil
+		}
 	}
 	c.mu.RUnlock()
 
@@ -40,7 +43,9 @@ func (c *CertCache) GetOrCreate(domain string, caCert tls.Certificate) (tls.Cert
 
 	// Double-check after acquiring write lock
 	if cert, ok := c.certs[domain]; ok {
-		return cert, nil
+		if !certExpired(cert) {
+			return cert, nil
+		}
 	}
 
 	cert, err := generateCert(domain, caCert)
@@ -50,6 +55,19 @@ func (c *CertCache) GetOrCreate(domain string, caCert tls.Certificate) (tls.Cert
 
 	c.certs[domain] = cert
 	return cert, nil
+}
+
+// certExpired returns true if the certificate has expired or will expire within 5 minutes.
+func certExpired(cert tls.Certificate) bool {
+	if len(cert.Certificate) == 0 {
+		return true
+	}
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return true
+	}
+	// Treat as expired 5 minutes before actual expiry to avoid edge-case races
+	return time.Now().After(parsed.NotAfter.Add(-5 * time.Minute))
 }
 
 // generateCert creates a TLS certificate for the given domain, signed by the CA.
