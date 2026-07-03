@@ -76,6 +76,92 @@ func TestCertCache_GetOrCreate(t *testing.T) {
 	}
 }
 
+func TestCertCache_RegeneratesExpiredCert(t *testing.T) {
+	ca := testCA(t)
+	cache := NewCertCache()
+
+	// Generate a valid cert and manually expire it in the cache
+	cert, err := cache.GetOrCreate("example.com", ca)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Replace with an already-expired cert
+	expiredCert := makeExpiredCert(t, ca)
+	cache.mu.Lock()
+	cache.certs["example.com"] = expiredCert
+	cache.mu.Unlock()
+
+	// GetOrCreate should detect the expired cert and regenerate
+	renewed, err := cache.GetOrCreate("example.com", ca)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify we got a new cert, not the expired one
+	parsedRenewed, err := x509.ParseCertificate(renewed.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if time.Now().After(parsedRenewed.NotAfter) {
+		t.Error("expected renewed cert to be valid, but it is expired")
+	}
+
+	// Verify it's different from the expired cert (different serial number)
+	parsedExpired, _ := x509.ParseCertificate(expiredCert.Certificate[0])
+	if parsedRenewed.SerialNumber.Cmp(parsedExpired.SerialNumber) == 0 {
+		t.Error("expected a new cert to be generated, got the same expired cert back")
+	}
+
+	// Verify it's also different from the original (proves cache was updated)
+	parsedOriginal, _ := x509.ParseCertificate(cert.Certificate[0])
+	if parsedRenewed.SerialNumber.Cmp(parsedOriginal.SerialNumber) == 0 {
+		t.Error("expected a freshly generated cert, got the original")
+	}
+}
+
+// makeExpiredCert generates a cert that expired in the past.
+func makeExpiredCert(t *testing.T, caCert tls.Certificate) tls.Certificate {
+	t.Helper()
+
+	ca, err := x509.ParseCertificate(caCert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	caKey, ok := caCert.PrivateKey.(*ecdsa.PrivateKey)
+	if !ok {
+		t.Fatal("CA private key is not ECDSA")
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject:      pkix.Name{CommonName: "example.com"},
+		DNSNames:     []string{"example.com"},
+		NotBefore:    time.Now().Add(-48 * time.Hour),
+		NotAfter:     time.Now().Add(-1 * time.Hour), // expired 1 hour ago
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return tls.Certificate{
+		Certificate: [][]byte{certDER},
+		PrivateKey:  key,
+	}
+}
+
 func TestHandler_Matches(t *testing.T) {
 	ca := testCA(t)
 	h := NewHandler([]string{"api.example.com", "other.example.com"}, ca)
