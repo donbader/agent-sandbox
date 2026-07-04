@@ -27,15 +27,15 @@ contributes:
         find "$AGENT_HOME" -mindepth 1 -type d | sort -r | while read -r d; do
           rel="${d#$AGENT_HOME/}"
           parent="$(dirname "$rel")"
-          if [ -d "/opt/home-seed/$parent" ] && [ ! -e "/opt/home-seed/$rel" ]; then
+          if [ "$parent" != "." ] && [ -d "/opt/home-seed/$parent" ] && [ ! -e "/opt/home-seed/$rel" ]; then
             rm -rf "$d"
             echo "[home-sync] removed stale dir: $rel"
           fi
         done
-        find "$AGENT_HOME" -type f | while read -r f; do
+        find "$AGENT_HOME" -mindepth 1 -type f | while read -r f; do
           rel="${f#$AGENT_HOME/}"
           dir="$(dirname "$rel")"
-          if [ -d "/opt/home-seed/$dir" ] && [ ! -e "/opt/home-seed/$rel" ]; then
+          if [ "$dir" != "." ] && [ -d "/opt/home-seed/$dir" ] && [ ! -e "/opt/home-seed/$rel" ]; then
             rm -f "$f"
             echo "[home-sync] removed stale: $rel"
           fi
