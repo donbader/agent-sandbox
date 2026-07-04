@@ -9,6 +9,10 @@ options:
     required: false
     default: false
     description: "Persist home directory across restarts using a named Docker volume. Config files are re-synced from home_directory on every start."
+  clean_stale:
+    type: array
+    required: false
+    description: "Relative paths within home to keep fully synced with source. Stale files and directories in these paths are removed on startup. Only use for paths entirely controlled by the repo (e.g. skills, extensions). Do NOT include paths with runtime-generated content."
 
 contributes:
   runtime:
@@ -17,5 +21,20 @@ contributes:
       - "RUN chown -R agent:agent /opt/home-seed"
     pre_entrypoint:
       - 'cp -a /opt/home-seed/. "$AGENT_HOME/"'
+      - |
+        {{- if .plugin.options.clean_stale }}
+        for sync_path in {{ range .plugin.options.clean_stale }}"{{ . }}" {{ end }}; do
+          seed_dir="/opt/home-seed/$sync_path"
+          home_dir="$AGENT_HOME/$sync_path"
+          [ ! -d "$home_dir" ] || [ ! -d "$seed_dir" ] && continue
+          find "$home_dir" -mindepth 1 | while read -r entry; do
+            rel="${entry#$AGENT_HOME/}"
+            if [ ! -e "/opt/home-seed/$rel" ]; then
+              rm -rf "$entry"
+              echo "[home-sync] removed stale: $rel"
+            fi
+          done
+        done
+        {{- end }}
     namespaced_volumes:
       - "{{ if .plugin.options.volume }}home:/home/agent{{ end }}"
