@@ -9,10 +9,11 @@ options:
     required: false
     default: false
     description: "Persist home directory across restarts using a named Docker volume. Config files are re-synced from home_directory on every start."
-  sync_paths:
-    type: array
+  clean_stale:
+    type: boolean
     required: false
-    description: "Relative paths within home_directory to keep in sync. Files in these paths that no longer exist in the source are deleted from the volume on startup. Use for managed config dirs (e.g. .pi/agent/skills, .pi/agent/extensions)."
+    default: false
+    description: "Remove stale files from volume on startup. For each directory that exists in the source, files in the volume that are not in the source are deleted. Directories created only at runtime (not in source) are never touched."
 
 contributes:
   runtime:
@@ -22,21 +23,16 @@ contributes:
     pre_entrypoint:
       - 'cp -a /opt/home-seed/. "$AGENT_HOME/"'
       - |
-        {{- if .plugin.options.sync_paths }}
-        for sync_path in {{ range .plugin.options.sync_paths }}"{{ . }}" {{ end }}; do
-          seed_dir="/opt/home-seed/$sync_path"
-          home_dir="$AGENT_HOME/$sync_path"
-          if [ -d "$home_dir" ] && [ -d "$seed_dir" ]; then
-            find "$home_dir" -type f | while read -r f; do
-              rel="${f#$AGENT_HOME/}"
-              if [ ! -e "/opt/home-seed/$rel" ]; then
-                rm -f "$f"
-                echo "[home-sync] removed stale: $rel"
-              fi
-            done
-            find "$home_dir" -type d -empty -delete 2>/dev/null || true
+        {{- if .plugin.options.clean_stale }}
+        find "$AGENT_HOME" -type f | while read -r f; do
+          rel="${f#$AGENT_HOME/}"
+          dir="$(dirname "$rel")"
+          if [ -d "/opt/home-seed/$dir" ] && [ ! -e "/opt/home-seed/$rel" ]; then
+            rm -f "$f"
+            echo "[home-sync] removed stale: $rel"
           fi
         done
+        find "$AGENT_HOME" -mindepth 1 -type d -empty -delete 2>/dev/null || true
         {{- end }}
     namespaced_volumes:
       - "{{ if .plugin.options.volume }}home:/home/agent{{ end }}"
