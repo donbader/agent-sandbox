@@ -24,23 +24,21 @@ contributes:
       - 'cp -a /opt/home-seed/. "$AGENT_HOME/"'
       - |
         {{- if .plugin.options.clean_stale }}
-        find "$AGENT_HOME" -mindepth 1 -type d | sort -r | while read -r d; do
-          rel="${d#$AGENT_HOME/}"
-          parent="$(dirname "$rel")"
-          if [ "$parent" != "." ] && [ -d "/opt/home-seed/$parent" ] && [ ! -e "/opt/home-seed/$rel" ]; then
-            rm -rf "$d"
-            echo "[home-sync] removed stale dir: $rel"
-          fi
+        find /opt/home-seed -type d | while read -r seed_dir; do
+          rel="${seed_dir#/opt/home-seed}"
+          [ -z "$rel" ] && continue
+          home_dir="$AGENT_HOME$rel"
+          [ ! -d "$home_dir" ] && continue
+          for entry in "$home_dir"/* "$home_dir"/.*; do
+            [ ! -e "$entry" ] && continue
+            name="$(basename "$entry")"
+            [ "$name" = "." ] || [ "$name" = ".." ] && continue
+            if [ ! -e "$seed_dir/$name" ]; then
+              rm -rf "$entry"
+              echo "[home-sync] removed stale: ${entry#$AGENT_HOME/}"
+            fi
+          done
         done
-        find "$AGENT_HOME" -mindepth 1 -type f | while read -r f; do
-          rel="${f#$AGENT_HOME/}"
-          dir="$(dirname "$rel")"
-          if [ "$dir" != "." ] && [ -d "/opt/home-seed/$dir" ] && [ ! -e "/opt/home-seed/$rel" ]; then
-            rm -f "$f"
-            echo "[home-sync] removed stale: $rel"
-          fi
-        done
-        find "$AGENT_HOME" -mindepth 1 -type d -empty -delete 2>/dev/null || true
         {{- end }}
     namespaced_volumes:
       - "{{ if .plugin.options.volume }}home:/home/agent{{ end }}"
