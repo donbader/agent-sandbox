@@ -81,6 +81,6 @@ When creating or modifying a plugin:
 | `mcp-oauth` | Gateway routes + middleware | OAuth callback + token injection |
 | `agent-manager-acp` | Sidecar (Node.js) | Runtime build + sidecar service |
 | `agent-docker` | Sidecar (Go binary) | Policy proxy with Docker socket |
-| `ssh` | Runtime (sshd) | Extra builds + ports |
+| `ssh` | Runtime (sshd) | Extra builds + gateway ingress |
 | `home-override` | Runtime (volume) | Persistent home directory |
 | `deploy-version` | Runtime (env) | Version injection |

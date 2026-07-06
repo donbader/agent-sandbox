@@ -183,6 +183,8 @@ installations:
       authorized_keys: "./ssh_key.pub"
 ```
 
+> **Note:** The SSH plugin installs the authorized key outside `/home/agent`, so it works correctly even when `home-override` mounts a volume over the home directory.
+
 Plugin references:
 - `@builtin/name` — bundled plugins (fetched from core releases)
 - `./path` — local plugin in your project directory
