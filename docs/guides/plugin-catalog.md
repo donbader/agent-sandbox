@@ -105,14 +105,17 @@ installations:
 - Installs `openssh-server` in the container image.
 - Generates a fresh host key (ed25519) at build time.
 - Disables password authentication — only key-based auth is allowed.
+- Installs the injected public key to `/etc/ssh/authorized_keys.d/agent` (outside `/home/agent`, so it survives home-volume mounts).
+- Configures `AuthorizedKeysFile` to accept both the injected key and any user-seeded `~/.ssh/authorized_keys`.
 - Starts `sshd` as a pre-entrypoint process before the agent launches.
-- Exposes the configured port on the host.
+- Publishes the SSH port on the gateway and forwards it to the agent.
 
 ### Caveats
 
 - **Requires `SYS_CHROOT` capability** — the plugin adds `cap_add: [SYS_CHROOT]` to the container.
 - **Disables user namespace isolation** (`skip_userns: true`). This is required for sshd to function but reduces container isolation. Be aware of the security trade-off.
 - The host key is regenerated on every image build, so SSH clients will see a changed fingerprint after rebuilds.
+- If you seed your own key via `~/.ssh/authorized_keys` (e.g. through a home volume), ensure the `.ssh` directory is mode 700 and the file is mode 600 — sshd's `StrictModes` will reject keys with wrong permissions.
 
 ---
 
