@@ -25,5 +25,7 @@ contributes:
       - "RUN chmod 700 /home/agent/.ssh && chmod 600 /home/agent/.ssh/authorized_keys"
     pre_entrypoint:
       - "/usr/sbin/sshd -p {{ .plugin.options.port }}"
-    ports:
-      - "{{ .plugin.options.port }}:{{ .plugin.options.port }}"
+  gateway:
+    ingress:
+      - listen: "{{ .plugin.options.port }}"
+        target: "{{ .agent.name }}:{{ .plugin.options.port }}"

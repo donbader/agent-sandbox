@@ -149,3 +149,28 @@ func TestMergeContributions_BuildStages(t *testing.T) {
 	// Order must be preserved
 	assert.Equal(t, []string{"RUN npm ci"}, merged.Runtime.BuildStages[1].Steps)
 }
+
+func TestMergeContributions_Ingress(t *testing.T) {
+	a := &Contributions{
+		Gateway: GatewayContrib{
+			Ingress: []IngressRule{
+				{Listen: "2222", Target: "agent-a:2222"},
+			},
+		},
+	}
+	b := &Contributions{
+		Gateway: GatewayContrib{
+			Ingress: []IngressRule{
+				{Listen: "8080", Target: "agent-b:8080"},
+			},
+		},
+	}
+
+	merged := MergeContributions(a, b)
+
+	require.Len(t, merged.Gateway.Ingress, 2)
+	assert.Equal(t, "2222", merged.Gateway.Ingress[0].Listen)
+	assert.Equal(t, "agent-a:2222", merged.Gateway.Ingress[0].Target)
+	assert.Equal(t, "8080", merged.Gateway.Ingress[1].Listen)
+	assert.Equal(t, "agent-b:8080", merged.Gateway.Ingress[1].Target)
+}
