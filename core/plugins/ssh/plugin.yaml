@@ -17,12 +17,15 @@ contributes:
     skip_userns: true
     extra_builds:
       - "RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/*"
-      - "RUN mkdir -p /run/sshd /home/agent/.ssh"
+      - "RUN mkdir -p /run/sshd /etc/ssh/authorized_keys.d"
       - "RUN rm -f /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub && ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N '' -q"
       - "RUN sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config"
       - "RUN sed -i 's/^#*Port.*/Port {{ .plugin.options.port }}/' /etc/ssh/sshd_config"
-      - "COPY {{ .plugin.options.authorized_keys }} /home/agent/.ssh/authorized_keys"
-      - "RUN chmod 700 /home/agent/.ssh && chmod 600 /home/agent/.ssh/authorized_keys"
+      # Honor the injected key (root-owned, volume-proof) AND any key the user seeds via the home dir.
+      - "RUN sed -i 's|^#*AuthorizedKeysFile.*|AuthorizedKeysFile .ssh/authorized_keys /etc/ssh/authorized_keys.d/%u|' /etc/ssh/sshd_config"
+      # Install to /etc/ssh (outside /home/agent) so a home volume mount can't shadow it.
+      - "COPY {{ .plugin.options.authorized_keys }} /etc/ssh/authorized_keys.d/agent"
+      - "RUN chmod 644 /etc/ssh/authorized_keys.d/agent"
     pre_entrypoint:
       - "/usr/sbin/sshd -p {{ .plugin.options.port }}"
   gateway:
