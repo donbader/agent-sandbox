@@ -235,3 +235,56 @@ func TestBuildGatewayConfig_PluginURLNormalization(t *testing.T) {
 	require.Len(t, gwCfg.EgressRules, 2)
 	assert.Equal(t, []string{"mcp.notion.com"}, gwCfg.EgressRules[0].Hosts)
 }
+
+func TestBuildGatewayConfig_Ingress(t *testing.T) {
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			Egress: []config.EgressRule{
+				{Hosts: []string{"*"}},
+			},
+		},
+	}
+
+	pluginContribs := &plugin.Contributions{
+		Gateway: plugin.GatewayContrib{
+			Ingress: []plugin.IngressRule{
+				{Listen: "8766", Target: "coder:8766"},
+			},
+		},
+	}
+
+	gwCfg := BuildGatewayConfig(cfg, pluginContribs)
+
+	require.Len(t, gwCfg.Ingress, 1)
+	assert.Equal(t, "8766", gwCfg.Ingress[0].Listen)
+	assert.Equal(t, "coder:8766", gwCfg.Ingress[0].Target)
+}
+
+func TestWriteGatewayRuntimeConfig_PortForwards(t *testing.T) {
+	buildDir := t.TempDir()
+
+	gwCfg := &GatewayConfigOutput{
+		EgressRules: []config.EgressRule{
+			{Hosts: []string{"*"}},
+		},
+		Ingress: []plugin.IngressRule{
+			{Listen: "8766", Target: "coder:8766"},
+			{Listen: "3000", Target: "coder:3000"},
+		},
+	}
+
+	err := WriteGatewayRuntimeConfig(buildDir, gwCfg)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(buildDir, "config.yaml"))
+	require.NoError(t, err)
+
+	var rc gatewayRuntimeConfig
+	require.NoError(t, yaml.Unmarshal(data, &rc))
+
+	require.Len(t, rc.PortForwards, 2)
+	assert.Equal(t, ":8766", rc.PortForwards[0].Listen)
+	assert.Equal(t, "coder:8766", rc.PortForwards[0].Target)
+	assert.Equal(t, ":3000", rc.PortForwards[1].Listen)
+	assert.Equal(t, "coder:3000", rc.PortForwards[1].Target)
+}

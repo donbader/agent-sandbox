@@ -212,6 +212,17 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 			}
 		}
 	}
+
+	// Publish ingress ports on the gateway (the only container on the external network).
+	// This allows inbound traffic (e.g., SSH) to reach the agent via the gateway's TCP forwarder.
+	if contribs != nil && len(contribs.Gateway.Ingress) > 0 {
+		gwPorts, _ := gatewaySvc["ports"].([]string)
+		for _, ing := range contribs.Gateway.Ingress {
+			gwPorts = append(gwPorts, ing.Listen+":"+ing.Listen)
+		}
+		gatewaySvc["ports"] = gwPorts
+	}
+
 	result.services[p.gatewayName] = gatewaySvc
 
 	// Sidecar services from plugins

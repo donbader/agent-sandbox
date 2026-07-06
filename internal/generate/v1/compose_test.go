@@ -818,3 +818,49 @@ func TestDangerousSocketPaths_EveryEngineHasSockets(t *testing.T) {
 		t.Errorf("DangerousSocketPaths() returned %d paths, expected at least %d", len(paths), len(runtime.Supported))
 	}
 }
+
+func TestBuildCompose_IngressPortsOnGateway(t *testing.T) {
+	cfg := &config.Config{
+		Name: "ssh-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	contribs := &plugin.Contributions{
+		Runtime: plugin.RuntimeContrib{
+			PreEntrypoint: []string{"/usr/sbin/sshd -p 8766"},
+		},
+		Gateway: plugin.GatewayContrib{
+			Ingress: []plugin.IngressRule{
+				{Listen: "8766", Target: "ssh-agent:8766"},
+			},
+		},
+		Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{}},
+	}
+
+	agents := []ComposeAgentEntry{{
+		Config:   cfg,
+		Contribs: contribs,
+		BuildDir: "/project/.build/ssh-agent",
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	// Ingress port should be published on the gateway, not the agent
+	var compose struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	err = yaml.Unmarshal([]byte(output), &compose)
+	require.NoError(t, err)
+
+	// Gateway has the ingress port
+	gwSvc := compose.Services["ssh-agent-gateway"]
+	assert.Contains(t, gwSvc.Ports, "8766:8766")
+
+	// Agent does NOT have ports published
+	agentSvc := compose.Services["ssh-agent"]
+	assert.Empty(t, agentSvc.Ports)
+}

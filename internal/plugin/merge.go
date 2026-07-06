@@ -37,6 +37,7 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 			merged.Runtime.SkipUserns = true
 		}
 		merged.Gateway.Egress = append(merged.Gateway.Egress, c.Gateway.Egress...)
+		merged.Gateway.Ingress = append(merged.Gateway.Ingress, c.Gateway.Ingress...)
 		merged.Gateway.NamespacedVolumes = append(merged.Gateway.NamespacedVolumes, c.Gateway.NamespacedVolumes...)
 		merged.Gateway.RawVolumes = append(merged.Gateway.RawVolumes, c.Gateway.RawVolumes...)
 		merged.Gateway.Routes = append(merged.Gateway.Routes, c.Gateway.Routes...)

@@ -102,8 +102,16 @@ type RuntimeContrib struct {
 	SkipUserns        bool               `yaml:"skip_userns"`
 }
 
+// IngressRule declares a TCP port forward from the gateway to the agent container.
+// The gateway publishes the port to the host and forwards traffic over the internal network.
+type IngressRule struct {
+	Listen string `yaml:"listen"` // port to listen on (e.g., "8766")
+	Target string `yaml:"target"` // forward target (e.g., "coder:8766")
+}
+
 type GatewayContrib struct {
 	Egress            []config.EgressRule `yaml:"egress"`
+	Ingress           []IngressRule       `yaml:"ingress"`
 	NamespacedVolumes []string            `yaml:"namespaced_volumes"` // auto-prefixed with {agentName}- at compose generation
 	RawVolumes        []string            `yaml:"raw_volumes"`        // used as-is, no agent name prefix
 	Routes            []RouteEntry        `yaml:"routes"`

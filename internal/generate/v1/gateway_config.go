@@ -18,6 +18,7 @@ import (
 type GatewayConfigOutput struct {
 	AuthHeaders []AuthHeaderEntry // auth-header entries to bake into config.yaml
 	EgressRules []config.EgressRule
+	Ingress     []plugin.IngressRule // TCP port forwards from gateway to agent
 }
 
 // AuthHeaderEntry describes an auth-header middleware to generate at build time.
@@ -30,12 +31,13 @@ type AuthHeaderEntry struct {
 
 // gatewayRuntimeConfig matches the proxy.Config struct in core/gateway.
 type gatewayRuntimeConfig struct {
-	Listen      string              `yaml:"listen"`
-	DNSListen   string              `yaml:"dns_listen"`
-	MITMDomains []string            `yaml:"mitm_domains"`
-	AuthHeaders []authHeaderRuntime `yaml:"auth_headers,omitempty"`
-	EgressRules []egressRuleRuntime `yaml:"egress_rules,omitempty"`
-	HealthAddr  string              `yaml:"health_addr,omitempty"`
+	Listen       string               `yaml:"listen"`
+	DNSListen    string               `yaml:"dns_listen"`
+	MITMDomains  []string             `yaml:"mitm_domains"`
+	AuthHeaders  []authHeaderRuntime  `yaml:"auth_headers,omitempty"`
+	EgressRules  []egressRuleRuntime  `yaml:"egress_rules,omitempty"`
+	PortForwards []portForwardRuntime `yaml:"port_forwards,omitempty"`
+	HealthAddr   string               `yaml:"health_addr,omitempty"`
 }
 
 // authHeaderRuntime is the runtime representation of an auth-header entry in config.yaml.
@@ -53,6 +55,12 @@ type egressRuleRuntime struct {
 	DenyPaths   []string            `yaml:"deny_paths,omitempty"`
 	DenyGraphQL *config.DenyGraphQL `yaml:"deny_graphql,omitempty"`
 	Target      string              `yaml:"target,omitempty"`
+}
+
+// portForwardRuntime is the runtime representation of a port forward in config.yaml.
+type portForwardRuntime struct {
+	Listen string `yaml:"listen"`
+	Target string `yaml:"target"`
 }
 
 // BuildGatewayConfig merges user gateway config with plugin contributions.
@@ -109,6 +117,7 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 			}
 			out.EgressRules = insertPluginEgressRule(out.EgressRules, normalized)
 		}
+		out.Ingress = contribs.Gateway.Ingress
 	}
 
 	return out
@@ -184,6 +193,14 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			DenyPaths:   rule.DenyPaths,
 			DenyGraphQL: rule.DenyGraphQL,
 			Target:      rule.Target,
+		})
+	}
+
+	// Write port forwards from ingress rules
+	for _, ing := range gwCfg.Ingress {
+		rc.PortForwards = append(rc.PortForwards, portForwardRuntime{
+			Listen: ":" + ing.Listen,
+			Target: ing.Target,
 		})
 	}
 
