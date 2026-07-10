@@ -278,21 +278,31 @@ func pruneDeadForwarders() {
 
 // scanExisting sets up forwarding for already-running containers.
 func scanExisting() {
-	resp, err := dockerGet("/containers/json")
-	if err != nil {
+	// Retry until Docker API is reachable (handles startup race with docker-proxy sidecar)
+	for attempt := 0; attempt < 30; attempt++ {
+		resp, err := dockerGet("/containers/json")
+		if err != nil {
+			time.Sleep(time.Duration(1+attempt/5) * time.Second)
+			continue
+		}
+		var containers []struct {
+			Id string
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+			resp.Body.Close()
+			time.Sleep(time.Second)
+			continue
+		}
+		resp.Body.Close()
+		if len(containers) > 0 {
+			log.Printf("[port-forward] found %d existing containers", len(containers))
+		}
+		for _, c := range containers {
+			handleStart(c.Id)
+		}
 		return
 	}
-	defer resp.Body.Close()
-
-	var containers []struct {
-		Id string
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
-		return
-	}
-	for _, c := range containers {
-		handleStart(c.Id)
-	}
+	log.Println("[port-forward] warning: could not reach Docker API after 30 retries")
 }
 
 // watchEvents streams Docker events and reacts to container start/stop.

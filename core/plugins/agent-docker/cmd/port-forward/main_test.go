@@ -294,3 +294,54 @@ func TestConcurrentForwarders(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+func TestScanExistingRetries(t *testing.T) {
+	// Simulate: first 2 requests fail, third succeeds with a container
+	attempt := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/containers/json" {
+			attempt++
+			if attempt < 3 {
+				w.WriteHeader(500)
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"Id": "test-container-abc"},
+			})
+			return
+		}
+		// /containers/test-container-abc/json — return port info
+		json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{"sandbox": map[string]any{"IPAddress": "172.32.0.99"}},
+				"Ports":    map[string]any{"9999/tcp": nil},
+			},
+			"HostConfig": map[string]any{
+				"PortBindings": map[string]any{
+					"9999/tcp": []map[string]string{{"HostIp": "", "HostPort": "19876"}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
+
+	scanExisting()
+
+	// Should have retried and eventually found the container
+	if attempt < 3 {
+		t.Errorf("expected at least 3 attempts, got %d", attempt)
+	}
+
+	// Should have set up forwarding for port 19876
+	mu.Lock()
+	_, exists := forwarders[19876]
+	mu.Unlock()
+	if !exists {
+		t.Error("expected forwarder on port 19876 after retry")
+	}
+
+	// Cleanup
+	stopForwarder(19876)
+}
