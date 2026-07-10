@@ -54,7 +54,7 @@ contributes:
   runtime:
     extra_builds:
       - "RUN curl -fsSL https://get.docker.com | sh"
-      - "COPY {{ asset \"cmd/port-forward\" }}/port_forward.py /usr/local/bin/port-forward"
+      - 'COPY {{ asset "cmd/port-forward" }}/port_forward.py /usr/local/bin/port-forward'
       - "RUN chmod +x /usr/local/bin/port-forward"
     environment:
       DOCKER_HOST: "tcp://{{ .agent.name }}-agent-docker-proxy:2375"
