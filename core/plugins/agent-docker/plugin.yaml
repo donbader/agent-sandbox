@@ -61,7 +61,7 @@ contributes:
     extra_builds:
       - "RUN curl -fsSL https://get.docker.com | sh"
       - 'COPY {{ asset "cmd/port-forward" }} /tmp/port-forward-src'
-      - "RUN cd /tmp/port-forward-src && CGO_ENABLED=0 go build -ldflags='-s -w' -o /usr/local/bin/port-forward . && rm -rf /tmp/port-forward-src"
+      - "RUN curl -fsSL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz | tar -xz -C /usr/local && CGO_ENABLED=0 /usr/local/go/bin/go build -C /tmp/port-forward-src -ldflags='-s -w' -o /usr/local/bin/port-forward . && rm -rf /tmp/port-forward-src /usr/local/go"
     environment:
       DOCKER_HOST: "tcp://{{ .agent.name }}-agent-docker-proxy:2375"
     pre_entrypoint:
