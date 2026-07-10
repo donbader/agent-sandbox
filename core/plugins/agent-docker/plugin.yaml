@@ -3,6 +3,7 @@ assets:
   - path: cmd/docker-proxy/
     exclude: ["*_test.go"]
   - path: cmd/buildkit-sidecar/
+  - path: cmd/port-forward/
 
 options:
   allowed_images:
@@ -53,9 +54,12 @@ contributes:
   runtime:
     extra_builds:
       - "RUN curl -fsSL https://get.docker.com | sh"
+      - 'COPY {{ asset "cmd/port-forward" }}/port_forward.py /usr/local/bin/port-forward'
+      - "RUN chmod +x /usr/local/bin/port-forward"
     environment:
       DOCKER_HOST: "tcp://{{ .agent.name }}-agent-docker-proxy:2375"
     pre_entrypoint:
+      - 'python3 /usr/local/bin/port-forward &'
       - '{{ if .plugin.options.allow_build }}docker buildx create --name buildkit --driver remote --driver-opt url=tcp://{{ .agent.name }}-agent-docker-buildkit:8372 --use 2>/dev/null || true{{ end }}'
   sidecar:
     services:
