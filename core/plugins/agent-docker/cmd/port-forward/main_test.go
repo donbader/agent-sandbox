@@ -98,8 +98,28 @@ func TestContainerPorts(t *testing.T) {
 						"8000/tcp": []map[string]string{{"HostPort": "8000"}},
 					},
 				},
+				"HostConfig": map[string]any{"PortBindings": map[string]any{}},
 			},
 			want: 0,
+		},
+		{
+			name: "fallback to HostConfig.PortBindings when NetworkSettings.Ports is null",
+			response: map[string]any{
+				"NetworkSettings": map[string]any{
+					"Networks": map[string]any{
+						"sandbox": map[string]any{"IPAddress": "172.32.0.14"},
+					},
+					"Ports": map[string]any{
+						"8000/tcp": nil,
+					},
+				},
+				"HostConfig": map[string]any{
+					"PortBindings": map[string]any{
+						"8000/tcp": []map[string]string{{"HostIp": "", "HostPort": "8000"}},
+					},
+				},
+			},
+			want: 1,
 		},
 	}
 
