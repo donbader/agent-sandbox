@@ -63,6 +63,7 @@ Every request passes through the proxy, which:
 | `allow_compose` | boolean | no | false | Enable `docker compose` support (unlocks network/volume APIs) |
 | `allow_build` | boolean | no | false | Enable `docker build` support (unlocks build endpoints + auto-allows buildkit image) |
 | `allowed_capabilities` | string[] | no | [] | Linux capabilities permitted on spawned containers (e.g. NET_ADMIN). Empty = all blocked. |
+| `localhost_port_forward` | boolean | no | true | Auto-forward container port bindings to agent localhost (enables browser access) |
 
 ---
 
@@ -146,6 +147,29 @@ Spawned containers join the sandbox's internal network:
 - They can reach the agent and each other by container name
 - They cannot reach the internet (network is `internal: true`)
 - All internet-bound traffic routes through the gateway
+
+### Localhost Port Forwarding
+
+When `localhost_port_forward: true` (default), a daemon inside the agent container watches Docker events and auto-forwards `localhost:PORT → container_ip:PORT` for any container with port bindings.
+
+This solves a common problem: browser tools block navigation to private IPs (172.x.x.x) but allow `localhost`. Without forwarding, agents can `curl` container IPs but cannot browse them.
+
+```
+Agent runs: docker compose up -d  (with -p 8000:8000)
+↓
+port-forward daemon detects the port binding
+↓
+Creates: localhost:8000 → 172.32.0.14:8000
+↓
+Agent browser opens http://localhost:8000 ✓
+```
+
+Disable with:
+```yaml
+- plugin: "@builtin/agent-docker"
+  options:
+    localhost_port_forward: false
+```
 
 ---
 

@@ -4,6 +4,7 @@ assets:
     exclude: ["*_test.go"]
   - path: cmd/buildkit-sidecar/
   - path: cmd/port-forward/
+    exclude: ["*_test.go"]
 
 options:
   allowed_images:
@@ -42,6 +43,11 @@ options:
     required: false
     default: false
     description: "Allow docker build operations (runs isolated buildkitd sidecar, agent connects via remote driver)"
+  localhost_port_forward:
+    type: boolean
+    required: false
+    default: true
+    description: "Auto-forward container port bindings to agent localhost. Enables the agent (and its browser) to reach spawned containers via http://localhost:PORT instead of private IPs."
   allowed_capabilities:
     type: array
     items:
@@ -54,12 +60,12 @@ contributes:
   runtime:
     extra_builds:
       - "RUN curl -fsSL https://get.docker.com | sh"
-      - 'COPY {{ asset "cmd/port-forward" }}/port_forward.py /usr/local/bin/port-forward'
-      - "RUN chmod +x /usr/local/bin/port-forward"
+      - 'COPY {{ asset "cmd/port-forward" }} /tmp/port-forward-src'
+      - "RUN curl -fsSL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz | tar -xz -C /usr/local && CGO_ENABLED=0 /usr/local/go/bin/go build -C /tmp/port-forward-src -ldflags='-s -w' -o /usr/local/bin/port-forward . && rm -rf /tmp/port-forward-src /usr/local/go"
     environment:
       DOCKER_HOST: "tcp://{{ .agent.name }}-agent-docker-proxy:2375"
     pre_entrypoint:
-      - 'python3 /usr/local/bin/port-forward &'
+      - '{{ if .plugin.options.localhost_port_forward }}/usr/local/bin/port-forward &{{ end }}'
       - '{{ if .plugin.options.allow_build }}docker buildx create --name buildkit --driver remote --driver-opt url=tcp://{{ .agent.name }}-agent-docker-buildkit:8372 --use 2>/dev/null || true{{ end }}'
   sidecar:
     services:
