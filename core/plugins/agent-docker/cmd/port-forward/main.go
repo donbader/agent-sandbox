@@ -74,6 +74,11 @@ func containerPorts(id string) [][3]string {
 				HostPort string
 			}
 		}
+		HostConfig struct {
+			PortBindings map[string][]struct {
+				HostPort string
+			}
+		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return nil
@@ -91,7 +96,7 @@ func containerPorts(id string) [][3]string {
 		return nil
 	}
 
-	// Extract port bindings
+	// Extract port bindings — try NetworkSettings.Ports first, fall back to HostConfig.PortBindings
 	var result [][3]string
 	for containerPortProto, bindings := range info.NetworkSettings.Ports {
 		if bindings == nil {
@@ -104,6 +109,22 @@ func containerPorts(id string) [][3]string {
 			}
 		}
 	}
+
+	// Fallback: if NetworkSettings.Ports had no active bindings, check HostConfig.PortBindings
+	if len(result) == 0 {
+		for containerPortProto, bindings := range info.HostConfig.PortBindings {
+			if bindings == nil {
+				continue
+			}
+			containerPort := strings.Split(containerPortProto, "/")[0]
+			for _, b := range bindings {
+				if b.HostPort != "" {
+					result = append(result, [3]string{b.HostPort, ip, containerPort})
+				}
+			}
+		}
+	}
+
 	return result
 }
 
