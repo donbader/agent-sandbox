@@ -366,3 +366,37 @@ func TestWatchEventsReplaysSinceStart(t *testing.T) {
 
 	stopForwarder(19878)
 }
+
+func TestScanExisting(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/containers/json" {
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"Id": "existing-1"},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.32.0.88"}},
+				"Ports":    map[string]any{"5000/tcp": nil},
+			},
+			"HostConfig": map[string]any{
+				"PortBindings": map[string]any{
+					"5000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19879"}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
+	scanExisting()
+
+	mu.Lock()
+	_, exists := forwarders[19879]
+	mu.Unlock()
+	if !exists {
+		t.Error("expected forwarder on port 19879 from scanExisting")
+	}
+	stopForwarder(19879)
+}

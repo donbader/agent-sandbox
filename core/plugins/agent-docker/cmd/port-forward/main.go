@@ -34,19 +34,45 @@ func main() {
 	log.SetFlags(log.Ltime)
 	log.Println("[port-forward] starting daemon")
 
-	// Record startup time — we'll replay events from this point
-	startTime := time.Now().Unix()
-
 	// Wait for Docker API to be reachable
 	waitForDocker()
 
-	// Watch events with since=startTime (replays container starts that happened
-	// between daemon startup and now, plus catches all future events — no gap)
+	// Record time AFTER Docker is ready — used as 'since' for event stream
+	scanTime := time.Now().Unix()
+
+	// Scan containers already running
+	scanExisting()
+
+	// Watch events with since=scanTime — covers any starts between scan and stream connect
 	for {
-		if err := watchEvents(startTime); err != nil {
+		if err := watchEvents(scanTime); err != nil {
 			log.Printf("[port-forward] event stream error: %v, retrying...", err)
 			time.Sleep(2 * time.Second)
 		}
+	}
+}
+
+// scanExisting finds currently running containers and sets up forwarding.
+// Called after waitForDocker() so no retries needed.
+func scanExisting() {
+	resp, err := dockerGet("/containers/json")
+	if err != nil {
+		log.Printf("[port-forward] scanExisting failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var containers []struct {
+		Id string
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+		return
+	}
+	if len(containers) > 0 {
+		log.Printf("[port-forward] found %d existing containers", len(containers))
+	}
+	for _, c := range containers {
+		handleStart(c.Id)
 	}
 }
 
