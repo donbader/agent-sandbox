@@ -2,8 +2,8 @@
 //
 // Uses a controller pattern: one reconcile() function computes desired state
 // (running containers with port bindings) and converges actual state (active
-// forwarders) to match. Reconcile is triggered by: startup, Docker events,
-// and a periodic safety-net timer.
+// forwarders) to match. Reconcile is triggered by: startup, Docker events
+// (debounced), and a periodic safety-net timer.
 //
 // Solves: agent-browser blocks private IPs but allows localhost.
 package main
@@ -25,16 +25,28 @@ import (
 
 // forwarder tracks a running TCP forwarder.
 type forwarder struct {
-	listener net.Listener
-	done     chan struct{}
-	targetIP string
+	listener   net.Listener
+	done       chan struct{}
+	targetIP   string
 	targetPort int
+}
+
+// target represents a desired forwarding destination.
+type target struct {
+	ip   string
+	port int
 }
 
 var (
 	mu         sync.Mutex
 	forwarders = map[int]*forwarder{} // host_port → forwarder
+
+	// Debounce: coalesce rapid events into one reconcile call
+	debounceMu    sync.Mutex
+	debounceTimer *time.Timer
 )
+
+const debounceDelay = 500 * time.Millisecond
 
 func main() {
 	log.SetFlags(log.Ltime)
@@ -60,10 +72,16 @@ func main() {
 	}
 }
 
-// target represents a desired forwarding destination.
-type target struct {
-	ip   string
-	port int
+// scheduleReconcile debounces reconcile calls. Multiple rapid events
+// (e.g. 10 containers starting) collapse into one reconcile after the
+// debounce delay.
+func scheduleReconcile() {
+	debounceMu.Lock()
+	defer debounceMu.Unlock()
+	if debounceTimer != nil {
+		debounceTimer.Stop()
+	}
+	debounceTimer = time.AfterFunc(debounceDelay, reconcile)
 }
 
 // desiredForwarders queries Docker for all running containers and returns
@@ -105,22 +123,32 @@ func reconcile() {
 	}
 
 	mu.Lock()
-	// Collect stale forwarders (running but not desired)
+	// Collect stale or drifted forwarders
 	var toRemove []int
-	for port := range forwarders {
-		if _, ok := desired[port]; !ok {
+	for port, fwd := range forwarders {
+		t, ok := desired[port]
+		if !ok {
+			// Port no longer desired
+			toRemove = append(toRemove, port)
+		} else if fwd.targetIP != t.ip || fwd.targetPort != t.port {
+			// Target drifted (container restarted with new IP)
 			toRemove = append(toRemove, port)
 		}
 	}
-	// Collect missing forwarders (desired but not running)
+	// Collect missing forwarders (desired but not running, or about to be removed due to drift)
+	removeSet := map[int]bool{}
+	for _, p := range toRemove {
+		removeSet[p] = true
+	}
 	var toAdd []int
 	for port := range desired {
-		if _, ok := forwarders[port]; !ok {
+		if _, ok := forwarders[port]; !ok || removeSet[port] {
 			toAdd = append(toAdd, port)
 		}
 	}
 	mu.Unlock()
 
+	// Remove stale/drifted first, then add — order matters for drift case
 	for _, port := range toRemove {
 		stopForwarder(port)
 	}
@@ -130,7 +158,7 @@ func reconcile() {
 	}
 }
 
-// watchEvents streams Docker events and triggers reconcile on changes.
+// watchEvents streams Docker events and triggers debounced reconcile.
 func watchEvents() error {
 	resp, err := dockerGet(`/events?filters={"type":["container"],"event":["start","stop","die"]}`)
 	if err != nil {
@@ -147,12 +175,8 @@ func watchEvents() error {
 			continue
 		}
 		switch event.Action {
-		case "start":
-			// Brief delay for container networking to settle
-			time.Sleep(500 * time.Millisecond)
-			reconcile()
-		case "stop", "die":
-			reconcile()
+		case "start", "stop", "die":
+			scheduleReconcile()
 		}
 	}
 	return scanner.Err()
@@ -273,7 +297,14 @@ func startForwarder(hostPort int, targetIP string, targetPort int) {
 	}
 
 	fwd := &forwarder{listener: ln, done: make(chan struct{}), targetIP: targetIP, targetPort: targetPort}
+
+	// Re-check under lock after listen (another goroutine may have raced)
 	mu.Lock()
+	if _, exists := forwarders[hostPort]; exists {
+		mu.Unlock()
+		ln.Close()
+		return
+	}
 	forwarders[hostPort] = fwd
 	mu.Unlock()
 

@@ -150,7 +150,7 @@ Spawned containers join the sandbox's internal network:
 
 ### Localhost Port Forwarding
 
-When `localhost_port_forward: true` (default), a daemon inside the agent container watches Docker events and auto-forwards `localhost:PORT → container_ip:PORT` for any container with port bindings.
+When `localhost_port_forward: true` (default), a daemon inside the agent container reconciles `localhost:PORT → container_ip:PORT` forwarders for any container with port bindings.
 
 This solves a common problem: browser tools block navigation to private IPs (172.x.x.x) but allow `localhost`. Without forwarding, agents can `curl` container IPs but cannot browse them.
 
@@ -163,6 +163,17 @@ Creates: localhost:8000 → 172.32.0.14:8000
 ↓
 Agent browser opens http://localhost:8000 ✓
 ```
+
+**Architecture:** Controller reconciliation pattern. A single `reconcile()` function computes desired state from Docker and converges actual forwarders to match. Triggered by:
+- Startup (immediate)
+- Docker events (debounced — rapid events coalesce into one reconcile)
+- Every 30s (safety net / self-healing)
+
+**Properties:**
+- Detects target drift (container restarts with new IP → forwarder updated)
+- Self-healing (missed events caught by periodic reconcile)
+- Idempotent (safe to trigger any number of times)
+- Zero special capabilities (userspace TCP proxy, no NET_ADMIN needed)
 
 Disable with:
 ```yaml
