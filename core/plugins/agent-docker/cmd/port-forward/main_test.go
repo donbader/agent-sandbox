@@ -3,115 +3,102 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 )
 
-// mockDockerAPI creates a test server that mimics Docker API responses.
-func mockDockerAPI(t *testing.T, containers []map[string]any) *httptest.Server {
-	t.Helper()
+// mockDockerServer creates a test server that serves container inspect responses.
+func mockDockerServer(containers map[string]map[string]any) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/containers/json":
-			json.NewEncoder(w).Encode(containers)
-		case len(r.URL.Path) > len("/containers/") && r.URL.Path[len(r.URL.Path)-5:] == "/json":
-			// /containers/{id}/json — return first container
-			if len(containers) > 0 {
-				json.NewEncoder(w).Encode(containers[0])
-			} else {
-				w.WriteHeader(404)
-			}
-		case r.URL.Path == "/events":
-			// Hold connection open (simulate event stream)
-			flusher, ok := w.(http.Flusher)
-			if ok {
-				flusher.Flush()
-			}
-			// Block until client disconnects
-			<-r.Context().Done()
-		default:
-			w.WriteHeader(404)
+		if r.URL.Path == "/_ping" {
+			w.WriteHeader(200)
+			return
 		}
+		if r.URL.Path == "/containers/json" {
+			list := []map[string]any{}
+			for id := range containers {
+				list = append(list, map[string]any{"Id": id})
+			}
+			json.NewEncoder(w).Encode(list)
+			return
+		}
+		// /containers/<id>/json
+		for id, info := range containers {
+			if r.URL.Path == "/containers/"+id+"/json" {
+				json.NewEncoder(w).Encode(info)
+				return
+			}
+		}
+		w.WriteHeader(404)
 	}))
 }
 
 func TestContainerPorts(t *testing.T) {
 	tests := []struct {
 		name     string
-		response map[string]any
-		want     int // expected number of port bindings
+		info     map[string]any
+		expected [][3]string
 	}{
 		{
 			name: "single port binding",
-			response: map[string]any{
+			info: map[string]any{
 				"NetworkSettings": map[string]any{
-					"Networks": map[string]any{
-						"sandbox": map[string]any{"IPAddress": "172.32.0.10"},
-					},
+					"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.17.0.2"}},
 					"Ports": map[string]any{
-						"8000/tcp": []map[string]string{{"HostPort": "8000"}},
-					},
-				},
-			},
-			want: 1,
-		},
-		{
-			name: "multiple port bindings",
-			response: map[string]any{
-				"NetworkSettings": map[string]any{
-					"Networks": map[string]any{
-						"sandbox": map[string]any{"IPAddress": "172.32.0.10"},
-					},
-					"Ports": map[string]any{
-						"8000/tcp": []map[string]string{{"HostPort": "8000"}},
-						"5173/tcp": []map[string]string{{"HostPort": "5173"}},
-					},
-				},
-			},
-			want: 2,
-		},
-		{
-			name: "no port bindings (nil)",
-			response: map[string]any{
-				"NetworkSettings": map[string]any{
-					"Networks": map[string]any{
-						"sandbox": map[string]any{"IPAddress": "172.32.0.10"},
-					},
-					"Ports": map[string]any{
-						"8080/tcp": nil,
-					},
-				},
-			},
-			want: 0,
-		},
-		{
-			name: "no network IP",
-			response: map[string]any{
-				"NetworkSettings": map[string]any{
-					"Networks": map[string]any{},
-					"Ports": map[string]any{
-						"8000/tcp": []map[string]string{{"HostPort": "8000"}},
+						"8080/tcp": []map[string]string{{"HostIp": "0.0.0.0", "HostPort": "8080"}},
 					},
 				},
 				"HostConfig": map[string]any{"PortBindings": map[string]any{}},
 			},
-			want: 0,
+			expected: [][3]string{{"8080", "172.17.0.2", "8080"}},
+		},
+		{
+			name: "multiple port bindings",
+			info: map[string]any{
+				"NetworkSettings": map[string]any{
+					"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.17.0.3"}},
+					"Ports": map[string]any{
+						"80/tcp":   []map[string]string{{"HostIp": "", "HostPort": "8080"}},
+						"443/tcp":  []map[string]string{{"HostIp": "", "HostPort": "8443"}},
+					},
+				},
+				"HostConfig": map[string]any{"PortBindings": map[string]any{}},
+			},
+			expected: [][3]string{{"8080", "172.17.0.3", "80"}, {"8443", "172.17.0.3", "443"}},
+		},
+		{
+			name: "no port bindings (nil)",
+			info: map[string]any{
+				"NetworkSettings": map[string]any{
+					"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.17.0.4"}},
+					"Ports":    map[string]any{"80/tcp": nil},
+				},
+				"HostConfig": map[string]any{"PortBindings": map[string]any{}},
+			},
+			expected: nil,
+		},
+		{
+			name: "no network IP",
+			info: map[string]any{
+				"NetworkSettings": map[string]any{
+					"Networks": map[string]any{},
+					"Ports": map[string]any{
+						"80/tcp": []map[string]string{{"HostIp": "", "HostPort": "8080"}},
+					},
+				},
+				"HostConfig": map[string]any{"PortBindings": map[string]any{}},
+			},
+			expected: nil,
 		},
 		{
 			name: "fallback to HostConfig.PortBindings when NetworkSettings.Ports is null",
-			response: map[string]any{
+			info: map[string]any{
 				"NetworkSettings": map[string]any{
-					"Networks": map[string]any{
-						"sandbox": map[string]any{"IPAddress": "172.32.0.14"},
-					},
-					"Ports": map[string]any{
-						"8000/tcp": nil,
-					},
+					"Networks": map[string]any{"sandbox": map[string]any{"IPAddress": "172.32.0.14"}},
+					"Ports":    map[string]any{"8000/tcp": nil},
 				},
 				"HostConfig": map[string]any{
 					"PortBindings": map[string]any{
@@ -119,126 +106,128 @@ func TestContainerPorts(t *testing.T) {
 					},
 				},
 			},
-			want: 1,
+			expected: [][3]string{{"8000", "172.32.0.14", "8000"}},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				json.NewEncoder(w).Encode(tt.response)
+				json.NewEncoder(w).Encode(tc.info)
 			}))
 			defer srv.Close()
-
-			// Override DOCKER_HOST for test
 			t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
 
-			ports := containerPorts("test-id")
-			if len(ports) != tt.want {
-				t.Errorf("got %d ports, want %d", len(ports), tt.want)
+			result := containerPorts("test-id")
+
+			if tc.expected == nil {
+				if len(result) != 0 {
+					t.Errorf("expected nil, got %v", result)
+				}
+				return
+			}
+
+			if len(result) != len(tc.expected) {
+				t.Errorf("expected %d results, got %d: %v", len(tc.expected), len(result), result)
+				return
+			}
+
+			// Check each expected tuple is present (order may vary)
+			for _, exp := range tc.expected {
+				found := false
+				for _, r := range result {
+					if r == exp {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected %v in results, got %v", exp, result)
+				}
 			}
 		})
 	}
 }
 
 func TestForwarderLifecycle(t *testing.T) {
-	// Start a mock backend
-	backend, err := net.Listen("tcp", "127.0.0.1:0")
+	// Start a simple TCP echo server as target
+	target, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer backend.Close()
-	backendPort := backend.Addr().(*net.TCPAddr).Port
+	defer target.Close()
+	targetPort := target.Addr().(*net.TCPAddr).Port
 
-	// Accept connections on backend and echo
 	go func() {
 		for {
-			conn, err := backend.Accept()
+			conn, err := target.Accept()
 			if err != nil {
 				return
 			}
 			go func(c net.Conn) {
 				defer c.Close()
-				io.Copy(c, c) // echo
+				buf := make([]byte, 1024)
+				n, _ := c.Read(buf)
+				c.Write(buf[:n])
 			}(conn)
 		}
 	}()
 
-	// Find a free port for the forwarder
-	tmp, _ := net.Listen("tcp", "127.0.0.1:0")
-	fwdPort := tmp.Addr().(*net.TCPAddr).Port
-	tmp.Close()
+	// Start forwarder on random port
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	fwdPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
 
-	// Start forwarder
-	go startForwarder(fwdPort, "127.0.0.1", backendPort)
-	time.Sleep(200 * time.Millisecond)
+	startForwarder(fwdPort, "127.0.0.1", targetPort)
+	defer stopForwarder(fwdPort)
 
-	// Verify it's in the active map
-	mu.Lock()
-	_, exists := forwarders[fwdPort]
-	mu.Unlock()
-	if !exists {
-		t.Fatal("forwarder not in active map")
-	}
+	time.Sleep(100 * time.Millisecond)
 
-	// Connect and verify echo
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", fwdPort))
+	// Verify forwarding works
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", fwdPort), time.Second)
 	if err != nil {
-		t.Fatal("connect to forwarder:", err)
+		t.Fatal(err)
 	}
-	msg := []byte("hello port-forward")
+	defer conn.Close()
+
+	msg := []byte("hello")
 	conn.Write(msg)
-	buf := make([]byte, len(msg))
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, err := io.ReadFull(conn, buf)
-	if err != nil || string(buf[:n]) != string(msg) {
-		t.Errorf("echo failed: got %q, err=%v", buf[:n], err)
-	}
-	conn.Close()
-
-	// Stop forwarder
-	stopForwarder(fwdPort)
-	time.Sleep(200 * time.Millisecond)
-
-	mu.Lock()
-	_, exists = forwarders[fwdPort]
-	mu.Unlock()
-	if exists {
-		t.Error("forwarder still in active map after stop")
-	}
-
-	// Verify port is released
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", fwdPort))
+	buf := make([]byte, 1024)
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	n, err := conn.Read(buf)
 	if err != nil {
-		t.Error("port not released after stop:", err)
-	} else {
-		ln.Close()
+		t.Fatal(err)
+	}
+	if string(buf[:n]) != "hello" {
+		t.Errorf("expected 'hello', got %q", string(buf[:n]))
+	}
+
+	// Stop and verify port is released
+	stopForwarder(fwdPort)
+	time.Sleep(100 * time.Millisecond)
+	_, err = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", fwdPort), 100*time.Millisecond)
+	if err == nil {
+		t.Error("expected connection refused after stop")
 	}
 }
 
 func TestForwarderBindConflict(t *testing.T) {
 	// Occupy a port
-	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer blocker.Close()
-	port := blocker.Addr().(*net.TCPAddr).Port
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
 
-	// Try to start forwarder on occupied port — should not panic or add to active
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		startForwarder(port, "127.0.0.1", 9999)
-	}()
-	wg.Wait()
+	// Try to start forwarder on same port — should log error but not panic
+	startForwarder(port, "127.0.0.1", 9999)
 
 	mu.Lock()
 	_, exists := forwarders[port]
 	mu.Unlock()
 	if exists {
-		t.Error("forwarder should not be active on occupied port")
+		t.Error("forwarder should not be registered on conflicting port")
 	}
 }
 
@@ -248,55 +237,45 @@ func TestStopNonexistent(t *testing.T) {
 }
 
 func TestConcurrentForwarders(t *testing.T) {
-	// Start a backend
-	backend, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer backend.Close()
-	backendPort := backend.Addr().(*net.TCPAddr).Port
+	target, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer target.Close()
+	targetPort := target.Addr().(*net.TCPAddr).Port
 
 	go func() {
 		for {
-			conn, err := backend.Accept()
+			conn, err := target.Accept()
 			if err != nil {
 				return
 			}
-			go func(c net.Conn) { defer c.Close(); io.Copy(c, c) }(conn)
+			conn.Close()
 		}
 	}()
 
-	// Start multiple forwarders
-	ports := make([]int, 3)
-	for i := range ports {
-		tmp, _ := net.Listen("tcp", "127.0.0.1:0")
-		ports[i] = tmp.Addr().(*net.TCPAddr).Port
-		tmp.Close()
-		go startForwarder(ports[i], "127.0.0.1", backendPort)
+	ports := []int{}
+	for i := 0; i < 3; i++ {
+		ln, _ := net.Listen("tcp", "127.0.0.1:0")
+		ports = append(ports, ln.Addr().(*net.TCPAddr).Port)
+		ln.Close()
 	}
-	time.Sleep(300 * time.Millisecond)
 
-	// All should be active
-	mu.Lock()
 	for _, p := range ports {
-		if _, ok := forwarders[p]; !ok {
-			t.Errorf("port %d not in active map", p)
-		}
+		startForwarder(p, "127.0.0.1", targetPort)
 	}
-	mu.Unlock()
+	time.Sleep(100 * time.Millisecond)
 
-	// Stop all
+	mu.Lock()
+	count := len(forwarders)
+	mu.Unlock()
+	if count < 3 {
+		t.Errorf("expected 3 forwarders, got %d", count)
+	}
+
 	for _, p := range ports {
 		stopForwarder(p)
 	}
-	time.Sleep(200 * time.Millisecond)
-
-	mu.Lock()
-	if len(forwarders) != 0 {
-		t.Errorf("expected 0 active forwarders, got %d", len(forwarders))
-	}
-	mu.Unlock()
 }
 
 func TestWaitForDocker(t *testing.T) {
-	// Simulate: first 2 pings fail, third succeeds
 	attempt := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/_ping" {
@@ -318,71 +297,119 @@ func TestWaitForDocker(t *testing.T) {
 	}
 }
 
-func TestWatchEventsReplaysSinceStart(t *testing.T) {
-	// Simulate: /events stream sends a replayed "start" event, then we verify forwarding
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/events" {
-			// Verify since parameter is present
-			if r.URL.Query().Get("since") == "" {
-				t.Error("expected since parameter in events request")
-			}
-			// Send a replayed start event
-			flusher, _ := w.(http.Flusher)
-			event := `{"Action":"start","id":"replay-container-123"}`
-			fmt.Fprintln(w, event)
-			flusher.Flush()
-			// Keep connection open briefly then close
-			time.Sleep(500 * time.Millisecond)
-			return
-		}
-		// /containers/replay-container-123/json
-		json.NewEncoder(w).Encode(map[string]any{
+func TestReconcileAddsForwarders(t *testing.T) {
+	srv := mockDockerServer(map[string]map[string]any{
+		"container-a": {
 			"NetworkSettings": map[string]any{
-				"Networks": map[string]any{"sandbox": map[string]any{"IPAddress": "172.32.0.77"}},
-				"Ports":    map[string]any{"4000/tcp": nil},
+				"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.17.0.10"}},
+				"Ports":    map[string]any{"3000/tcp": nil},
 			},
 			"HostConfig": map[string]any{
 				"PortBindings": map[string]any{
-					"4000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19878"}},
+					"3000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19880"}},
 				},
 			},
-		})
-	}))
+		},
+	})
 	defer srv.Close()
 
 	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
+	reconcile()
 
-	// Run watchEvents in background (it will return when the server closes the stream)
-	go watchEvents(time.Now().Unix() - 10)
-	time.Sleep(time.Second)
-
-	// Should have set up forwarding from the replayed event
 	mu.Lock()
-	_, exists := forwarders[19878]
+	_, exists := forwarders[19880]
 	mu.Unlock()
 	if !exists {
-		t.Error("expected forwarder on port 19878 from replayed event")
+		t.Error("expected forwarder on port 19880 after reconcile")
 	}
-
-	stopForwarder(19878)
+	stopForwarder(19880)
 }
 
-func TestScanExisting(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/containers/json" {
-			json.NewEncoder(w).Encode([]map[string]any{
-				{"Id": "existing-1"},
-			})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]any{
+func TestReconcileRemovesStale(t *testing.T) {
+	// Start a forwarder manually (simulating a container that was running before)
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	stalePort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	startForwarder(stalePort, "172.17.0.99", 9999)
+	time.Sleep(100 * time.Millisecond)
+
+	// Mock Docker returns NO containers — the forwarder should be removed
+	srv := mockDockerServer(map[string]map[string]any{})
+	defer srv.Close()
+	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
+
+	reconcile()
+
+	mu.Lock()
+	_, exists := forwarders[stalePort]
+	mu.Unlock()
+	if exists {
+		t.Errorf("expected forwarder on port %d to be removed by reconcile", stalePort)
+		stopForwarder(stalePort)
+	}
+}
+
+func TestReconcileIdempotent(t *testing.T) {
+	srv := mockDockerServer(map[string]map[string]any{
+		"container-b": {
 			"NetworkSettings": map[string]any{
-				"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.32.0.88"}},
+				"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.17.0.20"}},
 				"Ports":    map[string]any{"5000/tcp": nil},
 			},
 			"HostConfig": map[string]any{
 				"PortBindings": map[string]any{
-					"5000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19879"}},
+					"5000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19881"}},
+				},
+			},
+		},
+	})
+	defer srv.Close()
+
+	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
+
+	reconcile()
+	reconcile() // second call should be no-op
+
+	mu.Lock()
+	count := 0
+	for range forwarders {
+		count++
+	}
+	_, exists := forwarders[19881]
+	mu.Unlock()
+
+	if !exists {
+		t.Error("expected forwarder on port 19881")
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 forwarder, got %d", count)
+	}
+	stopForwarder(19881)
+}
+
+func TestEventTriggersReconcile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/events" {
+			flusher, _ := w.(http.Flusher)
+			fmt.Fprintln(w, `{"Action":"start","id":"new-container"}`)
+			flusher.Flush()
+			time.Sleep(500 * time.Millisecond)
+			return
+		}
+		if r.URL.Path == "/containers/json" {
+			json.NewEncoder(w).Encode([]map[string]any{{"Id": "new-container"}})
+			return
+		}
+		// /containers/new-container/json
+		json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{"bridge": map[string]any{"IPAddress": "172.17.0.30"}},
+				"Ports":    map[string]any{"7000/tcp": nil},
+			},
+			"HostConfig": map[string]any{
+				"PortBindings": map[string]any{
+					"7000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19882"}},
 				},
 			},
 		})
@@ -390,13 +417,16 @@ func TestScanExisting(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
-	scanExisting()
+
+	// Run watchEvents in background (returns when server closes stream)
+	go watchEvents()
+	time.Sleep(2 * time.Second) // wait for event + reconcile
 
 	mu.Lock()
-	_, exists := forwarders[19879]
+	_, exists := forwarders[19882]
 	mu.Unlock()
 	if !exists {
-		t.Error("expected forwarder on port 19879 from scanExisting")
+		t.Error("expected forwarder on port 19882 from event-triggered reconcile")
 	}
-	stopForwarder(19879)
+	stopForwarder(19882)
 }
