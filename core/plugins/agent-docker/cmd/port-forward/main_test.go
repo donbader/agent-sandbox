@@ -345,3 +345,51 @@ func TestScanExistingRetries(t *testing.T) {
 	// Cleanup
 	stopForwarder(19876)
 }
+
+func TestScanExistingRetriesOnEmptyList(t *testing.T) {
+	// Simulate: API responds OK but returns empty list first 3 times, then returns containers
+	attempt := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/containers/json" {
+			attempt++
+			if attempt < 4 {
+				json.NewEncoder(w).Encode([]map[string]any{}) // empty list
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"Id": "delayed-container"},
+			})
+			return
+		}
+		// /containers/delayed-container/json
+		json.NewEncoder(w).Encode(map[string]any{
+			"NetworkSettings": map[string]any{
+				"Networks": map[string]any{"sandbox": map[string]any{"IPAddress": "172.32.0.50"}},
+				"Ports":    map[string]any{"3000/tcp": nil},
+			},
+			"HostConfig": map[string]any{
+				"PortBindings": map[string]any{
+					"3000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19877"}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
+
+	scanExisting()
+
+	if attempt < 4 {
+		t.Errorf("expected at least 4 attempts (3 empty + 1 with containers), got %d", attempt)
+	}
+
+	mu.Lock()
+	_, exists := forwarders[19877]
+	mu.Unlock()
+	if !exists {
+		t.Error("expected forwarder on port 19877 after empty-list retries")
+	}
+
+	stopForwarder(19877)
+}

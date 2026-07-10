@@ -278,7 +278,10 @@ func pruneDeadForwarders() {
 
 // scanExisting sets up forwarding for already-running containers.
 func scanExisting() {
-	// Retry until Docker API is reachable (handles startup race with docker-proxy sidecar)
+	// Retry until Docker API is reachable AND returns containers.
+	// The docker-proxy may respond 200 OK with an empty list before it finishes
+	// tracking containers from the host daemon.
+	emptyReplies := 0
 	for attempt := 0; attempt < 30; attempt++ {
 		resp, err := dockerGet("/containers/json")
 		if err != nil {
@@ -294,13 +297,23 @@ func scanExisting() {
 			continue
 		}
 		resp.Body.Close()
+
 		if len(containers) > 0 {
 			log.Printf("[port-forward] found %d existing containers", len(containers))
+			for _, c := range containers {
+				handleStart(c.Id)
+			}
+			return
 		}
-		for _, c := range containers {
-			handleStart(c.Id)
+
+		// API responded but 0 containers — proxy might not be ready yet.
+		// Retry a few times before giving up.
+		emptyReplies++
+		if emptyReplies >= 10 {
+			log.Println("[port-forward] no containers found after 10 checks, will rely on events")
+			return
 		}
-		return
+		time.Sleep(2 * time.Second)
 	}
 	log.Println("[port-forward] warning: could not reach Docker API after 30 retries")
 }
