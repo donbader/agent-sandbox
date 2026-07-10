@@ -1,7 +1,11 @@
-// Port-forward daemon: watches Docker container starts and forwards localhost:PORT → container:PORT.
+// Port-forward daemon: reconciles localhost:PORT → container:PORT forwarders.
 //
-// Solves: agent-browser blocks private IPs but allows localhost. By forwarding
-// localhost:PORT → container_ip:PORT, the agent can access spawned containers.
+// Uses a controller pattern: one reconcile() function computes desired state
+// (running containers with port bindings) and converges actual state (active
+// forwarders) to match. Reconcile is triggered by: startup, Docker events,
+// and a periodic safety-net timer.
+//
+// Solves: agent-browser blocks private IPs but allows localhost.
 package main
 
 import (
@@ -23,6 +27,8 @@ import (
 type forwarder struct {
 	listener net.Listener
 	done     chan struct{}
+	targetIP string
+	targetPort int
 }
 
 var (
@@ -34,20 +40,139 @@ func main() {
 	log.SetFlags(log.Ltime)
 	log.Println("[port-forward] starting daemon")
 
-	// Record startup time — we'll replay events from this point
-	startTime := time.Now().Unix()
-
-	// Wait for Docker API to be reachable
 	waitForDocker()
+	reconcile()
 
-	// Watch events with since=startTime (replays container starts that happened
-	// between daemon startup and now, plus catches all future events — no gap)
+	// Periodic reconcile as safety net
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			reconcile()
+		}
+	}()
+
+	// Event-driven reconcile (retries forever)
 	for {
-		if err := watchEvents(startTime); err != nil {
+		if err := watchEvents(); err != nil {
 			log.Printf("[port-forward] event stream error: %v, retrying...", err)
 			time.Sleep(2 * time.Second)
 		}
 	}
+}
+
+// target represents a desired forwarding destination.
+type target struct {
+	ip   string
+	port int
+}
+
+// desiredForwarders queries Docker for all running containers and returns
+// a map of hostPort → target representing the desired forwarding state.
+func desiredForwarders() map[int]target {
+	resp, err := dockerGet("/containers/json")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var containers []struct {
+		Id string
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+		return nil
+	}
+
+	desired := map[int]target{}
+	for _, c := range containers {
+		ports := containerPorts(c.Id)
+		for _, p := range ports {
+			hp, _ := strconv.Atoi(p[0])
+			cp, _ := strconv.Atoi(p[2])
+			if hp > 0 && cp > 0 {
+				desired[hp] = target{ip: p[1], port: cp}
+			}
+		}
+	}
+	return desired
+}
+
+// reconcile converges actual forwarders to match desired state.
+// Idempotent: safe to call any number of times.
+func reconcile() {
+	desired := desiredForwarders()
+	if desired == nil {
+		return // API unreachable, skip this cycle
+	}
+
+	mu.Lock()
+	// Collect stale forwarders (running but not desired)
+	var toRemove []int
+	for port := range forwarders {
+		if _, ok := desired[port]; !ok {
+			toRemove = append(toRemove, port)
+		}
+	}
+	// Collect missing forwarders (desired but not running)
+	var toAdd []int
+	for port := range desired {
+		if _, ok := forwarders[port]; !ok {
+			toAdd = append(toAdd, port)
+		}
+	}
+	mu.Unlock()
+
+	for _, port := range toRemove {
+		stopForwarder(port)
+	}
+	for _, port := range toAdd {
+		t := desired[port]
+		startForwarder(port, t.ip, t.port)
+	}
+}
+
+// watchEvents streams Docker events and triggers reconcile on changes.
+func watchEvents() error {
+	resp, err := dockerGet(`/events?filters={"type":["container"],"event":["start","stop","die"]}`)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		var event struct {
+			Action string
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue
+		}
+		switch event.Action {
+		case "start":
+			// Brief delay for container networking to settle
+			time.Sleep(500 * time.Millisecond)
+			reconcile()
+		case "stop", "die":
+			reconcile()
+		}
+	}
+	return scanner.Err()
+}
+
+// waitForDocker retries until the Docker API responds successfully.
+func waitForDocker() {
+	for attempt := 0; attempt < 60; attempt++ {
+		resp, err := dockerGet("/_ping")
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			log.Println("[port-forward] Docker API ready")
+			return
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(time.Second)
+	}
+	log.Println("[port-forward] warning: Docker API not reachable after 60s, proceeding anyway")
 }
 
 // dockerGet makes a GET request to the Docker API.
@@ -147,7 +272,7 @@ func startForwarder(hostPort int, targetIP string, targetPort int) {
 		return
 	}
 
-	fwd := &forwarder{listener: ln, done: make(chan struct{})}
+	fwd := &forwarder{listener: ln, done: make(chan struct{}), targetIP: targetIP, targetPort: targetPort}
 	mu.Lock()
 	forwarders[hostPort] = fwd
 	mu.Unlock()
@@ -199,137 +324,4 @@ func stopForwarder(hostPort int) {
 		fwd.listener.Close()
 		log.Printf("[port-forward] stopped :%d", hostPort)
 	}
-}
-
-// handleStart sets up forwarding for a newly started container.
-func handleStart(containerID string) {
-	time.Sleep(500 * time.Millisecond) // let networking settle
-	ports := containerPorts(containerID)
-	for _, p := range ports {
-		hp, _ := strconv.Atoi(p[0])
-		cp, _ := strconv.Atoi(p[2])
-		if hp > 0 && cp > 0 {
-			startForwarder(hp, p[1], cp)
-		}
-	}
-}
-
-// handleStop cleans up dead forwarders by probing backends.
-func handleStop() {
-	mu.Lock()
-	ports := make([]int, 0, len(forwarders))
-	for p := range forwarders {
-		ports = append(ports, p)
-	}
-	mu.Unlock()
-
-	for _, port := range ports {
-		mu.Lock()
-		fwd, exists := forwarders[port]
-		mu.Unlock()
-		if !exists {
-			continue
-		}
-		// Probe: try connecting to the backend through the forwarder
-		_ = fwd // We can't easily probe the backend without knowing its IP.
-		// Instead, just let dead connections fail naturally.
-		// A more robust approach: re-inspect all running containers and remove
-		// forwarders whose ports no longer appear.
-	}
-	pruneDeadForwarders()
-}
-
-// pruneDeadForwarders removes forwarders whose backend is unreachable.
-func pruneDeadForwarders() {
-	// List all running containers' port bindings
-	resp, err := dockerGet("/containers/json")
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-
-	var containers []struct {
-		Ports []struct {
-			PublicPort int
-		}
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
-		return
-	}
-
-	activePorts := map[int]bool{}
-	for _, c := range containers {
-		for _, p := range c.Ports {
-			if p.PublicPort > 0 {
-				activePorts[p.PublicPort] = true
-			}
-		}
-	}
-
-	mu.Lock()
-	toRemove := []int{}
-	for port := range forwarders {
-		if !activePorts[port] {
-			toRemove = append(toRemove, port)
-		}
-	}
-	mu.Unlock()
-
-	for _, port := range toRemove {
-		stopForwarder(port)
-	}
-}
-
-// scanExisting sets up forwarding for already-running containers.
-// waitForDocker retries until the Docker API responds successfully.
-func waitForDocker() {
-	for attempt := 0; attempt < 60; attempt++ {
-		resp, err := dockerGet("/_ping")
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			log.Println("[port-forward] Docker API ready")
-			return
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-		time.Sleep(time.Second)
-	}
-	log.Println("[port-forward] warning: Docker API not reachable after 60s, proceeding anyway")
-}
-
-// watchEvents streams Docker events with since parameter to replay missed events.
-func watchEvents(since int64) error {
-	url := fmt.Sprintf(`/events?since=%d&filters={"type":["container"],"event":["start","stop","die"]}`, since)
-	resp, err := dockerGet(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		var event struct {
-			Action string
-			ID     string `json:"id"`
-			Actor  struct {
-				ID string
-			}
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			continue
-		}
-		id := event.ID
-		if id == "" {
-			id = event.Actor.ID
-		}
-
-		switch event.Action {
-		case "start":
-			go handleStart(id)
-		case "stop", "die":
-			go handleStop()
-		}
-	}
-	return scanner.Err()
 }
