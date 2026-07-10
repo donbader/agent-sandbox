@@ -34,12 +34,16 @@ func main() {
 	log.SetFlags(log.Ltime)
 	log.Println("[port-forward] starting daemon")
 
-	// Scan existing containers
-	scanExisting()
+	// Record startup time — we'll replay events from this point
+	startTime := time.Now().Unix()
 
-	// Watch for new events (retries forever)
+	// Wait for Docker API to be reachable
+	waitForDocker()
+
+	// Watch events with since=startTime (replays container starts that happened
+	// between daemon startup and now, plus catches all future events — no gap)
 	for {
-		if err := watchEvents(); err != nil {
+		if err := watchEvents(startTime); err != nil {
 			log.Printf("[port-forward] event stream error: %v, retrying...", err)
 			time.Sleep(2 * time.Second)
 		}
@@ -277,37 +281,27 @@ func pruneDeadForwarders() {
 }
 
 // scanExisting sets up forwarding for already-running containers.
-func scanExisting() {
-	// Retry until Docker API is reachable (handles startup race with docker-proxy sidecar)
-	for attempt := 0; attempt < 30; attempt++ {
-		resp, err := dockerGet("/containers/json")
-		if err != nil {
-			time.Sleep(time.Duration(1+attempt/5) * time.Second)
-			continue
-		}
-		var containers []struct {
-			Id string
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+// waitForDocker retries until the Docker API responds successfully.
+func waitForDocker() {
+	for attempt := 0; attempt < 60; attempt++ {
+		resp, err := dockerGet("/_ping")
+		if err == nil && resp.StatusCode == 200 {
 			resp.Body.Close()
-			time.Sleep(time.Second)
-			continue
+			log.Println("[port-forward] Docker API ready")
+			return
 		}
-		resp.Body.Close()
-		if len(containers) > 0 {
-			log.Printf("[port-forward] found %d existing containers", len(containers))
+		if resp != nil {
+			resp.Body.Close()
 		}
-		for _, c := range containers {
-			handleStart(c.Id)
-		}
-		return
+		time.Sleep(time.Second)
 	}
-	log.Println("[port-forward] warning: could not reach Docker API after 30 retries")
+	log.Println("[port-forward] warning: Docker API not reachable after 60s, proceeding anyway")
 }
 
-// watchEvents streams Docker events and reacts to container start/stop.
-func watchEvents() error {
-	resp, err := dockerGet("/events?filters=" + `{"type":["container"],"event":["start","stop","die"]}`)
+// watchEvents streams Docker events with since parameter to replay missed events.
+func watchEvents(since int64) error {
+	url := fmt.Sprintf(`/events?since=%d&filters={"type":["container"],"event":["start","stop","die"]}`, since)
+	resp, err := dockerGet(url)
 	if err != nil {
 		return err
 	}

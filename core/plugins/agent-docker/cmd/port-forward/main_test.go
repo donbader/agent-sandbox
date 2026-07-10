@@ -295,30 +295,55 @@ func TestConcurrentForwarders(t *testing.T) {
 	mu.Unlock()
 }
 
-func TestScanExistingRetries(t *testing.T) {
-	// Simulate: first 2 requests fail, third succeeds with a container
+func TestWaitForDocker(t *testing.T) {
+	// Simulate: first 2 pings fail, third succeeds
 	attempt := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/containers/json" {
+		if r.URL.Path == "/_ping" {
 			attempt++
 			if attempt < 3 {
-				w.WriteHeader(500)
+				w.WriteHeader(503)
 				return
 			}
-			json.NewEncoder(w).Encode([]map[string]any{
-				{"Id": "test-container-abc"},
-			})
+			w.WriteHeader(200)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
+	waitForDocker()
+
+	if attempt < 3 {
+		t.Errorf("expected at least 3 attempts, got %d", attempt)
+	}
+}
+
+func TestWatchEventsReplaysSinceStart(t *testing.T) {
+	// Simulate: /events stream sends a replayed "start" event, then we verify forwarding
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/events" {
+			// Verify since parameter is present
+			if r.URL.Query().Get("since") == "" {
+				t.Error("expected since parameter in events request")
+			}
+			// Send a replayed start event
+			flusher, _ := w.(http.Flusher)
+			event := `{"Action":"start","id":"replay-container-123"}`
+			fmt.Fprintln(w, event)
+			flusher.Flush()
+			// Keep connection open briefly then close
+			time.Sleep(500 * time.Millisecond)
 			return
 		}
-		// /containers/test-container-abc/json — return port info
+		// /containers/replay-container-123/json
 		json.NewEncoder(w).Encode(map[string]any{
 			"NetworkSettings": map[string]any{
-				"Networks": map[string]any{"sandbox": map[string]any{"IPAddress": "172.32.0.99"}},
-				"Ports":    map[string]any{"9999/tcp": nil},
+				"Networks": map[string]any{"sandbox": map[string]any{"IPAddress": "172.32.0.77"}},
+				"Ports":    map[string]any{"4000/tcp": nil},
 			},
 			"HostConfig": map[string]any{
 				"PortBindings": map[string]any{
-					"9999/tcp": []map[string]string{{"HostIp": "", "HostPort": "19876"}},
+					"4000/tcp": []map[string]string{{"HostIp": "", "HostPort": "19878"}},
 				},
 			},
 		})
@@ -327,21 +352,17 @@ func TestScanExistingRetries(t *testing.T) {
 
 	t.Setenv("DOCKER_HOST", "tcp://"+srv.Listener.Addr().String())
 
-	scanExisting()
+	// Run watchEvents in background (it will return when the server closes the stream)
+	go watchEvents(time.Now().Unix() - 10)
+	time.Sleep(time.Second)
 
-	// Should have retried and eventually found the container
-	if attempt < 3 {
-		t.Errorf("expected at least 3 attempts, got %d", attempt)
-	}
-
-	// Should have set up forwarding for port 19876
+	// Should have set up forwarding from the replayed event
 	mu.Lock()
-	_, exists := forwarders[19876]
+	_, exists := forwarders[19878]
 	mu.Unlock()
 	if !exists {
-		t.Error("expected forwarder on port 19876 after retry")
+		t.Error("expected forwarder on port 19878 from replayed event")
 	}
 
-	// Cleanup
-	stopForwarder(19876)
+	stopForwarder(19878)
 }
