@@ -534,12 +534,29 @@ func extractContainerID(path string) string {
 // resolveContainerRef translates a user-provided container reference to the actual
 // namespaced name/ID. Returns empty string if not owned.
 func (dp *DockerProxy) resolveContainerRef(ref string) string {
+	originalRef := ref
 	// Try name translation first (user name → namespaced name)
 	if resolved := dp.names.Resolve(KindContainer, ref); resolved != "" {
 		ref = resolved
 	}
-	// Query Docker to verify the container exists and belongs to this sandbox.
-	// Docker handles short ID prefix resolution and name matching.
+	if id := dp.inspectAndVerify(ref); id != "" {
+		return id
+	}
+	// Fallback: after proxy restart dp.names is empty, so the user name
+	// wasn't translated to the namespaced form. Try the namespaced name directly.
+	if ref == originalRef {
+		namespacedRef := dp.cfg.SandboxID + "-" + ref
+		if id := dp.inspectAndVerify(namespacedRef); id != "" {
+			// Re-populate name map so future lookups are fast
+			dp.trackContainer(id, originalRef, namespacedRef)
+			return id
+		}
+	}
+	return ""
+}
+
+// inspectAndVerify queries Docker for a container ref and checks sandbox ownership.
+func (dp *DockerProxy) inspectAndVerify(ref string) string {
 	req, err := http.NewRequest("GET", fmt.Sprintf("/containers/%s/json", ref), nil)
 	if err != nil {
 		return ""

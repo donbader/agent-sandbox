@@ -597,3 +597,91 @@ func TestDockerProxy_NamedVolumes_Allowed(t *testing.T) {
 	}, 0)
 	assert.NoError(t, err)
 }
+
+func TestDockerProxy_ResolveContainerRef_RestartFallback(t *testing.T) {
+	// Mock Docker backend: knows container by namespaced name only
+	mockDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/containers/test-my-app/json":
+			// Namespaced name resolves
+			w.Header().Set("Content-Type", "application/json")
+			resp, _ := json.Marshal(map[string]interface{}{
+				"Id": "abc123full",
+				"Config": map[string]interface{}{
+					"Labels": map[string]string{
+						"agent-sandbox.sandbox": "test",
+					},
+				},
+			})
+			_, _ = w.Write(resp)
+		case "/containers/my-app/json":
+			// User name alone does NOT resolve
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockDocker.Close()
+
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+	backendURL, _ := url.Parse(mockDocker.URL)
+	proxy.upstream = httputil.NewSingleHostReverseProxy(backendURL)
+
+	// dp.names is empty (simulates proxy restart) — no Track() calls
+	// resolveContainerRef should find it via namespaced fallback
+	id := proxy.resolveContainerRef("my-app")
+	assert.Equal(t, "abc123full", id, "should resolve via namespaced fallback after restart")
+
+	// After first resolution, the name should be tracked (fast path next time)
+	id2 := proxy.resolveContainerRef("my-app")
+	assert.Equal(t, "abc123full", id2, "second call should also resolve (now tracked)")
+}
+
+func TestDockerProxy_ResolveContainerRef_DirectID(t *testing.T) {
+	// Mock Docker backend: responds to direct container ID inspect
+	mockDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/containers/abc123deadbeef/json" {
+			w.Header().Set("Content-Type", "application/json")
+			resp, _ := json.Marshal(map[string]interface{}{
+				"Id": "abc123deadbeef",
+				"Config": map[string]interface{}{
+					"Labels": map[string]string{
+						"agent-sandbox.sandbox": "test",
+					},
+				},
+			})
+			_, _ = w.Write(resp)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockDocker.Close()
+
+	cfg := &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	}
+	proxy, _ := NewDockerProxy(cfg)
+	backendURL, _ := url.Parse(mockDocker.URL)
+	proxy.upstream = httputil.NewSingleHostReverseProxy(backendURL)
+
+	// Direct ID lookup should work without fallback
+	id := proxy.resolveContainerRef("abc123deadbeef")
+	assert.Equal(t, "abc123deadbeef", id, "should resolve directly by container ID")
+}
