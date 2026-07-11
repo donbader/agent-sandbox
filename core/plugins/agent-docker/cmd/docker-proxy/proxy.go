@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -176,7 +177,7 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 
 	// Validate under lock to prevent TOCTOU race on container count
 	dp.mu.Lock()
-	currentCount := len(dp.ids)
+	currentCount := dp.countOwnedContainers()
 	if err := dp.policy.ValidateCreate(createReq, currentCount); err != nil {
 		dp.mu.Unlock()
 		if pe, ok := err.(*PolicyError); ok {
@@ -575,6 +576,32 @@ func isHijackEndpoint(path string) bool {
 		return true
 	}
 	return false
+}
+
+// countOwnedContainers queries the Docker daemon for the real count of containers
+// owned by this sandbox. This is the source of truth — immune to stale in-memory state.
+func (dp *DockerProxy) countOwnedContainers() int {
+	filters := fmt.Sprintf(`{"label":["agent-sandbox.sandbox=%s"]}`, dp.cfg.SandboxID)
+	q := url.Values{}
+	q.Set("all", "true")
+	q.Set("filters", filters)
+	req, err := http.NewRequest("GET", "/containers/json?"+q.Encode(), nil)
+	if err != nil {
+		slog.Warn("countOwnedContainers: failed to create request", "err", err)
+		return 0
+	}
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, req)
+	if rec.code != http.StatusOK {
+		slog.Warn("countOwnedContainers: unexpected status", "code", rec.code)
+		return 0
+	}
+	var containers []any
+	if err := json.Unmarshal(rec.body.Bytes(), &containers); err != nil {
+		slog.Warn("countOwnedContainers: failed to parse response", "err", err)
+		return 0
+	}
+	return len(containers)
 }
 
 // handleHijack handles Docker API endpoints that upgrade the HTTP connection
