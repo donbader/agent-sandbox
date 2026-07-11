@@ -213,6 +213,17 @@ func TestDockerProxy_ImagePull_Blocked(t *testing.T) {
 }
 
 func TestDockerProxy_ContainerCreate_MaxContainers(t *testing.T) {
+	// Mock Docker backend that reports 2 existing containers
+	mockDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/containers/json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"existing-1"},{"Id":"existing-2"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockDocker.Close()
+
 	cfg := &ProxyConfig{
 		SandboxID:     "test",
 		AgentName:     "coder",
@@ -224,9 +235,8 @@ func TestDockerProxy_ContainerCreate_MaxContainers(t *testing.T) {
 		PidsLimit:     256,
 	}
 	proxy, _ := NewDockerProxy(cfg)
-
-	proxy.trackContainer("existing-1", "", "existing-1")
-	proxy.trackContainer("existing-2", "", "existing-2")
+	backendURL, _ := url.Parse(mockDocker.URL)
+	proxy.upstream = httputil.NewSingleHostReverseProxy(backendURL)
 
 	body := `{"Image": "node:20", "HostConfig": {}}`
 	req := httptest.NewRequest("POST", "/containers/create", strings.NewReader(body))
