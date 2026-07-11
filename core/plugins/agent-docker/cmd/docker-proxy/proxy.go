@@ -26,8 +26,6 @@ type DockerProxy struct {
 	volumes  *VolumeTranslator
 	names    *NameTranslator    // bidirectional name mapping for containers, networks, volumes
 	mu       sync.Mutex
-	ids         map[string]bool // container IDs owned by this sandbox (for counting)
-	tracked     map[string]bool // all lookup keys (IDs + namespaced names) for ownership checks
 	networks    map[string]bool // network IDs created by this sandbox (for cleanup)
 	builtImages map[string]bool // image tags built through this proxy (auto-allowed)
 }
@@ -70,8 +68,6 @@ func NewDockerProxy(cfg *ProxyConfig) (*DockerProxy, error) {
 		cfg:         cfg,
 		upstream:    upstream,
 		names:       NewNameTranslator(cfg.SandboxID),
-		ids:         make(map[string]bool),
-		tracked:     make(map[string]bool),
 		networks:    make(map[string]bool),
 		builtImages: builtImages,
 	}, nil
@@ -538,31 +534,39 @@ func extractContainerID(path string) string {
 // resolveContainerRef translates a user-provided container reference to the actual
 // namespaced name/ID. Returns empty string if not owned.
 func (dp *DockerProxy) resolveContainerRef(ref string) string {
-	// Try name translation first (user name → namespaced name, or real name passthrough)
+	// Try name translation first (user name → namespaced name)
 	if resolved := dp.names.Resolve(KindContainer, ref); resolved != "" {
-		return resolved
+		ref = resolved
 	}
-	dp.mu.Lock()
-	defer dp.mu.Unlock()
-	// Direct match (full ID or namespaced name)
-	if dp.tracked[ref] {
-		return ref
+	// Query Docker to verify the container exists and belongs to this sandbox.
+	// Docker handles short ID prefix resolution and name matching.
+	req, err := http.NewRequest("GET", fmt.Sprintf("/containers/%s/json", ref), nil)
+	if err != nil {
+		return ""
 	}
-	// Try prefix match on container IDs (docker allows short IDs)
-	for id := range dp.tracked {
-		if len(ref) >= 12 && strings.HasPrefix(id, ref) {
-			return id
-		}
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, req)
+	if rec.code != http.StatusOK {
+		return ""
 	}
-	return ""
+	var info struct {
+		Id     string            `json:"Id"`
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(rec.body.Bytes(), &info); err != nil {
+		return ""
+	}
+	if info.Config.Labels["agent-sandbox.sandbox"] != dp.cfg.SandboxID {
+		return ""
+	}
+	return info.Id
 }
 
 func (dp *DockerProxy) trackContainer(id, userName, namespacedName string) {
 	dp.mu.Lock()
 	defer dp.mu.Unlock()
-	dp.ids[id] = true
-	dp.tracked[id] = true
-	dp.tracked[namespacedName] = true
 	dp.names.Track(KindContainer, userName, namespacedName)
 }
 
