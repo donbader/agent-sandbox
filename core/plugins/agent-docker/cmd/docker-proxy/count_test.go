@@ -17,7 +17,7 @@ func mockDockerBackend(t *testing.T, containers []map[string]any) *httptest.Serv
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/containers/json" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(containers)
+			_ = json.NewEncoder(w).Encode(containers)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -80,7 +80,7 @@ func TestCountOwnedContainers_ErrorResponse(t *testing.T) {
 func TestCountOwnedContainers_MalformedJSON(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("not valid json"))
+		_, _ = w.Write([]byte("not valid json"))
 	}))
 	defer backend.Close()
 
