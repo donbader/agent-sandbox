@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -228,7 +229,31 @@ func (dp *DockerProxy) handleNetworkList(w http.ResponseWriter, r *http.Request)
 }
 
 // handleNetworkConnect allows connecting containers to networks we own.
+// Verifies the container being connected is owned by this sandbox.
 func (dp *DockerProxy) handleNetworkConnect(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	var req struct {
+		Container string `json:"Container"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Verify the container is owned by this sandbox
+	if req.Container != "" {
+		if id := dp.inspectAndVerify(req.Container); id == "" {
+			writeError(w, http.StatusForbidden, "container not owned by this sandbox")
+			return
+		}
+	}
+
 	dp.upstream.ServeHTTP(w, r)
 }
 

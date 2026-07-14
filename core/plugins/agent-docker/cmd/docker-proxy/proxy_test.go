@@ -598,6 +598,24 @@ func TestDockerProxy_NamedVolumes_Allowed(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestDockerProxy_ImageDelete_Blocked(t *testing.T) {
+	proxy, _ := NewDockerProxy(&ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+	})
+
+	req := httptest.NewRequest("DELETE", "/images/node:20", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
 func TestDockerProxy_ResolveContainerRef_RestartFallback(t *testing.T) {
 	// Mock Docker backend: knows container by namespaced name only
 	mockDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

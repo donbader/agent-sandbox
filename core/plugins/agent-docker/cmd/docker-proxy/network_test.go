@@ -231,3 +231,63 @@ func TestIsDefaultNetwork(t *testing.T) {
 	assert.False(t, isDefaultNetwork("chome-matv3-ihbums_sandbox"))
 	assert.False(t, isDefaultNetwork("custom_network"))
 }
+
+func TestHandleNetworkConnect_OwnershipCheck(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/containers/owned-container/json":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id": "owned-container-id",
+				"Config": map[string]any{
+					"Labels": map[string]string{
+						"agent-sandbox.sandbox": "test",
+					},
+				},
+			})
+		case r.Method == "GET" && r.URL.Path == "/containers/foreign-container/json":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id": "foreign-container-id",
+				"Config": map[string]any{
+					"Labels": map[string]string{
+						"agent-sandbox.sandbox": "other-sandbox",
+					},
+				},
+			})
+		case r.Method == "POST" && strings.Contains(r.URL.Path, "/connect"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	proxy := newProxyWithUpstream(t, handler, &ProxyConfig{
+		SandboxID:     "test",
+		AgentName:     "coder",
+		NetworkName:   "sandbox",
+		AllowedImages: []string{"node:*"},
+		MaxContainers: 5,
+		MemoryBytes:   2 * 1024 * 1024 * 1024,
+		NanoCPUs:      2000000000,
+		PidsLimit:     256,
+		AllowCompose:  true,
+	})
+
+	// Container from a different sandbox → 403
+	body := `{"Container":"foreign-container"}`
+	req := httptest.NewRequest("POST", "/networks/net123/connect", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "not owned")
+
+	// Container owned by this sandbox → forwarded
+	body = `{"Container":"owned-container"}`
+	req = httptest.NewRequest("POST", "/networks/net123/connect", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
