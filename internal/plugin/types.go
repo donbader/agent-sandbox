@@ -164,7 +164,8 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 		Options     map[string]OptionSchema `yaml:"options"`
 		Contributes Contributions           `yaml:"contributes"`
 	}
-	if err := yaml.Unmarshal(data, &full); err == nil && full.Name != "" {
+	fullParseErr := yaml.Unmarshal(data, &full)
+	if fullParseErr == nil && full.Name != "" {
 		// Full parse succeeded — extract raw contributes and re-serialize via map[string]any
 		// to unescape YAML string values (\" → ") while preserving unknown fields
 		// for strict validation during render.
@@ -198,6 +199,9 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 		Options   map[string]OptionSchema `yaml:"options"`
 	}
 	if err := yaml.Unmarshal(metadataOnly, &meta); err != nil {
+		if fullParseErr != nil {
+			return nil, fmt.Errorf("parse plugin.yaml (initial parse: %v): %w", fullParseErr, err)
+		}
 		return nil, fmt.Errorf("parse plugin.yaml: %w", err)
 	}
 	if meta.Name == "" {
