@@ -257,8 +257,11 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 	// Sidecars source from the shared certs volume at runtime.
 	if g.coreDir != "" {
 		gwRouteScript, err := os.ReadFile(filepath.Join(g.coreDir, "scripts", "gateway-route.sh"))
-		if err == nil {
-			_ = os.WriteFile(filepath.Join(buildDir, "gateway-route.sh"), gwRouteScript, 0755)
+		if err != nil {
+			return nil, fmt.Errorf("read gateway-route.sh: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(buildDir, "gateway-route.sh"), gwRouteScript, 0755); err != nil {
+			return nil, fmt.Errorf("write gateway-route.sh: %w", err)
 		}
 	}
 
