@@ -424,7 +424,7 @@ func validateNetworkIsolation(services map[string]any, networks map[string]any) 
 
 	for svcName, svcDef := range services {
 		// Gateway services are allowed on any network.
-		if strings.Contains(svcName, "-gateway") {
+		if strings.HasSuffix(svcName, "-gateway") {
 			continue
 		}
 
