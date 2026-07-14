@@ -40,11 +40,15 @@ export function consumePendingFlow(state: string): PendingFlow | null {
   } catch {
     return null;
   }
-  // Delete after reading (consume)
+  // Guard against double-spend: treat empty or sentinel as already consumed
+  if (!data || data === "__consumed__") {
+    return null;
+  }
+  // Mark as consumed immediately — narrows the race window vs writing ""
   try {
-    gw.fs.write(path, "");
+    gw.fs.write(path, "__consumed__");
   } catch {
-    // best effort cleanup
+    // best effort; second reader will hit the sentinel on the next read
   }
   const flow: PendingFlow = JSON.parse(data);
   if (Date.now() > flow.expires_at) {

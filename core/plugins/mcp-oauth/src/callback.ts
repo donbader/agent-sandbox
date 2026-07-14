@@ -61,7 +61,8 @@ function exchangeCode(
   });
 
   if (resp.status !== 200) {
-    throw new Error("token endpoint returned " + resp.status + ": " + resp.body);
+    gw.log.error("token exchange failed: status=" + resp.status + " body=" + resp.body);
+    throw new Error("token exchange failed (status " + resp.status + ")");
   }
 
   return JSON.parse(resp.body);

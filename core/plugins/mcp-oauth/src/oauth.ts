@@ -42,7 +42,7 @@ function writeToken(provider: string, token: StoredToken): void {
   gw.fs.write(`${provider}.json`, JSON.stringify(token, null, 2));
 }
 
-function refreshToken(stored: StoredToken, clientSecret?: string): StoredToken | null {
+function refreshToken(stored: StoredToken, clientSecret?: string, tokenEndpoint?: string): StoredToken | null {
   if (!stored.refresh_token) {
     gw.log.info("oauth: no refresh_token available, cannot refresh");
     return null;
@@ -59,9 +59,13 @@ function refreshToken(stored: StoredToken, clientSecret?: string): StoredToken |
     params.push("client_secret=" + encodeURIComponent(clientSecret));
   }
 
+  // Use pinned endpoint from options/registration; fall back to stored only if unavailable
+  // ponytail: stored fallback exists for tokens written before this fix; remove after migration
+  const endpoint = tokenEndpoint || stored.token_endpoint;
+
   let resp: any;
   try {
-    resp = gw.http.fetch(stored.token_endpoint, {
+    resp = gw.http.fetch(endpoint, {
       method: "POST",
       body: params.join("&"),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -83,7 +87,7 @@ function refreshToken(stored: StoredToken, clientSecret?: string): StoredToken |
     access_token: tr.access_token,
     refresh_token: tr.refresh_token || stored.refresh_token,
     expires_at: Math.floor(Date.now() / 1000) + expiresIn,
-    token_endpoint: stored.token_endpoint,
+    token_endpoint: endpoint,
     client_id: stored.client_id,
   };
 }
@@ -166,11 +170,16 @@ export default function(ctx: GatewayContext, options: PluginOptions) {
   if (now + 300 >= stored.expires_at) {
     gw.log.info("oauth: token for " + matchedName + " expired or expiring soon (expires_at=" + stored.expires_at + ", now=" + now + ")");
     let clientSecret = matchedCfg.client_secret || "";
-    if (!clientSecret) {
+    // Pin token endpoint from options/registration — never trust the stored token file
+    let pinnedTokenEndpoint = matchedCfg.token_endpoint || "";
+    if (!clientSecret || !pinnedTokenEndpoint) {
       const reg = loadRegistration(matchedName);
-      if (reg && reg.client_secret) clientSecret = reg.client_secret;
+      if (reg) {
+        if (!clientSecret && reg.client_secret) clientSecret = reg.client_secret;
+        if (!pinnedTokenEndpoint && reg.token_endpoint) pinnedTokenEndpoint = reg.token_endpoint;
+      }
     }
-    const refreshed = refreshToken(stored, clientSecret);
+    const refreshed = refreshToken(stored, clientSecret, pinnedTokenEndpoint || undefined);
     if (refreshed) {
       writeToken(matchedName, refreshed);
       gw.secrets.register(refreshed.access_token);
