@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,7 +34,13 @@ func (f *Forwarder) ListenAndServe() error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			return fmt.Errorf("forward accept %s: %w", f.listen, err)
+			if errors.Is(err, net.ErrClosed) {
+				return nil // clean shutdown
+			}
+			// Transient errors (EMFILE, etc.) — log and retry.
+			slog.Warn("forward accept error, retrying", "listen", f.listen, "error", err)
+			time.Sleep(5 * time.Millisecond)
+			continue
 		}
 		go f.handle(conn)
 	}
