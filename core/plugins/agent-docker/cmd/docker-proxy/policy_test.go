@@ -108,3 +108,17 @@ func TestValidateCreateRequest_Valid(t *testing.T) {
 	err := p.ValidateCreate(&CreateRequest{Image: "node:20"}, 0)
 	assert.NoError(t, err)
 }
+
+func TestValidateCreateRequest_RelativeBindMount(t *testing.T) {
+	p := &Policy{AllowedImages: []string{"node:*"}, MaxContainers: 5}
+
+	// Relative paths must be blocked
+	for _, bind := range []string{"./foo:/data", "../etc:/data", "sub/path:/data"} {
+		err := p.ValidateCreate(&CreateRequest{Image: "node:20", Binds: []string{bind}}, 0)
+		assert.ErrorContains(t, err, "bind mount", "expected block for %q", bind)
+	}
+
+	// Named volume (no slash, no dot prefix) must be allowed
+	err := p.ValidateCreate(&CreateRequest{Image: "node:20", Binds: []string{"myvolume:/data"}}, 0)
+	assert.NoError(t, err)
+}
