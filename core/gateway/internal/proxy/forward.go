@@ -37,11 +37,10 @@ func (f *Forwarder) ListenAndServe() error {
 			if errors.Is(err, net.ErrClosed) {
 				return nil // clean shutdown
 			}
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				time.Sleep(5 * time.Millisecond)
-				continue
-			}
-			return fmt.Errorf("forward accept %s: %w", f.listen, err)
+			// Transient errors (EMFILE, etc.) — log and retry.
+			slog.Warn("forward accept error, retrying", "listen", f.listen, "error", err)
+			time.Sleep(5 * time.Millisecond)
+			continue
 		}
 		go f.handle(conn)
 	}

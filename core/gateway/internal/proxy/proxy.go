@@ -53,11 +53,10 @@ func (p *Proxy) ListenAndServe() error {
 			if errors.Is(err, net.ErrClosed) {
 				return nil // clean shutdown
 			}
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				time.Sleep(5 * time.Millisecond)
-				continue
-			}
-			return fmt.Errorf("proxy accept: %w", err)
+			// Transient errors (EMFILE, etc.) — log and retry.
+			slog.Warn("proxy accept error, retrying", "error", err)
+			time.Sleep(5 * time.Millisecond)
+			continue
 		}
 		go p.handleConn(conn)
 	}
