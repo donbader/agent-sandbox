@@ -119,10 +119,6 @@ function loadCachedRegistration(providerName: string): Registration | null {
 function deriveCallbackURL(ctx: GatewayContext, options: PluginOptions): string {
   if (options.callback_url) return options.callback_url;
 
-  // Allow explicit callback_url via query parameter (used by internal callers like openacp-mcp-oauth)
-  const query = ctx.request.query || {};
-  if (query["callback_url"]) return query["callback_url"];
-
   // Derive from request headers
   const proto = ctx.request.headers["x-forwarded-proto"] || "http";
   let host = ctx.request.headers["x-forwarded-host"] || ctx.request.host || "127.0.0.1";
