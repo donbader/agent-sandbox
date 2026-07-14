@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -167,9 +168,12 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 		}
 	}
 
+	domains := make([]string, 0, len(mitmSet))
 	for domain := range mitmSet {
-		rc.MITMDomains = append(rc.MITMDomains, domain)
+		domains = append(domains, domain)
 	}
+	sort.Strings(domains)
+	rc.MITMDomains = domains
 
 	// Convert auth-header entries to runtime format
 	for _, ah := range gwCfg.AuthHeaders {
