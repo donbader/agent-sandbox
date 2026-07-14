@@ -2,6 +2,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -49,6 +50,13 @@ func (p *Proxy) ListenAndServe() error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil // clean shutdown
+			}
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				time.Sleep(5 * time.Millisecond)
+				continue
+			}
 			return fmt.Errorf("proxy accept: %w", err)
 		}
 		go p.handleConn(conn)
@@ -69,7 +77,9 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	slog.Debug("new connection", "remote_addr", clientConn.RemoteAddr())
 
 	// Read the first bytes to determine protocol (TLS vs HTTP)
-	_ = clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := clientConn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return
+	}
 	buf := make([]byte, 4096)
 	n, err := clientConn.Read(buf)
 	if err != nil {
