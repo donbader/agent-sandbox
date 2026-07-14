@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -596,6 +597,7 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 	for v := range seen {
 		envVars = append(envVars, v)
 	}
+	sort.Strings(envVars)
 	return envVars
 }
 
