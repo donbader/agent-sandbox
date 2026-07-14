@@ -261,7 +261,7 @@ contributes:
 	require.NoError(t, os.WriteFile(filepath.Join(channelDir, "plugin.yaml"), []byte(`
 name: my-channel
 requires:
-  - "@builtin/agent-manager-acp"
+  - "./plugins/agent-manager-acp"
 contributes:
   runtime:
     extra_builds:

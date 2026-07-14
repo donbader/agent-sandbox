@@ -1,10 +1,14 @@
 package plugin
 
-import "maps"
+import (
+	"fmt"
+	"maps"
+)
 
 // MergeContributions combines multiple contribution sets in order.
 // CapAdd entries are deduplicated across plugins. SkipUserns is a logical OR.
-func MergeContributions(contribs ...*Contributions) *Contributions {
+// Returns an error if two plugins declare a sidecar service with the same name.
+func MergeContributions(contribs ...*Contributions) (*Contributions, error) {
 	merged := &Contributions{
 		Sidecar: SidecarContrib{Services: map[string]ComposeService{}},
 	}
@@ -41,8 +45,13 @@ func MergeContributions(contribs ...*Contributions) *Contributions {
 		merged.Gateway.NamespacedVolumes = append(merged.Gateway.NamespacedVolumes, c.Gateway.NamespacedVolumes...)
 		merged.Gateway.RawVolumes = append(merged.Gateway.RawVolumes, c.Gateway.RawVolumes...)
 		merged.Gateway.Routes = append(merged.Gateway.Routes, c.Gateway.Routes...)
-		maps.Copy(merged.Sidecar.Services, c.Sidecar.Services)
+		for name, svc := range c.Sidecar.Services {
+			if _, exists := merged.Sidecar.Services[name]; exists {
+				return nil, fmt.Errorf("sidecar service name %q is declared by multiple plugins", name)
+			}
+			merged.Sidecar.Services[name] = svc
+		}
 	}
 
-	return merged
+	return merged, nil
 }

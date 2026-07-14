@@ -25,7 +25,8 @@ func TestMergeContributions(t *testing.T) {
 		}},
 	}
 
-	merged := MergeContributions(a, b)
+	merged, err := MergeContributions(a, b)
+	require.NoError(t, err)
 
 	assert.Len(t, merged.Runtime.ExtraBuilds, 2)
 	assert.Len(t, merged.Gateway.Egress, 2)
@@ -38,14 +39,16 @@ func TestMergeContributions_NilHandling(t *testing.T) {
 		Runtime: RuntimeContrib{ExtraBuilds: []string{"RUN echo hello"}},
 	}
 
-	merged := MergeContributions(nil, a, nil)
+	merged, err := MergeContributions(nil, a, nil)
+	require.NoError(t, err)
 
 	assert.Len(t, merged.Runtime.ExtraBuilds, 1)
 	assert.Equal(t, "RUN echo hello", merged.Runtime.ExtraBuilds[0])
 }
 
 func TestMergeContributions_Empty(t *testing.T) {
-	merged := MergeContributions()
+	merged, err := MergeContributions()
+	require.NoError(t, err)
 	assert.NotNil(t, merged)
 	assert.NotNil(t, merged.Sidecar.Services)
 	assert.Empty(t, merged.Runtime.ExtraBuilds)
@@ -65,7 +68,8 @@ func TestMergeContributions_PreEntrypointAndPorts(t *testing.T) {
 		},
 	}
 
-	merged := MergeContributions(a, b)
+	merged, err := MergeContributions(a, b)
+	require.NoError(t, err)
 
 	assert.Equal(t, []string{"/usr/sbin/sshd -p 2222", "/usr/bin/some-daemon"}, merged.Runtime.PreEntrypoint)
 	assert.Equal(t, []string{"2222:2222", "8080:8080"}, merged.Runtime.Ports)
@@ -83,7 +87,8 @@ func TestMergeContributions_CapAddDedup(t *testing.T) {
 		},
 	}
 
-	merged := MergeContributions(a, b)
+	merged, err := MergeContributions(a, b)
+	require.NoError(t, err)
 
 	// NET_ADMIN appears in both but should be deduplicated
 	assert.Equal(t, []string{"SYS_CHROOT", "NET_ADMIN", "SYS_PTRACE"}, merged.Runtime.CapAdd)
@@ -101,7 +106,8 @@ func TestMergeContributions_SkipUserns(t *testing.T) {
 		},
 	}
 
-	merged := MergeContributions(a, b)
+	merged, err := MergeContributions(a, b)
+	require.NoError(t, err)
 
 	// Logical OR — if any plugin sets it true, result is true
 	assert.True(t, merged.Runtime.SkipUserns)
@@ -119,7 +125,8 @@ func TestMergeContributions_SkipUserns_AllFalse(t *testing.T) {
 		},
 	}
 
-	merged := MergeContributions(a, b)
+	merged, err := MergeContributions(a, b)
+	require.NoError(t, err)
 
 	assert.False(t, merged.Runtime.SkipUserns)
 }
@@ -140,7 +147,8 @@ func TestMergeContributions_BuildStages(t *testing.T) {
 		},
 	}
 
-	merged := MergeContributions(a, b)
+	merged, err := MergeContributions(a, b)
+	require.NoError(t, err)
 
 	require.Len(t, merged.Runtime.BuildStages, 2)
 	assert.Equal(t, "plugin-a", merged.Runtime.BuildStages[0].Name)
@@ -166,11 +174,29 @@ func TestMergeContributions_Ingress(t *testing.T) {
 		},
 	}
 
-	merged := MergeContributions(a, b)
+	merged, err := MergeContributions(a, b)
+	require.NoError(t, err)
 
 	require.Len(t, merged.Gateway.Ingress, 2)
 	assert.Equal(t, "2222", merged.Gateway.Ingress[0].Listen)
 	assert.Equal(t, "agent-a:2222", merged.Gateway.Ingress[0].Target)
 	assert.Equal(t, "8080", merged.Gateway.Ingress[1].Listen)
 	assert.Equal(t, "agent-b:8080", merged.Gateway.Ingress[1].Target)
+}
+
+func TestMergeContributions_SidecarCollision(t *testing.T) {
+	a := &Contributions{
+		Sidecar: SidecarContrib{Services: map[string]ComposeService{
+			"db": {Image: "postgres:16"},
+		}},
+	}
+	b := &Contributions{
+		Sidecar: SidecarContrib{Services: map[string]ComposeService{
+			"db": {Image: "mysql:8"},
+		}},
+	}
+
+	_, err := MergeContributions(a, b)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"db"`)
 }

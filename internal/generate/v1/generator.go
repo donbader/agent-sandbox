@@ -223,7 +223,10 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 		return nil, err
 	}
 
-	merged := plugin.MergeContributions(allContribs...)
+	merged, err := plugin.MergeContributions(allContribs...)
+	if err != nil {
+		return nil, fmt.Errorf("merge plugin contributions: %w", err)
+	}
 
 	// Resolve user-facing relative paths to be relative to projectDir (Docker build context).
 	// Paths in plugin contributions (extra_builds COPY, volumes) are relative to agentDir,
@@ -397,16 +400,20 @@ func shouldExclude(path string, exclude []string) bool {
 
 func validateRequires(resolved map[string]*resolvedPlugin) error {
 	installed := make(map[string]bool)
-	for _, rp := range resolved {
-		installed[rp.def.Name] = true
+	for ref := range resolved {
+		installed[ref] = true
+	}
+	// Allow short-name requires for @builtin/ plugins only.
+	// @fleet/ plugins must be referenced by full ref and cannot satisfy a
+	// @builtin/ requirement by sharing the same short name.
+	for ref, rp := range resolved {
+		if strings.HasPrefix(ref, "@builtin/") {
+			installed[rp.def.Name] = true
+		}
 	}
 	for ref, rp := range resolved {
 		for _, req := range rp.def.Requires {
-			reqName := req
-			if len(reqName) > 9 && reqName[:9] == "@builtin/" {
-				reqName = reqName[9:]
-			}
-			if !installed[reqName] {
+			if !installed[req] {
 				return fmt.Errorf("plugin %q requires %q — add it to installations", ref, req)
 			}
 		}
