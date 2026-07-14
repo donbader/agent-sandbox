@@ -16,6 +16,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -84,10 +85,16 @@ func scheduleReconcile() {
 	debounceTimer = time.AfterFunc(debounceDelay, reconcile)
 }
 
-// desiredForwarders queries Docker for all running containers and returns
+// desiredForwarders queries Docker for sandbox-owned running containers and returns
 // a map of hostPort → target representing the desired forwarding state.
 func desiredForwarders() map[int]target {
-	resp, err := dockerGet("/containers/json")
+	// Filter by sandbox label to only forward ports for our sandbox's containers
+	path := "/containers/json"
+	if sandboxID := os.Getenv("SANDBOX_ID"); sandboxID != "" {
+		filter := url.QueryEscape(`{"label":["agent-sandbox.sandbox=` + sandboxID + `"]}`)
+		path = "/containers/json?filters=" + filter
+	}
+	resp, err := dockerGet(path)
 	if err != nil {
 		return nil
 	}

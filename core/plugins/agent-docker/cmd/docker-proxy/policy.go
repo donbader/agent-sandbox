@@ -85,7 +85,8 @@ func (p *Policy) ValidateCreate(req *CreateRequest, currentCount int) error {
 	}
 	for _, bind := range req.Binds {
 		src := strings.SplitN(bind, ":", 2)[0]
-		if strings.HasPrefix(src, "/") {
+		// Block absolute paths, relative paths (./foo, ../foo), and any path containing /
+		if strings.HasPrefix(src, "/") || strings.HasPrefix(src, ".") || strings.Contains(src, "/") {
 			return &PolicyError{Code: 403, Message: fmt.Sprintf("host bind mount %q is not allowed", src)}
 		}
 	}

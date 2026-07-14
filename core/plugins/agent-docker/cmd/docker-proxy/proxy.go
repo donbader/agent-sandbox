@@ -183,7 +183,7 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
-	dp.mu.Unlock()
+	// Keep lock held through creation to prevent TOCTOU race on container count
 
 	containerName := r.URL.Query().Get("name")
 	namespacedName := dp.mutator.NamespaceContainerName(containerName)
@@ -209,6 +209,7 @@ func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Requ
 
 	rec := &responseRecorder{header: make(http.Header)}
 	dp.upstream.ServeHTTP(rec, newReq)
+	dp.mu.Unlock() // release after creation
 
 	if rec.code == http.StatusCreated {
 		var resp map[string]any
@@ -500,6 +501,8 @@ var blockedEndpoints = []endpointRule{
 	// Plugin management
 	{"POST", regexp.MustCompile(`^/plugins/`)},
 	{"GET", regexp.MustCompile(`^/plugins`)},
+	// Image deletion (agents must not remove shared host images)
+	{"DELETE", regexp.MustCompile(`^/images/`)},
 	// System-level dangerous operations
 	{"POST", regexp.MustCompile(`^/containers/prune$`)},
 	{"POST", regexp.MustCompile(`^/images/prune$`)},
