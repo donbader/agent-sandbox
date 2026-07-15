@@ -23,10 +23,11 @@ import (
 // It terminates TLS using the sandbox CA, parses HTTP requests,
 // applies middleware, and forwards to the real destination.
 type Handler struct {
-	domains        []string
-	caCert         tls.Certificate
-	certCache      *CertCache
-	transportCache sync.Map // keyed by serverName → *http.Transport
+	domains          []string
+	caCert           tls.Certificate
+	certCache        *CertCache
+	transportCache   sync.Map // keyed by serverName → *http.Transport
+	insecureUpstream bool     // read once at startup from GATEWAY_INSECURE_UPSTREAM
 
 	// DenyPathChecker is an optional callback for egress path filtering.
 	// Returns true if the request should be blocked.
@@ -42,9 +43,10 @@ type Handler struct {
 // NewHandler creates a MITM handler for the given domains.
 func NewHandler(domains []string, caCert tls.Certificate) *Handler {
 	return &Handler{
-		domains:   domains,
-		caCert:    caCert,
-		certCache: NewCertCache(),
+		domains:          domains,
+		caCert:           caCert,
+		certCache:        NewCertCache(),
+		insecureUpstream: os.Getenv("GATEWAY_INSECURE_UPSTREAM") == "true",
 	}
 }
 
@@ -210,6 +212,15 @@ func (h *Handler) Handle(clientConn net.Conn, initialData []byte, serverName str
 	}
 }
 
+// scopedEnv returns an env lookup function restricted to GATEWAY_* and PLUGIN_* prefixed
+// variables. This prevents plugins from reading arbitrary process environment (Docker secrets, etc.).
+func scopedEnv(key string) string {
+	if strings.HasPrefix(key, "GATEWAY_") || strings.HasPrefix(key, "PLUGIN_") {
+		return os.Getenv(key)
+	}
+	return ""
+}
+
 // applyMiddlewareWithContext runs middleware and returns the context and whether any matched.
 // If ctx.AbortStatus is non-zero, the request should be aborted (return a response without forwarding).
 func applyMiddlewareWithContext(req *http.Request) (*gateway.MiddlewareContext, bool) {
@@ -220,7 +231,7 @@ func applyMiddlewareWithContext(req *http.Request) (*gateway.MiddlewareContext, 
 
 	ctx := &gateway.MiddlewareContext{
 		Request: req,
-		Env:     os.Getenv,
+		Env:     scopedEnv,
 	}
 
 	for _, mw := range matching {
@@ -239,8 +250,6 @@ func applyMiddlewareWithContext(req *http.Request) (*gateway.MiddlewareContext, 
 // getTransport returns a cached *http.Transport for the given serverName, creating
 // one on first use. Reusing transports enables TCP/TLS connection pooling.
 func (h *Handler) getTransport(serverName string) *http.Transport {
-	insecure := os.Getenv("GATEWAY_INSECURE_UPSTREAM") == "true"
-
 	if v, ok := h.transportCache.Load(serverName); ok {
 		t, _ := v.(*http.Transport)
 		return t
@@ -249,7 +258,7 @@ func (h *Handler) getTransport(serverName string) *http.Transport {
 	t := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			ServerName:         serverName,
-			InsecureSkipVerify: insecure, //nolint:gosec // test-only
+			InsecureSkipVerify: h.insecureUpstream, //nolint:gosec // test-only
 		},
 		DisableCompression: true,
 	}
@@ -264,9 +273,7 @@ func (h *Handler) forwardRequest(req *http.Request, serverName string) (*http.Re
 	req.URL.Host = serverName
 	req.RequestURI = "" // must be empty for client requests
 
-	insecure := os.Getenv("GATEWAY_INSECURE_UPSTREAM") == "true"
-
-	if insecure {
+	if h.insecureUpstream {
 		req.URL.Scheme = "http"
 	} else {
 		req.URL.Scheme = "https"
