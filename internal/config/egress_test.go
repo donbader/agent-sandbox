@@ -236,6 +236,30 @@ func TestNeedsMITM_NoMiddlewares(t *testing.T) {
 	assert.False(t, rule.NeedsMITM())
 }
 
+func TestMatchHost_NoFilepathGlobs(t *testing.T) {
+	rules := []EgressRule{{Hosts: []string{"api?.example.com"}}}
+
+	// ? is NOT treated as a glob — pattern is literal
+	m := MatchHost(rules, "api1.example.com")
+	assert.False(t, m.Matched, "? should not act as a single-char wildcard")
+
+	// Exact literal match still works
+	m = MatchHost(rules, "api?.example.com")
+	assert.True(t, m.Matched, "literal pattern should match itself")
+
+	// Wildcard prefix still works as expected
+	wildRules := []EgressRule{{Hosts: []string{"*.example.com"}}}
+	m = MatchHost(wildRules, "sub.example.com")
+	assert.True(t, m.Matched, "*.prefix wildcard should still work")
+
+	// Exact domain match
+	exactRules := []EgressRule{{Hosts: []string{"api.example.com"}}}
+	m = MatchHost(exactRules, "api.example.com")
+	assert.True(t, m.Matched, "exact domain should match")
+	m = MatchHost(exactRules, "other.example.com")
+	assert.False(t, m.Matched, "different domain should not match")
+}
+
 func TestHasLegacyServices(t *testing.T) {
 	t.Run("has legacy", func(t *testing.T) {
 		cfg := &Config{
