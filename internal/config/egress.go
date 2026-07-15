@@ -99,12 +99,8 @@ func matchHostPattern(pattern, host string) bool {
 		return false
 	}
 
-	// Exact domain match (using filepath.Match for simple glob support)
-	matched, err := filepath.Match(pattern, host)
-	if err != nil {
-		return false
-	}
-	return matched
+	// Exact domain match
+	return pattern == host
 }
 
 // matchPathPattern checks if method+path matches a deny_paths pattern.
