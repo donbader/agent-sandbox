@@ -404,3 +404,61 @@ func TestForwarder_PipesData(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, msg, string(buf))
 }
+
+func TestProxy_MaxConns(t *testing.T) {
+	// Create a proxy with a very low connection limit
+	cfg := &Config{
+		Listen:   "127.0.0.1:0",
+		MaxConns: 2,
+	}
+	p := New(cfg)
+
+	ln, err := net.Listen("tcp", cfg.Listen)
+	require.NoError(t, err)
+	p.listener = ln
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			select {
+			case p.sem <- struct{}{}:
+			default:
+				_ = conn.Close()
+				continue
+			}
+			go func() {
+				defer func() { <-p.sem }()
+				p.handleConn(conn)
+			}()
+		}
+	}()
+	defer func() { _ = ln.Close() }()
+
+	addr := ln.Addr().String()
+
+	// Open 2 connections (don't send data — they block on read deadline)
+	c1, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer func() { _ = c1.Close() }()
+
+	c2, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer func() { _ = c2.Close() }()
+
+	// Give the proxy time to accept and start handling
+	time.Sleep(50 * time.Millisecond)
+
+	// 3rd connection should be rejected (closed immediately)
+	c3, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer func() { _ = c3.Close() }()
+
+	// The proxy closes rejected connections immediately — read should return EOF
+	_ = c3.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	buf := make([]byte, 1)
+	_, err = c3.Read(buf)
+	assert.ErrorIs(t, err, io.EOF, "expected connection to be closed (at capacity)")
+}
