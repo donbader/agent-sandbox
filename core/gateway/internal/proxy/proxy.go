@@ -2,6 +2,7 @@
 package proxy
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -75,22 +76,26 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 
 	slog.Debug("new connection", "remote_addr", clientConn.RemoteAddr())
 
-	// Read the first bytes to determine protocol (TLS vs HTTP)
 	if err := clientConn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return
 	}
-	buf := make([]byte, 4096)
-	n, err := clientConn.Read(buf)
-	if err != nil {
+
+	// Read TLS record header (5 bytes: content_type[1] + version[2] + length[2])
+	// This is also enough to detect HTTP methods ("GET ", "POST", etc.)
+	header := make([]byte, 5)
+	if _, err := io.ReadFull(clientConn, header); err != nil {
 		slog.Debug("read initial data", "error", err)
 		return
 	}
-	_ = clientConn.SetReadDeadline(time.Time{})
 
-	hello := buf[:n]
+	// Non-TLS: check for HTTP or block
+	if header[0] != 0x16 {
+		// Read more data for HTTP detection (up to 4091 additional bytes)
+		extra := make([]byte, 4091)
+		n, _ := clientConn.Read(extra)
+		hello := append(header, extra[:n]...)
+		_ = clientConn.SetReadDeadline(time.Time{})
 
-	// TLS records start with 0x16 (ContentType handshake)
-	if len(hello) > 0 && hello[0] != 0x16 {
 		if isHTTP(hello) && p.httpHandler != nil {
 			slog.Debug("connection detected as HTTP", "remote_addr", clientConn.RemoteAddr())
 			p.httpHandler.Handle(clientConn, hello)
@@ -100,6 +105,22 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 		return
 	}
 
+	// TLS: parse record length and read the full record (up to 16KB)
+	recordLen := int(binary.BigEndian.Uint16(header[3:5]))
+	if recordLen > 16384 { // TLS max record size
+		slog.Debug("TLS record too large", "remote_addr", clientConn.RemoteAddr(), "length", recordLen)
+		return
+	}
+
+	record := make([]byte, 5+recordLen)
+	copy(record, header)
+	if _, err := io.ReadFull(clientConn, record[5:]); err != nil {
+		slog.Debug("read TLS record body", "error", err)
+		return
+	}
+	_ = clientConn.SetReadDeadline(time.Time{})
+
+	hello := record
 	serverName := extractSNI(hello)
 	if serverName == "" {
 		slog.Debug("no SNI in connection", "remote_addr", clientConn.RemoteAddr())
