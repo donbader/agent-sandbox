@@ -16,10 +16,10 @@ type sandboxNet struct {
 }
 
 // findAvailableSubnet probes Docker for existing networks and returns two
-// consecutive available 172.X.0.0/24 subnets (starting at X=30, up to X=50).
+// consecutive available 172.X.0.0/24 subnets (starting at X=32, up to X=50).
 // One for the sandbox (internal) network, one for the external network.
-// Falls back to 172.32/172.33 if Docker is unavailable.
-func findAvailableSubnet() sandboxNet {
+// Returns an error if no available subnet pair can be found.
+func findAvailableSubnet() (sandboxNet, error) {
 	used := usedSubnets()
 
 	for x := 32; x <= 50; x++ {
@@ -32,10 +32,10 @@ func findAvailableSubnet() sandboxNet {
 				CIDR:         cidr1,
 				Prefix:       fmt.Sprintf("172.%d.0", x),
 				ExternalCIDR: cidr2,
-			}
+			}, nil
 		}
 	}
-	return sandboxNet{CIDR: "172.32.0.0/24", Prefix: "172.32.0", ExternalCIDR: "172.33.0.0/24"}
+	return sandboxNet{}, fmt.Errorf("no available subnet pair in 172.32-50 range; all are occupied by existing Docker networks or host routes")
 }
 
 // usedSubnets returns all subnets currently allocated by Docker networks
