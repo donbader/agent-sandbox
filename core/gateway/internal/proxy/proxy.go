@@ -19,13 +19,19 @@ type Proxy struct {
 	httpHandler *HTTPHandler
 	listener    net.Listener
 	egress      *EgressFilter
+	sem         chan struct{} // connection semaphore to cap concurrency
 }
 
 // New creates a new proxy with the given config.
 func New(cfg *Config) *Proxy {
+	maxConns := cfg.MaxConns
+	if maxConns <= 0 {
+		maxConns = 1024
+	}
 	return &Proxy{
 		config: cfg,
 		egress: NewEgressFilter(cfg.EgressRules),
+		sem:    make(chan struct{}, maxConns),
 	}
 }
 
@@ -58,7 +64,18 @@ func (p *Proxy) ListenAndServe() error {
 			time.Sleep(5 * time.Millisecond)
 			continue
 		}
-		go p.handleConn(conn)
+		select {
+		case p.sem <- struct{}{}:
+		default:
+			// At capacity — reject connection immediately
+			_ = conn.Close()
+			slog.Warn("proxy at max connections, rejecting", "remote_addr", conn.RemoteAddr())
+			continue
+		}
+		go func() {
+			defer func() { <-p.sem }()
+			p.handleConn(conn)
+		}()
 	}
 }
 

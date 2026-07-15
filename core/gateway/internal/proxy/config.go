@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Listen       string        `yaml:"listen"`        // TCP listen address (e.g., ":8443")
 	DNSListen    string        `yaml:"dns_listen"`    // DNS listen address (e.g., ":53")
+	MaxConns     int           `yaml:"max_conns"`     // max concurrent connections (0 = default 1024)
 	MITMDomains  []string      `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
 	HTTPServices []HTTPService `yaml:"http_services"` // plain HTTP services to proxy
 	PortForwards []PortForward `yaml:"port_forwards"` // TCP port forwards to agent container
