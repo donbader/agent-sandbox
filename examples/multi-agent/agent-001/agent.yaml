@@ -3,7 +3,7 @@ name: agent-001
 core_version: latest
 runtime:
   image: "@builtin/codex"
-  volumes:
+  raw_volumes:
     - "agent-001-data:/home/agent/workspace"
 installations:
   - plugin: "@builtin/home-override"

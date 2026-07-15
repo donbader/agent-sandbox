@@ -57,7 +57,7 @@ runtime:
   extra_builds:
     - "RUN apt-get install -y jq"
   entrypoint: ["codex-acp", "--listen", ":8080"]
-  volumes:
+  raw_volumes:
     - "data:/opt/data"
 installations:
   - plugin: github-pat
@@ -166,6 +166,37 @@ func TestValidate_NoErrorsOnValidConfig(t *testing.T) {
 
 	err := cfg.Validate()
 	assert.NoError(t, err)
+}
+
+func TestLoad_UnknownTopLevelField(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+name: test
+core_version: latest
+runtime_engne: docker
+runtime:
+  image: "@builtin/codex"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+	_, err := Load(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "runtime_engne")
+}
+
+func TestLoad_UnknownNestedField(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+name: test
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+  extra_build:
+    - "RUN echo hi"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0644))
+	_, err := Load(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "extra_build")
 }
 
 func TestLoad_MissingCoreVersion(t *testing.T) {

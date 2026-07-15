@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,8 +111,8 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("read agent.yaml: %w", err)
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	cfg, err := ParseConfigStrict(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse agent.yaml: %w", err)
 	}
 
@@ -124,6 +125,17 @@ func Load(dir string) (*Config, error) {
 		return nil, err
 	}
 
+	return cfg, nil
+}
+
+// ParseConfigStrict decodes YAML into Config, rejecting unknown fields.
+func ParseConfigStrict(data []byte) (*Config, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	var cfg Config
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
@@ -185,8 +197,10 @@ func LoadFleet(dir string) (*FleetConfig, error) {
 		return nil, fmt.Errorf("reading fleet.yaml: %w", err)
 	}
 
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
 	var cfg FleetConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parsing fleet.yaml: %w", err)
 	}
 
