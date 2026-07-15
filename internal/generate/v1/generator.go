@@ -160,7 +160,6 @@ func (g *Generator) RunProject(project *config.Project) error {
 func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string) (*AgentResult, error) {
 	resolver := plugin.NewResolver(agentDir, g.bundledFS)
 	resolver.SetFleetDir(g.projectDir)
-	var allContribs []*plugin.Contributions
 	resolved := make(map[string]*resolvedPlugin)
 
 	// Compute project metadata once for all plugins
@@ -216,15 +215,14 @@ func (g *Generator) generateAgent(cfg *config.Config, agentDir, buildDir string)
 				}
 			}
 		}
-
-		allContribs = append(allContribs, rendered)
 	}
 
-	if err := validateRequires(resolved); err != nil {
+	sortedContribs, err := validateAndSortPlugins(resolved, cfg.Installations)
+	if err != nil {
 		return nil, err
 	}
 
-	merged, err := plugin.MergeContributions(allContribs...)
+	merged, err := plugin.MergeContributions(sortedContribs...)
 	if err != nil {
 		return nil, fmt.Errorf("merge plugin contributions: %w", err)
 	}
@@ -399,27 +397,59 @@ func shouldExclude(path string, exclude []string) bool {
 	return false
 }
 
-func validateRequires(resolved map[string]*resolvedPlugin) error {
-	installed := make(map[string]bool)
-	for ref := range resolved {
-		installed[ref] = true
-	}
-	// Allow short-name requires for @builtin/ plugins only.
-	// @fleet/ plugins must be referenced by full ref and cannot satisfy a
-	// @builtin/ requirement by sharing the same short name.
+// validateAndSortPlugins checks that all plugin requirements are satisfied
+// (presence + version constraints) and returns contributions in topological order.
+func validateAndSortPlugins(resolved map[string]*resolvedPlugin, installations []config.Installation) ([]*plugin.Contributions, error) {
+	// Build name index: maps both full refs and short names (for @builtin/) to PluginDef.
+	nameIndex := make(map[string]*plugin.PluginDef)
 	for ref, rp := range resolved {
+		nameIndex[ref] = rp.def
 		if strings.HasPrefix(ref, "@builtin/") {
-			installed[rp.def.Name] = true
+			nameIndex[rp.def.Name] = rp.def
 		}
 	}
+
+	// Validate: each requirement must be installed and satisfy version constraints.
 	for ref, rp := range resolved {
-		for _, req := range rp.def.Requires {
-			if !installed[req] {
-				return fmt.Errorf("plugin %q requires %q — add it to installations", ref, req)
+		for _, reqStr := range rp.def.Requires {
+			req, err := plugin.ParseRequirement(reqStr)
+			if err != nil {
+				return nil, fmt.Errorf("plugin %q: invalid requirement %q: %w", ref, reqStr, err)
+			}
+			dep := nameIndex[req.Name]
+			if dep == nil {
+				return nil, fmt.Errorf("plugin %q requires %q — add it to installations", ref, req.Name)
+			}
+			if !req.Satisfied(dep.Version) {
+				return nil, fmt.Errorf("plugin %q requires %q but %q provides version %q", ref, reqStr, req.Name, dep.Version)
 			}
 		}
 	}
-	return nil
+
+	// Topological sort: dependencies come before dependents.
+	var defs []*plugin.PluginDef
+	for _, inst := range installations {
+		if rp, ok := resolved[inst.Plugin]; ok {
+			defs = append(defs, rp.def)
+		}
+	}
+
+	sorted, err := plugin.ResolveOrder(defs, nameIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map sorted defs back to their rendered contributions.
+	defToContribs := make(map[*plugin.PluginDef]*plugin.Contributions, len(resolved))
+	for _, rp := range resolved {
+		defToContribs[rp.def] = rp.rendered
+	}
+
+	result := make([]*plugin.Contributions, 0, len(sorted))
+	for _, def := range sorted {
+		result = append(result, defToContribs[def])
+	}
+	return result, nil
 }
 
 func (g *Generator) resolveAssetPaths(p *plugin.PluginDef, buildDir string) error {
