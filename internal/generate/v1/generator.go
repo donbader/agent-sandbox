@@ -3,6 +3,7 @@ package v1
 import (
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -497,8 +498,9 @@ func warnUnresolvedVars(pluginName string, contribs *plugin.Contributions) {
 			continue
 		}
 		os.Expand(line, func(varName string) string {
-			fmt.Fprintf(os.Stderr, "Warning: plugin %q extra_builds contains ${%s} which will be baked literally into the Docker image.\n", pluginName, varName)
-			fmt.Fprintf(os.Stderr, "  Hint: plugin options are rendered at generate time — use a literal value instead.\n")
+			slog.Warn("unresolved variable in plugin extra_builds will be baked literally into Docker image",
+				"plugin", pluginName, "var", varName,
+				"hint", "plugin options are rendered at generate time — use a literal value instead")
 			return ""
 		})
 	}

@@ -1,7 +1,9 @@
 package v1
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -630,26 +632,22 @@ func TestWarnUnresolvedVars(t *testing.T) {
 			contribs := &plugin.Contributions{}
 			contribs.Runtime.ExtraBuilds = tt.extraBuilds
 
-			// Capture stderr
-			oldStderr := os.Stderr
-			r, w, _ := os.Pipe()
-			os.Stderr = w
+			// Capture slog output via custom handler
+			var buf bytes.Buffer
+			oldLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			defer slog.SetDefault(oldLogger)
 
 			warnUnresolvedVars("test-plugin", contribs)
 
-			w.Close() //nolint:errcheck // test helper, error irrelevant
-			os.Stderr = oldStderr
-
-			var buf [4096]byte
-			n, _ := r.Read(buf[:])
-			output := string(buf[:n])
+			output := buf.String()
 
 			if tt.wantNoWarn {
 				assert.Empty(t, output, "expected no warning but got: %s", output)
 			} else {
 				for _, varName := range tt.wantWarns {
-					assert.Contains(t, output, fmt.Sprintf("${%s}", varName))
-					assert.Contains(t, output, "test-plugin")
+					assert.Contains(t, output, fmt.Sprintf("var=%s", varName))
+					assert.Contains(t, output, "plugin=test-plugin")
 				}
 			}
 		})
