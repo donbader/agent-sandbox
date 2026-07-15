@@ -89,7 +89,8 @@ func randomSuffix() string {
 }
 
 // injectInitWrapper adds transparent proxy setup to a spawned container.
-// Uses the gateway-authored routing script (cached at startup) as the entrypoint wrapper.
+// References the gateway-route.sh script by path on the shared certs volume
+// rather than inlining content, eliminating a string interpolation vector.
 func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 	// Add NET_ADMIN capability for ip route manipulation
 	capAdd, _ := hc["CapAdd"].([]any)
@@ -99,7 +100,7 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 	// Set DNS to gateway IP so containers resolve through the gateway
 	hc["Dns"] = []string{m.cfg.GatewayIP}
 
-	// Mount certs volume (read-only) for CA cert access
+	// Mount certs volume (read-only) for CA cert + gateway-route.sh access
 	mounts, _ := hc["Mounts"].([]any)
 	mounts = append(mounts, map[string]any{
 		"Type":     "volume",
@@ -109,8 +110,9 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 	})
 	hc["Mounts"] = mounts
 
-	// Use the cached gateway route script content + exec "$@" as init command
-	initCmd := m.cfg.GatewayRouteScript + "\nexec \"$@\""
+	// Reference the script by file path — never inline content as a -c argument.
+	// The script is on the read-only certs volume mounted above.
+	initCmd := "/shared/certs/gateway-route.sh && exec \"$@\""
 
 	// Collect original entrypoint + cmd into args for exec "$@"
 	var originalCmd []any
@@ -121,7 +123,7 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 		originalCmd = append(originalCmd, cmd...)
 	}
 
-	// Set new entrypoint: sh -c "<init> ; exec $@" -- <original cmd...>
+	// Set new entrypoint: sh -c "/shared/certs/gateway-route.sh && exec $@" -- <original cmd...>
 	body["Entrypoint"] = []any{"/bin/sh", "-c", initCmd, "--"}
 	if len(originalCmd) > 0 {
 		body["Cmd"] = originalCmd

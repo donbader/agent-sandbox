@@ -126,7 +126,7 @@ func TestMutateCreate_ComposeMode_StandaloneRun(t *testing.T) {
 	assert.Equal(t, "/bin/sh", ep[0])
 	assert.Equal(t, "-c", ep[1])
 	assert.Contains(t, ep[2], "exec \"$@\"")
-	assert.Contains(t, ep[2], "GATEWAY_IP")
+	assert.Contains(t, ep[2], "/shared/certs/gateway-route.sh")
 	assert.Equal(t, "--", ep[3])
 
 	// Original entrypoint + cmd preserved in Cmd
@@ -187,7 +187,7 @@ func TestMutateCreate_ComposeMode_WithNetworks(t *testing.T) {
 
 	ep, _ := body["Entrypoint"].([]any)
 	assert.Equal(t, "/bin/sh", ep[0])
-	assert.Contains(t, ep[2], "GATEWAY_IP")
+	assert.Contains(t, ep[2], "/shared/certs/gateway-route.sh")
 }
 
 func TestInjectInitWrapper_NoOriginalCmd(t *testing.T) {
@@ -214,7 +214,7 @@ func TestInjectInitWrapper_NoOriginalCmd(t *testing.T) {
 
 	// Init script should contain the gateway route script content
 	initScript, _ := ep[2].(string)
-	assert.Contains(t, initScript, "GATEWAY_IP")
+	assert.Contains(t, initScript, "/shared/certs/gateway-route.sh")
 	assert.Contains(t, initScript, "exec \"$@\"")
 
 	// Cmd should be deleted (let Docker use image default)
@@ -269,5 +269,5 @@ func TestInjectInitWrapper_WithEntrypointAndCmd(t *testing.T) {
 	assert.Equal(t, "/bin/sh", ep[0])
 	initScript, _ := ep[2].(string)
 	assert.Contains(t, initScript, "exec \"$@\"")
-	assert.Contains(t, initScript, "GATEWAY_IP")
+	assert.Contains(t, initScript, "/shared/certs/gateway-route.sh")
 }
