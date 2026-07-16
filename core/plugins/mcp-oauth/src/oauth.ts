@@ -127,7 +127,7 @@ function buildAuthorizeURL(
 
 export default function(ctx: GatewayContext, options: PluginOptions) {
   const providers: Record<string, ProviderConfig> = options.providers || {};
-  const callbackURL = options.callback_url || "";
+  const callbackURL = options.callback_url || (options.callback_port ? "http://127.0.0.1:" + options.callback_port + "/plugins/mcp-oauth/callback" : "");
   const providersJSON = JSON.stringify(providers);
 
   const requestHost = ctx.request.host;

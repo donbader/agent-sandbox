@@ -262,7 +262,7 @@ func main() {
 	// Sandbox containers route all traffic via this gateway; packets arrive with dest port 443
 	// and need to be redirected to the local proxy listener on 8443.
 	// Skip if iptables is not available (e.g., CI smoke tests outside Docker).
-	if err := setupIptables(); err != nil {
+	if err := setupIptables(proxyRedirectPorts(cfg)); err != nil {
 		slog.Warn("iptables setup skipped", "error", err)
 	}
 
@@ -383,11 +383,45 @@ fi
 	return nil
 }
 
+// proxyRedirectPorts returns local destination ports that should be redirected
+// to the transparent proxy listener. DNS interception points matching hostnames
+// at the gateway IP, so explicit URLs such as http://service:8000 need their
+// destination port redirected just like port 80/443.
+func proxyRedirectPorts(cfg *proxy.Config) []string {
+	ports := []string{"443", "80"}
+	seen := map[string]bool{"443": true, "80": true}
+
+	addPort := func(port string) {
+		port = strings.TrimSpace(port)
+		if port == "" || seen[port] {
+			return
+		}
+		seen[port] = true
+		ports = append(ports, port)
+	}
+
+	for _, svc := range cfg.HTTPServices {
+		addPort(svc.Port)
+	}
+	for _, rule := range cfg.EgressRules {
+		if rule.Deny || rule.Target == "" {
+			continue
+		}
+		_, port, err := net.SplitHostPort(rule.Target)
+		if err != nil {
+			continue
+		}
+		addPort(port)
+	}
+
+	return ports
+}
+
 // setupIptables configures PREROUTING to redirect all HTTP/HTTPS traffic to
 // the proxy on port 8443. The proxy auto-detects protocol (TLS vs plain HTTP)
 // by peeking the first byte of each connection.
-func setupIptables() error {
-	for _, port := range []string{"443", "80"} {
+func setupIptables(ports []string) error {
+	for _, port := range ports {
 		cmd := exec.Command("iptables", "-t", "nat", "-A", "PREROUTING",
 			"-p", "tcp", "--dport", port, "-j", "REDIRECT", "--to-port", "8443")
 		if out, err := cmd.CombinedOutput(); err != nil {

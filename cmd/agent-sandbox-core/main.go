@@ -97,9 +97,20 @@ func composeCmd(dir *string) *cobra.Command {
 			}
 			projectName := filepath.Base(absDir)
 
+			rt := runtimeBinary(*dir)
+
+			// Pre-flight: remove stale project networks on podman.
+			// podman compose down doesn't reliably remove project networks, leaving
+			// stale IPAM config that causes static IP assignment failures on next up.
+			removeStaleNetworks(rt, projectName, args)
+
+			// Pre-flight: ensure shared networks exist before compose up.
+			if firstNonFlag(args) == "up" {
+				ensureSharedNetworks(rt, *dir)
+			}
+
 			// Pre-flight: validate subnets are actually available in this Docker environment.
 			// If not (e.g. DinD with IPAM conflicts), patch the compose YAML with working subnets.
-			rt := runtimeBinary(*dir)
 			if err := validateAndFixSubnets(composePath, rt); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: subnet validation failed: %v\n", err)
 			}
@@ -125,16 +136,60 @@ func composeCmd(dir *string) *cobra.Command {
 }
 
 // runtimeBinary determines the container runtime CLI to use.
-// Priority: AGENT_SANDBOX_RUNTIME env var > first agent's runtime_engine > "docker"
+// Priority: AGENT_SANDBOX_RUNTIME env var > fleet.yaml runtime_engine > "docker"
 func runtimeBinary(dir string) string {
 	if rt := os.Getenv("AGENT_SANDBOX_RUNTIME"); rt != "" {
 		return rt
 	}
 	project, err := config.LoadProject(dir)
-	if err == nil && len(project.Agents) > 0 && project.Agents[0].Config.RuntimeEngine != "" {
-		return project.Agents[0].Config.RuntimeEngineBinary()
+	if err == nil && project.RuntimeEngine != "" {
+		return config.RuntimeEngineBinary(project.RuntimeEngine)
 	}
 	return "docker"
+}
+
+// removeStaleNetworks removes project networks left behind by podman compose down.
+// podman compose down doesn't reliably remove project networks, leaving stale IPAM
+// config that causes static IP assignment failures on the next compose up.
+// Only runs when the runtime is podman and the compose subcommand is "up".
+func removeStaleNetworks(rt, projectName string, args []string) {
+	if filepath.Base(rt) != "podman" {
+		return
+	}
+
+	// Only clean up before "up" — skip for other subcommands.
+	subCmd := firstNonFlag(args)
+	if subCmd != "up" {
+		return
+	}
+
+	networks := []string{
+		projectName + "_sandbox",
+		projectName + "_external",
+	}
+
+	for _, net := range networks {
+		// Remove any containers still attached to this network.
+		out, err := exec.Command(rt, "ps", "-aq", "--filter", "network="+net).Output()
+		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+			ids := strings.Fields(strings.TrimSpace(string(out)))
+			// #nosec — container IDs from our own ps query
+			_ = exec.Command(rt, append([]string{"rm", "-f"}, ids...)...).Run()
+		}
+
+		// Remove the network itself (ignore errors — it may not exist).
+		_ = exec.Command(rt, "network", "rm", "-f", net).Run()
+	}
+}
+
+// firstNonFlag returns the first argument that doesn't start with "-".
+func firstNonFlag(args []string) string {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return ""
 }
 
 func initCmd() *cobra.Command {

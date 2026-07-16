@@ -69,7 +69,7 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 
 	// Determine effective egress rules
 	if len(cfg.Gateway.Egress) > 0 {
-		out.EgressRules = cfg.Gateway.Egress
+		out.EgressRules = normalizeAllEgressHosts(cfg.Gateway.Egress)
 	} else if len(cfg.Gateway.Services) > 0 {
 		// Legacy mode: convert services to egress rules internally
 		out.EgressRules = config.MigrateServicesToEgress(cfg.Gateway.Services)
@@ -87,7 +87,7 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 			for header, value := range rule.Headers {
 				ev, valueFormat := envvar.ParseTemplate(value)
 				out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
-					Domain:      host,
+					Domain:      extractDomain(host),
 					Header:      header,
 					EnvVar:      ev,
 					ValueFormat: valueFormat,
@@ -108,7 +108,7 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 				for header, value := range normalized.Headers {
 					ev, valueFormat := envvar.ParseTemplate(value)
 					out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
-						Domain:      host,
+						Domain:      extractDomain(host),
 						Header:      header,
 						EnvVar:      ev,
 						ValueFormat: valueFormat,
@@ -143,6 +143,15 @@ func normalizeEgressHosts(rule config.EgressRule) config.EgressRule {
 		} else {
 			normalized.Hosts = append(normalized.Hosts, h)
 		}
+	}
+	return normalized
+}
+
+// normalizeAllEgressHosts normalizes hosts in all egress rules to bare hostnames.
+func normalizeAllEgressHosts(rules []config.EgressRule) []config.EgressRule {
+	normalized := make([]config.EgressRule, len(rules))
+	for i, rule := range rules {
+		normalized[i] = normalizeEgressHosts(rule)
 	}
 	return normalized
 }

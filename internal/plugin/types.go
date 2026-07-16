@@ -115,6 +115,7 @@ type GatewayContrib struct {
 	NamespacedVolumes []string            `yaml:"namespaced_volumes"` // auto-prefixed with {agentName}- at compose generation
 	RawVolumes        []string            `yaml:"raw_volumes"`        // used as-is, no agent name prefix
 	Routes            []RouteEntry        `yaml:"routes"`
+	PublishedPorts    []string            `yaml:"published_ports"` // "host:container" ports published directly on the gateway (no TCP forward)
 }
 
 // RouteEntry declares an HTTP route handler contributed by a plugin.

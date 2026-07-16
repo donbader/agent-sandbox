@@ -36,9 +36,9 @@ func (e *ValidationError) HasErrors() bool {
 	return len(e.Errors) > 0
 }
 
-// RuntimeEngineBinary returns the container runtime CLI binary name.
-func (c *Config) RuntimeEngineBinary() string {
-	switch c.RuntimeEngine {
+// RuntimeEngineBinary returns the container runtime CLI binary name for the given engine string.
+func RuntimeEngineBinary(engine string) string {
+	switch engine {
 	case "podman":
 		return "podman"
 	default:
@@ -51,7 +51,7 @@ type Config struct {
 	Name          string         `yaml:"name" json:"name" jsonschema:"required,title=name,description=Agent instance name"`
 	LogLevel      string         `yaml:"log_level" json:"log_level,omitempty" jsonschema:"title=log_level,description=Logging verbosity,enum=info,enum=debug"`
 	CoreVersion   string         `yaml:"core_version" json:"core_version" jsonschema:"required,title=core_version,description=Core version to use for generation (semver tag or 'latest' for embedded)"`
-	RuntimeEngine string         `yaml:"runtime_engine" json:"runtime_engine,omitempty" jsonschema:"title=runtime_engine,description=Container runtime engine (docker or podman),enum=docker,enum=podman,default=docker"`
+	RuntimeEngine string         `yaml:"runtime_engine" json:"runtime_engine,omitempty" jsonschema:"title=runtime_engine,description=DEPRECATED: use runtime_engine in fleet.yaml instead,enum=docker,enum=podman,default=docker"`
 	Runtime       RuntimeConfig  `yaml:"runtime" json:"runtime" jsonschema:"required,title=runtime,description=Agent container configuration"`
 	Gateway       GatewayConfig  `yaml:"gateway" json:"gateway,omitempty" jsonschema:"title=gateway,description=Transparent egress proxy configuration"`
 	Installations []Installation `yaml:"installations" json:"installations,omitempty" jsonschema:"title=installations,description=Plugins to install"`
@@ -73,12 +73,12 @@ type BuildStageConfig struct {
 
 // RuntimeConfig holds runtime container configuration.
 type RuntimeConfig struct {
-	Image             string            `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
-	CWD               string            `yaml:"cwd" json:"cwd,omitempty" jsonschema:"title=cwd,description=Working directory for agent sessions (default: /home/agent/workspace)"`
-	ExtraBuilds       []string          `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base. Each string is a complete Dockerfile line (e.g. 'RUN apt-get install -y foo'). Supports multi-line YAML block scalars with backslash continuations."`
-	Entrypoint        []string          `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override. Array of command and arguments (e.g. ['sh'\\, '-c'\\, 'node app.js'])."`
-	NamespacedVolumes []string          `yaml:"namespaced_volumes" json:"namespaced_volumes,omitempty" jsonschema:"title=namespaced_volumes,description=Named volumes auto-prefixed with agent name for fleet isolation"`
-	RawVolumes        []string          `yaml:"raw_volumes" json:"raw_volumes,omitempty" jsonschema:"title=raw_volumes,description=Volumes used as-is (bind mounts or intentionally shared named volumes)"`
+	Image             string             `yaml:"image" json:"image" jsonschema:"required,title=image,description=Base image (@builtin/codex or any Docker image)"`
+	CWD               string             `yaml:"cwd" json:"cwd,omitempty" jsonschema:"title=cwd,description=Working directory for agent sessions (default: /home/agent/workspace)"`
+	ExtraBuilds       []string           `yaml:"extra_builds" json:"extra_builds,omitempty" jsonschema:"title=extra_builds,description=Additional Dockerfile instructions layered after the base. Each string is a complete Dockerfile line (e.g. 'RUN apt-get install -y foo'). Supports multi-line YAML block scalars with backslash continuations."`
+	Entrypoint        []string           `yaml:"entrypoint" json:"entrypoint,omitempty" jsonschema:"title=entrypoint,description=Container CMD override. Array of command and arguments (e.g. ['sh'\\, '-c'\\, 'node app.js'])."`
+	NamespacedVolumes []string           `yaml:"namespaced_volumes" json:"namespaced_volumes,omitempty" jsonschema:"title=namespaced_volumes,description=Named volumes auto-prefixed with agent name for fleet isolation"`
+	RawVolumes        []string           `yaml:"raw_volumes" json:"raw_volumes,omitempty" jsonschema:"title=raw_volumes,description=Volumes used as-is (bind mounts or intentionally shared named volumes)"`
 	Environment       map[string]string  `yaml:"environment" json:"environment,omitempty" jsonschema:"title=environment,description=Environment variables passed to the agent container"`
 	BuildStages       []BuildStageConfig `yaml:"build_stages" json:"build_stages,omitempty" jsonschema:"title=build_stages,description=Isolated Docker build stages for caching heavy build steps"`
 }
@@ -167,14 +167,16 @@ func (c *Config) Validate() error {
 
 // FleetConfig represents a fleet.yaml file for multi-agent deployments.
 type FleetConfig struct {
-	Agents []string    `yaml:"agents" json:"agents" jsonschema:"required,title=agents,description=List of agent subdirectory names"`
-	Shared SharedBlock `yaml:"shared" json:"shared,omitempty" jsonschema:"title=shared,description=Configuration shared across all agents"`
+	RuntimeEngine string      `yaml:"runtime_engine" json:"runtime_engine,omitempty" jsonschema:"title=runtime_engine,description=Container runtime engine (docker or podman),enum=docker,enum=podman"`
+	Agents        []string    `yaml:"agents" json:"agents" jsonschema:"required,title=agents,description=List of agent subdirectory names"`
+	Shared        SharedBlock `yaml:"shared" json:"shared,omitempty" jsonschema:"title=shared,description=Configuration shared across all agents"`
 }
 
 // SharedBlock holds configuration shared across all agents in a fleet.
 type SharedBlock struct {
 	Installations []Installation `yaml:"installations" json:"installations,omitempty" jsonschema:"title=installations,description=Plugins shared across all agents"`
 	Gateway       GatewayConfig  `yaml:"gateway" json:"gateway,omitempty" jsonschema:"title=gateway,description=Gateway services shared across all agents"`
+	Networks      []string       `yaml:"networks" json:"networks,omitempty" jsonschema:"title=networks,description=External compose networks to attach every generated service to"`
 }
 
 // LoadFleet reads and parses a fleet.yaml file from the given directory.
@@ -192,6 +194,10 @@ func LoadFleet(dir string) (*FleetConfig, error) {
 
 	if len(cfg.Agents) == 0 {
 		return nil, fmt.Errorf("fleet.yaml: agents list is required")
+	}
+
+	if cfg.RuntimeEngine != "" && !runtime.IsValid(cfg.RuntimeEngine) {
+		return nil, fmt.Errorf("fleet.yaml: runtime_engine must be one of %v, got %q", runtime.ValidNames(), cfg.RuntimeEngine)
 	}
 
 	return &cfg, nil
@@ -234,5 +240,3 @@ func MergeEgressRules(shared, perAgent []EgressRule) []EgressRule {
 	}
 	return shared
 }
-
-

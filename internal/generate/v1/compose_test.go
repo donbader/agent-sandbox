@@ -2,6 +2,7 @@ package v1
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/donbader/agent-sandbox/internal/config"
@@ -277,7 +278,7 @@ func TestBuildProjectCompose_SingleAgent(t *testing.T) {
 			Config: &config.Config{
 				Name: "my-agent",
 				Runtime: config.RuntimeConfig{
-					Image:   "@builtin/codex",
+					Image:             "@builtin/codex",
 					NamespacedVolumes: []string{"data:/opt/data"},
 				},
 			},
@@ -311,7 +312,7 @@ func TestBuildProjectCompose_MultipleAgents(t *testing.T) {
 	agents := []ComposeAgentEntry{
 		{
 			Config: &config.Config{
-				Name: "coder",
+				Name:    "coder",
 				Runtime: config.RuntimeConfig{Image: "@builtin/codex"},
 			},
 			Contribs: nil,
@@ -319,7 +320,7 @@ func TestBuildProjectCompose_MultipleAgents(t *testing.T) {
 		},
 		{
 			Config: &config.Config{
-				Name: "reviewer",
+				Name:    "reviewer",
 				Runtime: config.RuntimeConfig{Image: "@builtin/codex"},
 			},
 			Contribs: nil,
@@ -660,7 +661,7 @@ func TestValidateNetworkIsolation(t *testing.T) {
 				"networks": []string{"sandbox"},
 			},
 		}
-		err := validateNetworkIsolation(services, internalNetworks)
+		err := validateNetworkIsolation(services, internalNetworks, nil)
 		assert.NoError(t, err)
 	})
 
@@ -673,7 +674,7 @@ func TestValidateNetworkIsolation(t *testing.T) {
 				"networks": map[string]any{"sandbox": map[string]any{}, "external": map[string]any{}},
 			},
 		}
-		err := validateNetworkIsolation(services, internalNetworks)
+		err := validateNetworkIsolation(services, internalNetworks, nil)
 		assert.ErrorContains(t, err, "non-internal network")
 		assert.ErrorContains(t, err, "my-agent")
 	})
@@ -690,7 +691,7 @@ func TestValidateNetworkIsolation(t *testing.T) {
 				"networks": []string{"sandbox", "external"},
 			},
 		}
-		err := validateNetworkIsolation(services, internalNetworks)
+		err := validateNetworkIsolation(services, internalNetworks, nil)
 		assert.ErrorContains(t, err, "non-internal network")
 		assert.ErrorContains(t, err, "my-agent-db-sidecar")
 	})
@@ -701,7 +702,7 @@ func TestValidateNetworkIsolation(t *testing.T) {
 				"networks": map[string]any{"sandbox": map[string]any{}, "external": map[string]any{}, "custom": map[string]any{}},
 			},
 		}
-		err := validateNetworkIsolation(services, internalNetworks)
+		err := validateNetworkIsolation(services, internalNetworks, nil)
 		assert.NoError(t, err)
 	})
 }
@@ -863,4 +864,224 @@ func TestBuildCompose_IngressPortsOnGateway(t *testing.T) {
 	// Agent does NOT have ports published
 	agentSvc := compose.Services["ssh-agent"]
 	assert.Empty(t, agentSvc.Ports)
+}
+
+func TestBuildProjectCompose_PodmanRuntimeSocketAndSELinuxOptions(t *testing.T) {
+	agents := []ComposeAgentEntry{{
+		Config: &config.Config{
+			Name:          "podman-agent",
+			RuntimeEngine: "podman",
+			Runtime: config.RuntimeConfig{
+				Image: "@builtin/codex",
+			},
+		},
+		Contribs: &plugin.Contributions{
+			Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{
+				"agent-docker-proxy": {
+					Image:       "agent-docker-proxy",
+					Volumes:     []string{"/var/run/docker.sock:/var/run/docker.sock"},
+					SecurityOpt: []string{"seccomp=unconfined"},
+				},
+			}},
+		},
+		BuildDir: "/project/.build/podman-agent",
+	}}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	var compose struct {
+		Services map[string]map[string]any `yaml:"services"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(output), &compose))
+
+	agent := compose.Services["podman-agent"]
+	assert.Equal(t, "keep-id", agent["userns_mode"])
+	assert.Contains(t, agent["security_opt"], "label=disable")
+
+	proxy := compose.Services["podman-agent-agent-docker-proxy"]
+	assert.Contains(t, proxy["volumes"], podmanRootlessSocketPath()+":/var/run/docker.sock")
+	assert.Contains(t, proxy["security_opt"], "seccomp=unconfined")
+	assert.Contains(t, proxy["security_opt"], "label=disable")
+}
+
+func TestBuildProjectCompose_DockerRuntimeKeepsDockerSocketDefaults(t *testing.T) {
+	agents := []ComposeAgentEntry{{
+		Config: &config.Config{
+			Name:          "docker-agent",
+			RuntimeEngine: "docker",
+			Runtime: config.RuntimeConfig{
+				Image: "@builtin/codex",
+			},
+		},
+		Contribs: &plugin.Contributions{
+			Sidecar: plugin.SidecarContrib{Services: map[string]plugin.ComposeService{
+				"agent-docker-proxy": {
+					Image:   "agent-docker-proxy",
+					Volumes: []string{"/var/run/docker.sock:/var/run/docker.sock"},
+				},
+			}},
+		},
+		BuildDir: "/project/.build/docker-agent",
+	}}
+
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	var compose struct {
+		Services map[string]map[string]any `yaml:"services"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(output), &compose))
+
+	agent := compose.Services["docker-agent"]
+	assert.NotContains(t, agent, "userns_mode")
+	assert.NotContains(t, agent, "security_opt")
+
+	proxy := compose.Services["docker-agent-agent-docker-proxy"]
+	assert.Contains(t, proxy["volumes"], "/var/run/docker.sock:/var/run/docker.sock")
+	assert.NotContains(t, proxy, "security_opt")
+}
+
+func TestMergeAdditionalNetworks_DoesNotOverwriteExistingNetworks(t *testing.T) {
+	dst := map[string]any{
+		"sandbox": map[string]any{"internal": true},
+		"shared":  map[string]any{"external": true},
+	}
+	src := map[string]any{
+		"sandbox": map[string]any{"external": true},
+		"shared":  map[string]any{"external": false},
+		"custom":  map[string]any{"external": true},
+	}
+
+	mergeAdditionalNetworks(dst, src)
+
+	assert.Equal(t, map[string]any{"internal": true}, dst["sandbox"])
+	assert.Equal(t, map[string]any{"external": true}, dst["shared"])
+	assert.Equal(t, map[string]any{"external": true}, dst["custom"])
+}
+
+func TestBuildProjectCompose_GatewayEnvMatchesSandboxIP(t *testing.T) {
+	cfg := &config.Config{
+		Name: "ip-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+		Gateway: config.GatewayConfig{
+			Egress: []config.EgressRule{
+				{Hosts: []string{"rkgw-gateway"}, Target: "rkgw-gateway:8000", Network: "shared"},
+			},
+		},
+	}
+
+	agents := []ComposeAgentEntry{{
+		Config:         cfg,
+		Contribs:       &plugin.Contributions{},
+		BuildDir:       "/project/.build/ip-agent",
+		SharedNetworks: []string{"shared"},
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	var composed composeFile
+	require.NoError(t, yaml.Unmarshal([]byte(output), &composed))
+
+	gateway, ok := composed.Services["ip-agent-gateway"].(map[string]any)
+	require.True(t, ok)
+
+	var gatewayIP string
+	for _, rawEnv := range gateway["environment"].([]any) {
+		env, ok := rawEnv.(string)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(env, "GATEWAY_SANDBOX_IP=") {
+			gatewayIP = strings.TrimPrefix(env, "GATEWAY_SANDBOX_IP=")
+		}
+	}
+	require.NotEmpty(t, gatewayIP)
+
+	networks := gateway["networks"].(map[string]any)
+	sandbox := networks["sandbox"].(map[string]any)
+	assert.Equal(t, gatewayIP, sandbox["ipv4_address"])
+}
+
+func TestGatewayIPForSubnet(t *testing.T) {
+	assert.Equal(t, "172.35.0.2", gatewayIPForSubnet("172.35.0.0/24", 2))
+}
+
+func TestBuildProjectCompose_SharedExternalNetworks(t *testing.T) {
+	cfg := &config.Config{
+		Name: "shared-agent",
+		Runtime: config.RuntimeConfig{
+			Image: "@builtin/codex",
+		},
+	}
+
+	contribs := &plugin.Contributions{
+		Sidecar: plugin.SidecarContrib{
+			Services: map[string]plugin.ComposeService{
+				"helper": {Image: "alpine:3.21"},
+			},
+		},
+	}
+
+	agents := []ComposeAgentEntry{{
+		Config:         cfg,
+		Contribs:       contribs,
+		BuildDir:       "/project/.build/shared-agent",
+		SharedNetworks: []string{"shared"},
+	}}
+	output, err := BuildProjectCompose(agents, "/project")
+	require.NoError(t, err)
+
+	var composed composeFile
+	require.NoError(t, yaml.Unmarshal([]byte(output), &composed))
+
+	sharedNetwork, ok := composed.Networks["shared"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, sharedNetwork["external"])
+
+	for _, serviceName := range []string{"shared-agent", "shared-agent-gateway"} {
+		service, ok := composed.Services[serviceName].(map[string]any)
+		require.True(t, ok, "missing service %s", serviceName)
+		networks, ok := service["networks"].(map[string]any)
+		require.True(t, ok, "service %s networks should be a map", serviceName)
+		assert.Contains(t, networks, "shared")
+	}
+
+	sidecar, ok := composed.Services["shared-agent-helper"].(map[string]any)
+	require.True(t, ok)
+	networks, ok := sidecar["networks"].([]any)
+	require.True(t, ok)
+	assert.Contains(t, networks, "shared")
+}
+
+func TestValidateNetworkIsolation_AllowsConfiguredSharedNetwork(t *testing.T) {
+	services := map[string]any{
+		"agent": map[string]any{
+			"networks": []string{"sandbox", "shared"},
+		},
+	}
+	networks := map[string]any{
+		"sandbox": map[string]any{"internal": true},
+		"shared":  map[string]any{"external": true},
+	}
+
+	assert.NoError(t, validateNetworkIsolation(services, networks, []string{"shared"}))
+}
+
+func TestValidateNetworkIsolation_RejectsUnconfiguredExternalNetwork(t *testing.T) {
+	services := map[string]any{
+		"agent": map[string]any{
+			"networks": []string{"sandbox", "public"},
+		},
+	}
+	networks := map[string]any{
+		"sandbox": map[string]any{"internal": true},
+		"public":  map[string]any{"external": true},
+	}
+
+	err := validateNetworkIsolation(services, networks, []string{"shared"})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "non-internal network")
 }

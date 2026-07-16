@@ -43,6 +43,8 @@ func TestLoadProject_MultipleAgents(t *testing.T) {
   - coder
   - reviewer
 shared:
+  networks:
+    - shared
   installations:
     - plugin: "@builtin/github-pat"
       options:
@@ -65,6 +67,7 @@ runtime:
 	require.Len(t, project.Agents, 2)
 	assert.Equal(t, "coder", project.Agents[0].Name)
 	assert.Equal(t, "reviewer", project.Agents[1].Name)
+	assert.Equal(t, []string{"shared"}, project.SharedNetworks)
 	// Shared installations merged
 	require.Len(t, project.Agents[0].Config.Installations, 1)
 	assert.Equal(t, "@builtin/github-pat", project.Agents[0].Config.Installations[0].Plugin)

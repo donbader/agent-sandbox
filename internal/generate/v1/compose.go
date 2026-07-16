@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/donbader/agent-sandbox/internal/runtime"
 	"gopkg.in/yaml.v3"
 )
-
 
 type composeFile struct {
 	Services map[string]any `yaml:"services"`
@@ -41,6 +41,7 @@ type agentPairParams struct {
 	projectName      string
 	gatewaySandboxIP string
 	sandboxCIDR      string
+	sharedNetworks   []string
 }
 
 // agentPairResult holds the services and volumes produced by buildAgentPair.
@@ -90,11 +91,9 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 				"condition": "service_healthy",
 			},
 		},
-		"networks": map[string]any{
-			"sandbox": map[string]any{
-				"aliases": []string{p.agentAlias},
-			},
-		},
+		"networks": serviceNetworksWithSandbox(p.sharedNetworks, map[string]any{
+			"aliases": []string{p.agentAlias},
+		}),
 		"volumes": agentVolumes,
 		"environment": map[string]string{
 			"GATEWAY_HOST":        p.gatewayAlias,
@@ -138,8 +137,11 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 	// Podman rootless requires userns_mode: keep-id for file ownership mapping.
 	// Skip when a plugin declares skip_userns (e.g. sshd needs real root for privilege separation).
 	skipUserns := contribs != nil && contribs.Runtime.SkipUserns
-	if cfg.RuntimeEngine == "podman" && !skipUserns {
-		agentSvc["userns_mode"] = "keep-id"
+	if cfg.RuntimeEngine == "podman" {
+		if !skipUserns {
+			agentSvc["userns_mode"] = "keep-id"
+		}
+		disableSELinuxLabeling(agentSvc)
 	}
 
 	result.services[p.agentName] = agentSvc
@@ -159,13 +161,10 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 		"build":    p.gatewayBuild,
 		"cap_drop": []string{"ALL"},
 		"cap_add":  []string{"NET_ADMIN", "NET_BIND_SERVICE"},
-		"networks": map[string]any{
-			"sandbox": map[string]any{
-				"aliases":      []string{p.gatewayAlias},
-				"ipv4_address": p.gatewaySandboxIP,
-			},
-			"external": map[string]any{},
-		},
+		"networks": serviceNetworksWithSandboxAndExternal(p.sharedNetworks, map[string]any{
+			"aliases":      []string{p.gatewayAlias},
+			"ipv4_address": p.gatewaySandboxIP,
+		}),
 		"volumes": gatewayVolumes,
 		"healthcheck": map[string]any{
 			"test":     []string{"CMD", "wget", "--spider", "-q", "http://localhost:8080/health"},
@@ -223,18 +222,33 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 		gatewaySvc["ports"] = gwPorts
 	}
 
+	// Publish plugin-contributed gateway ports (e.g., OAuth callback port).
+	if contribs != nil && len(contribs.Gateway.PublishedPorts) > 0 {
+		gwPorts, _ := gatewaySvc["ports"].([]string)
+		gwPorts = append(gwPorts, contribs.Gateway.PublishedPorts...)
+		gatewaySvc["ports"] = gwPorts
+	}
+
 	result.services[p.gatewayName] = gatewaySvc
 
 	// Sidecar services from plugins
 	if contribs != nil {
 		for name, svc := range contribs.Sidecar.Services {
 			sidecar := buildSidecarService(svc, p.buildDir)
+			attachSharedNetworks(sidecar, p.sharedNetworks)
 			// Inject system env vars into all sidecars.
 			injectSidecarSystemEnv(sidecar, p.cfg.Name, p.projectName)
 			// Namespace named volumes (e.g. "buildkit-data:/path" → "dorey-002-buildkit-data:/path").
 			// Must happen BEFORE injectSidecarGatewayRouting which adds already-namespaced certs volume.
 			if vols, ok := sidecar["volumes"].([]string); ok {
-				sidecar["volumes"] = namespaceVolumes(p.agentName, vols)
+				vols = namespaceVolumes(p.agentName, vols)
+				if p.cfg.RuntimeEngine == "podman" {
+					vols = rewriteDockerSocketMountsForPodman(vols)
+				}
+				sidecar["volumes"] = vols
+			}
+			if p.cfg.RuntimeEngine == "podman" {
+				disableSELinuxLabeling(sidecar)
 			}
 			// Inject gateway routing infrastructure (cap_add, certs volume, GATEWAY_HOST).
 			injectSidecarGatewayRouting(sidecar, p.agentName, p.certsVolume)
@@ -311,9 +325,10 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 
 // ComposeAgentEntry holds the data needed to generate one agent's services in a fleet compose file.
 type ComposeAgentEntry struct {
-	Config   *config.Config
-	Contribs *plugin.Contributions
-	BuildDir string // absolute path to the agent's .build/<name>/ directory
+	Config         *config.Config
+	Contribs       *plugin.Contributions
+	BuildDir       string   // absolute path to the agent's .build/<name>/ directory
+	SharedNetworks []string // external networks attached to every generated service
 }
 
 // BuildProjectCompose generates a unified docker-compose.yml for any project (1 or N agents).
@@ -345,13 +360,20 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 		},
 	}
 
+	sharedNetworks := collectSharedNetworks(agents)
+	for _, network := range sharedNetworks {
+		compose.Networks[network] = map[string]any{
+			"external": true,
+		}
+	}
+
 	for i, agent := range agents {
 		cfg := agent.Config
 		agentName := cfg.Name
 		gatewayName := cfg.Name + "-gateway"
 		certsVolume := agentName + "-certs"
 		// Each gateway gets a unique static IP on the sandbox subnet (.2, .3, .4, ...).
-		gatewaySandboxIP := fmt.Sprintf("%s.%d", subnet.Prefix, i+2)
+		gatewaySandboxIP := gatewayIPForSubnet(subnet.CIDR, i+2)
 
 		relBuildDir, err := filepath.Rel(filepath.Join(projectDir, ".build"), agent.BuildDir)
 		if err != nil {
@@ -385,6 +407,7 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 			exposeGateway:    false,
 			gatewaySandboxIP: gatewaySandboxIP,
 			sandboxCIDR:      subnet.CIDR,
+			sharedNetworks:   agent.SharedNetworks,
 		})
 		if err != nil {
 			return "", err
@@ -392,11 +415,16 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 
 		maps.Copy(compose.Services, pair.services)
 		maps.Copy(compose.Volumes, pair.volumes)
-		maps.Copy(compose.Networks, pair.networks)
+		mergeAdditionalNetworks(compose.Networks, pair.networks)
 	}
 
+	// Project-owned networks are authoritative. Extra networks declared by agents
+	// must never replace the generated sandbox/external IPAM configuration.
+	compose.Networks["sandbox"] = projectSandboxNetwork(subnet.CIDR)
+	compose.Networks["external"] = projectExternalNetwork(subnet.ExternalCIDR)
+
 	// Validate network isolation: non-gateway services must only be on internal networks.
-	if err := validateNetworkIsolation(compose.Services, compose.Networks); err != nil {
+	if err := validateNetworkIsolation(compose.Services, compose.Networks, sharedNetworks); err != nil {
 		return "", err
 	}
 
@@ -407,11 +435,150 @@ func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string,
 	return string(data), nil
 }
 
+func projectSandboxNetwork(cidr string) map[string]any {
+	return map[string]any{
+		"driver":   "bridge",
+		"internal": true,
+		"ipam": map[string]any{
+			"config": []map[string]any{{"subnet": cidr}},
+		},
+	}
+}
+
+func projectExternalNetwork(cidr string) map[string]any {
+	return map[string]any{
+		"driver": "bridge",
+		"ipam": map[string]any{
+			"config": []map[string]any{{"subnet": cidr}},
+		},
+	}
+}
+
+func mergeAdditionalNetworks(dst map[string]any, src map[string]any) {
+	for name, network := range src {
+		if _, exists := dst[name]; exists {
+			continue
+		}
+		dst[name] = network
+	}
+}
+
+func gatewayIPForSubnet(cidr string, host int) string {
+	prefix := strings.TrimSuffix(cidr, ".0/24")
+	if prefix == cidr {
+		return fmt.Sprintf("%s.%d", strings.TrimSuffix(cidr, "/24"), host)
+	}
+	return fmt.Sprintf("%s.%d", prefix, host)
+}
+
+func collectSharedNetworks(agents []ComposeAgentEntry) []string {
+	seen := map[string]bool{}
+	var networks []string
+	for _, agent := range agents {
+		for _, network := range agent.SharedNetworks {
+			network = strings.TrimSpace(network)
+			if network == "" || seen[network] {
+				continue
+			}
+			seen[network] = true
+			networks = append(networks, network)
+		}
+	}
+	return networks
+}
+
+func serviceNetworksWithSandbox(sharedNetworks []string, sandboxConfig map[string]any) map[string]any {
+	networks := map[string]any{
+		"sandbox": sandboxConfig,
+	}
+	for _, network := range sharedNetworks {
+		network = strings.TrimSpace(network)
+		if network == "" {
+			continue
+		}
+		networks[network] = map[string]any{}
+	}
+	return networks
+}
+
+func serviceNetworksWithSandboxAndExternal(sharedNetworks []string, sandboxConfig map[string]any) map[string]any {
+	networks := serviceNetworksWithSandbox(sharedNetworks, sandboxConfig)
+	networks["external"] = map[string]any{}
+	return networks
+}
+
+func attachSharedNetworks(service map[string]any, sharedNetworks []string) {
+	if len(sharedNetworks) == 0 {
+		return
+	}
+
+	switch networks := service["networks"].(type) {
+	case map[string]any:
+		for _, network := range sharedNetworks {
+			network = strings.TrimSpace(network)
+			if network == "" {
+				continue
+			}
+			networks[network] = map[string]any{}
+		}
+	case []string:
+		service["networks"] = appendUniqueStrings(networks, sharedNetworks...)
+	case []any:
+		service["networks"] = appendUniqueAnyStrings(networks, sharedNetworks...)
+	default:
+		service["networks"] = appendUniqueStrings([]string{"sandbox"}, sharedNetworks...)
+	}
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := makeStringSet(values)
+	for _, value := range additions {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
+}
+
+func appendUniqueAnyStrings(values []any, additions ...string) []any {
+	seen := map[string]bool{}
+	for _, value := range values {
+		if s, ok := value.(string); ok {
+			seen[s] = true
+		}
+	}
+	for _, value := range additions {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
+}
+
+func makeStringSet(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = true
+		}
+	}
+	return set
+}
+
 // validateNetworkIsolation checks that non-gateway services are only on internal networks.
 // This is a defense-in-depth check — the generator already assigns networks correctly by
 // construction, but this catches regressions or future code changes that might violate
 // the security model.
-func validateNetworkIsolation(services map[string]any, networks map[string]any) error {
+func validateNetworkIsolation(services map[string]any, networks map[string]any, allowedExternalNetworks []string) error {
+	allowedExternalNets := makeStringSet(allowedExternalNetworks)
+
 	// Build set of internal networks.
 	internalNets := map[string]bool{}
 	for name, cfg := range networks {
@@ -452,8 +619,8 @@ func validateNetworkIsolation(services map[string]any, networks map[string]any) 
 
 		// Verify all networks are internal.
 		for _, net := range netNames {
-			if !internalNets[net] {
-				return fmt.Errorf("service %q is on non-internal network %q — only gateway services may use external networks", svcName, net)
+			if !internalNets[net] && !allowedExternalNets[net] {
+				return fmt.Errorf("service %q is on non-internal network %q — only gateway services may use external or shared networks", svcName, net)
 			}
 		}
 	}
@@ -551,6 +718,41 @@ func namespaceVolumes(agentName string, volumes []string) []string {
 		result[i] = namespaceVolume(agentName, v)
 	}
 	return result
+}
+
+func rewriteDockerSocketMountsForPodman(volumes []string) []string {
+	result := make([]string, len(volumes))
+	for i, volume := range volumes {
+		result[i] = rewriteDockerSocketMountForPodman(volume)
+	}
+	return result
+}
+
+func rewriteDockerSocketMountForPodman(volume string) string {
+	parts := strings.Split(volume, ":")
+	if len(parts) < 2 || !isDockerSocketPath(parts[0]) {
+		return volume
+	}
+	parts[0] = podmanRootlessSocketPath()
+	return strings.Join(parts, ":")
+}
+
+func podmanRootlessSocketPath() string {
+	return fmt.Sprintf("/run/user/%d/podman/podman.sock", os.Getuid())
+}
+
+func disableSELinuxLabeling(service map[string]any) {
+	securityOpt, _ := service["security_opt"].([]string)
+	for _, opt := range securityOpt {
+		if opt == "label=disable" {
+			return
+		}
+	}
+	service["security_opt"] = append(securityOpt, "label=disable")
+}
+
+func isDockerSocketPath(path string) bool {
+	return path == "/var/run/docker.sock" || path == "/run/docker.sock"
 }
 
 // collectGatewayEnvVars extracts env var names referenced in gateway service headers

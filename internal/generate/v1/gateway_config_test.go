@@ -288,3 +288,102 @@ func TestWriteGatewayRuntimeConfig_PortForwards(t *testing.T) {
 	assert.Equal(t, ":3000", rc.PortForwards[1].Listen)
 	assert.Equal(t, "coder:3000", rc.PortForwards[1].Target)
 }
+
+func TestBuildGatewayConfig_UserEgressURLNormalization(t *testing.T) {
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			Egress: []config.EgressRule{
+				{
+					Hosts:   []string{"https://agw.playground.straitsx.ai/kiro/anthropic"},
+					Headers: map[string]string{"Authorization": "Bearer ${STX_LLM_GATEWAY_API_KEY}"},
+				},
+				{Hosts: []string{"*"}},
+			},
+		},
+	}
+
+	gwCfg := BuildGatewayConfig(cfg, nil)
+
+	// URL in user egress rule should be normalized to bare hostname
+	require.Len(t, gwCfg.EgressRules, 2)
+	assert.Equal(t, []string{"agw.playground.straitsx.ai"}, gwCfg.EgressRules[0].Hosts)
+	assert.Equal(t, []string{"*"}, gwCfg.EgressRules[1].Hosts)
+
+	// Auth header domain should also be the bare hostname, not the full URL
+	require.Len(t, gwCfg.AuthHeaders, 1)
+	assert.Equal(t, "agw.playground.straitsx.ai", gwCfg.AuthHeaders[0].Domain)
+	assert.Equal(t, "Authorization", gwCfg.AuthHeaders[0].Header)
+	assert.Equal(t, "STX_LLM_GATEWAY_API_KEY", gwCfg.AuthHeaders[0].EnvVar)
+}
+
+func TestWriteGatewayRuntimeConfig_UserURLHostInMITMDomains(t *testing.T) {
+	buildDir := t.TempDir()
+
+	// Simulate the output of BuildGatewayConfig after normalization:
+	// a user egress rule with URL-style host that has headers (needs MITM).
+	gwCfg := &GatewayConfigOutput{
+		AuthHeaders: []AuthHeaderEntry{
+			{
+				Domain:      "agw.playground.straitsx.ai",
+				Header:      "Authorization",
+				EnvVar:      "STX_LLM_GATEWAY_API_KEY",
+				ValueFormat: "Bearer ${value}",
+			},
+		},
+		EgressRules: []config.EgressRule{
+			{
+				Hosts:   []string{"agw.playground.straitsx.ai"},
+				Headers: map[string]string{"Authorization": "Bearer ${STX_LLM_GATEWAY_API_KEY}"},
+			},
+			{Hosts: []string{"*"}},
+		},
+	}
+
+	err := WriteGatewayRuntimeConfig(buildDir, gwCfg)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(buildDir, "config.yaml"))
+	require.NoError(t, err)
+
+	var rc gatewayRuntimeConfig
+	require.NoError(t, yaml.Unmarshal(data, &rc))
+
+	// The normalized hostname must appear in mitm_domains
+	assert.Contains(t, rc.MITMDomains, "agw.playground.straitsx.ai")
+
+	// Auth header must use bare hostname as domain
+	require.Len(t, rc.AuthHeaders, 1)
+	assert.Equal(t, "agw.playground.straitsx.ai", rc.AuthHeaders[0].Domain)
+	assert.Equal(t, "Authorization", rc.AuthHeaders[0].Header)
+	assert.Contains(t, rc.AuthHeaders[0].Value, "${STX_LLM_GATEWAY_API_KEY}")
+}
+
+func TestBuildGatewayConfig_UserEgressMultipleURLHosts(t *testing.T) {
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			Egress: []config.EgressRule{
+				{
+					Hosts: []string{
+						"https://agw.playground.straitsx.ai/kiro/anthropic",
+						"https://api.openai.com/v1",
+					},
+					Headers: map[string]string{"Authorization": "Bearer ${API_KEY}"},
+				},
+				{Hosts: []string{"*"}},
+			},
+		},
+	}
+
+	gwCfg := BuildGatewayConfig(cfg, nil)
+
+	// Both URL hosts should be normalized
+	require.Len(t, gwCfg.EgressRules, 2)
+	assert.Contains(t, gwCfg.EgressRules[0].Hosts, "agw.playground.straitsx.ai")
+	assert.Contains(t, gwCfg.EgressRules[0].Hosts, "api.openai.com")
+
+	// Auth headers should be generated for both bare hostnames
+	require.Len(t, gwCfg.AuthHeaders, 2)
+	domains := []string{gwCfg.AuthHeaders[0].Domain, gwCfg.AuthHeaders[1].Domain}
+	assert.Contains(t, domains, "agw.playground.straitsx.ai")
+	assert.Contains(t, domains, "api.openai.com")
+}

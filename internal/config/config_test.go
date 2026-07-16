@@ -91,7 +91,7 @@ runtime:
 		cfg, err := Load(dir)
 		require.NoError(t, err)
 		assert.Equal(t, "", cfg.RuntimeEngine)
-		assert.Equal(t, "docker", cfg.RuntimeEngineBinary())
+		assert.Equal(t, "docker", RuntimeEngineBinary(cfg.RuntimeEngine))
 	})
 
 	t.Run("podman", func(t *testing.T) {
@@ -107,7 +107,7 @@ runtime:
 		cfg, err := Load(dir)
 		require.NoError(t, err)
 		assert.Equal(t, "podman", cfg.RuntimeEngine)
-		assert.Equal(t, "podman", cfg.RuntimeEngineBinary())
+		assert.Equal(t, "podman", RuntimeEngineBinary(cfg.RuntimeEngine))
 	})
 
 	t.Run("invalid engine rejected", func(t *testing.T) {

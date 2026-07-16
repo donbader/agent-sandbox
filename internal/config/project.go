@@ -9,8 +9,10 @@ import (
 // Project is the unified representation of any agent-sandbox project.
 // Loaded from fleet.yaml + agent subdirectories.
 type Project struct {
-	Dir    string  // absolute path to project root
-	Agents []Agent // always len >= 1
+	Dir            string   // absolute path to project root
+	RuntimeEngine  string   // from fleet.yaml or auto-detected
+	Agents         []Agent  // always len >= 1
+	SharedNetworks []string // external compose networks attached to every generated service
 }
 
 // Agent pairs a resolved config with its source directory.
@@ -50,7 +52,7 @@ func LoadProject(dir string) (*Project, error) {
 		})
 	}
 
-	return &Project{Dir: absDir, Agents: agents}, nil
+	return &Project{Dir: absDir, RuntimeEngine: fleet.RuntimeEngine, Agents: agents, SharedNetworks: fleet.Shared.Networks}, nil
 }
 
 // ResolveAgent returns the targeted agent: uses explicit name if provided,

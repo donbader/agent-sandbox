@@ -11,6 +11,7 @@ import (
 	"github.com/donbader/agent-sandbox/internal/config"
 	"github.com/donbader/agent-sandbox/internal/generate/templates"
 	"github.com/donbader/agent-sandbox/internal/plugin"
+	"github.com/donbader/agent-sandbox/internal/runtime"
 )
 
 // Generator orchestrates v1 build artifact generation.
@@ -109,8 +110,20 @@ func (g *Generator) RunProject(project *config.Project) error {
 		return fmt.Errorf("create .build dir: %w", err)
 	}
 
+	// Determine runtime engine: explicit fleet config wins, otherwise auto-detect.
+	runtimeEngine := project.RuntimeEngine
+	if runtimeEngine == "" {
+		detected, err := detectHostRuntimeEngine()
+		if err != nil {
+			return fmt.Errorf("auto-detect runtime engine: %w", err)
+		}
+		runtimeEngine = detected
+	}
+
 	var entries []ComposeAgentEntry
 	for _, agent := range project.Agents {
+		agent.Config.RuntimeEngine = runtimeEngine
+
 		agentBuildDir := filepath.Join(buildDir, agent.Name)
 		if err := os.MkdirAll(agentBuildDir, 0755); err != nil {
 			return fmt.Errorf("create build dir for %s: %w", agent.Name, err)
@@ -126,10 +139,16 @@ func (g *Generator) RunProject(project *config.Project) error {
 		}
 
 		entries = append(entries, ComposeAgentEntry{
-			Config:   result.Config,
-			Contribs: result.Contribs,
-			BuildDir: agentBuildDir,
+			Config:         result.Config,
+			Contribs:       result.Contribs,
+			BuildDir:       agentBuildDir,
+			SharedNetworks: project.SharedNetworks,
 		})
+	}
+
+	// Validate fleet-wide configuration before writing compose.
+	if err := validateFleet(entries); err != nil {
+		return fmt.Errorf("validate fleet: %w", err)
 	}
 
 	compose, err := BuildProjectCompose(entries, g.projectDir)
@@ -522,4 +541,51 @@ func (g *Generator) computePluginFunctions(p *plugin.PluginDef) map[string]strin
 	}
 
 	return results
+}
+
+func detectHostRuntimeEngine() (string, error) {
+	dockerAvailable := false
+	podmanAvailable := false
+
+	// Check if "docker" binary resolves to podman (common on Linux with podman-docker).
+	if binaryResolvesTo("docker", runtime.Supported["podman"].Binary) {
+		// docker is a symlink to podman — only podman is truly available.
+		return "podman", nil
+	}
+
+	// Check if real docker is available.
+	if output, err := exec.Command("docker", "info").CombinedOutput(); err == nil {
+		if strings.Contains(strings.ToLower(string(output)), "podman") {
+			// "docker" command exists but is actually podman under the hood.
+			return "podman", nil
+		}
+		dockerAvailable = true
+	}
+
+	// Check if podman binary is available.
+	if _, err := exec.LookPath(runtime.Supported["podman"].Binary); err == nil {
+		podmanAvailable = true
+	}
+
+	if dockerAvailable && podmanAvailable {
+		return "", fmt.Errorf("both docker and podman detected; please declare runtime_engine in fleet.yaml (docker or podman)")
+	}
+
+	if podmanAvailable {
+		return "podman", nil
+	}
+
+	return config.DefaultRuntimeEngine, nil
+}
+
+func binaryResolvesTo(name, targetBase string) bool {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		resolved = path
+	}
+	return filepath.Base(resolved) == targetBase
 }

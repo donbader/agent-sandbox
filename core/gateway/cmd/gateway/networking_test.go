@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
 )
 
 // TestGatewayRouteScript_NoIptablesDependency verifies that the gateway-authored
@@ -71,6 +73,24 @@ func TestGatewayRouteScript_FallbackNoIptables(t *testing.T) {
 
 	if !strings.Contains(content, "ca.crt") {
 		t.Error("fallback script must install CA certificate")
+	}
+}
+
+func TestProxyRedirectPorts_IncludesConfiguredTargetPorts(t *testing.T) {
+	ports := proxyRedirectPorts(&proxy.Config{
+		HTTPServices: []proxy.HTTPService{
+			{Host: "service.local", Port: "9000"},
+		},
+		EgressRules: []proxy.EgressRule{
+			{Hosts: []string{"rkgw-gateway"}, Target: "rkgw-gateway:8000"},
+			{Hosts: []string{"blocked.local"}, Target: "blocked.local:7000", Deny: true},
+			{Hosts: []string{"duplicate.local"}, Target: "duplicate.local:8000"},
+		},
+	})
+
+	expected := []string{"443", "80", "9000", "8000"}
+	if strings.Join(ports, ",") != strings.Join(expected, ",") {
+		t.Fatalf("expected ports %v, got %v", expected, ports)
 	}
 }
 

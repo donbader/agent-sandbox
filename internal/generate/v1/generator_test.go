@@ -542,6 +542,36 @@ runtime:
 	assert.Contains(t, string(composeData), "beta-gateway:")
 }
 
+func TestGenerator_RunProject_SharedNetworks(t *testing.T) {
+	projectDir := t.TempDir()
+	agentDir := filepath.Join(projectDir, "alpha")
+	require.NoError(t, os.MkdirAll(agentDir, 0755))
+	agentYAML := `
+name: alpha
+core_version: latest
+runtime:
+  image: "@builtin/codex"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(agentDir, "agent.yaml"), []byte(agentYAML), 0644))
+
+	project := &config.Project{
+		Dir:            projectDir,
+		SharedNetworks: []string{"shared"},
+		Agents: []config.Agent{
+			{Name: "alpha", Dir: agentDir, Config: mustParseConfig(t, filepath.Join(agentDir, "agent.yaml"))},
+		},
+	}
+
+	g := NewGenerator(projectDir, nil)
+	g.SetPresets(testPresets)
+	require.NoError(t, g.RunProject(project))
+
+	composeData, err := os.ReadFile(filepath.Join(projectDir, ".build", "docker-compose.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(composeData), "shared:")
+	assert.Contains(t, string(composeData), "external: true")
+}
+
 func TestGenerator_RunProject_SingleAgent(t *testing.T) {
 	projectDir := t.TempDir()
 

@@ -32,6 +32,11 @@ options:
     required: false
     description: "Public callback URL (derived from request if not set)"
 
+  callback_port:
+    type: integer
+    required: false
+    description: "Host port to publish the gateway's OAuth callback endpoint on. When set, derives callback_url as http://127.0.0.1:<port>/plugins/mcp-oauth/callback"
+
   volume_strategy:
     type: string
     required: false
@@ -45,6 +50,10 @@ contributes:
       - hosts: ["{{ index $cfg "mcp_url" }}"]
         middlewares:
           - "./src/oauth.ts"
+{{- end }}
+{{- if .plugin.options.callback_port }}
+    published_ports:
+      - "{{ .plugin.options.callback_port }}:8080"
 {{- end }}
 {{- if eq (or .plugin.options.volume_strategy "per_agent") "fleet" }}
     raw_volumes:
