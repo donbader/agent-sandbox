@@ -343,21 +343,25 @@ func (dp *DockerProxy) handleBuild(w http.ResponseWriter, r *http.Request) {
 	// Only track tags that actually exist after the build completes.
 	// A failed build leaves no image, so image inspect will 404.
 	if len(tags) > 0 && dp.cfg.AllowBuild {
-		dp.mu.Lock()
+		// Check existence OUTSIDE the lock (HTTP call to daemon)
+		var verified []string
 		for _, tag := range tags {
-			if tag == "" {
-				continue
-			}
-			// Verify the tag was actually created (build may have failed)
-			if dp.imageExists(tag) {
-				dp.builtImages[tag] = true
-				dp.builtImages[normalizeImage(tag)] = true
-				slog.Info("tracked built image", "tag", tag)
-			} else {
+			if tag != "" && dp.imageExists(tag) {
+				verified = append(verified, tag)
+			} else if tag != "" {
 				slog.Debug("build tag not tracked (image not found after build)", "tag", tag)
 			}
 		}
-		dp.mu.Unlock()
+		// Brief lock to update map only
+		if len(verified) > 0 {
+			dp.mu.Lock()
+			for _, tag := range verified {
+				dp.builtImages[tag] = true
+				dp.builtImages[normalizeImage(tag)] = true
+				slog.Info("tracked built image", "tag", tag)
+			}
+			dp.mu.Unlock()
+		}
 	}
 }
 
