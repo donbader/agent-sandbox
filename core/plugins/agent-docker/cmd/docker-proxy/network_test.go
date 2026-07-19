@@ -273,6 +273,8 @@ func TestHandleNetworkConnect_OwnershipCheck(t *testing.T) {
 		PidsLimit:     256,
 		AllowCompose:  true,
 	})
+	// Set sandbox network ID so owned-container can connect to it
+	proxy.cfg.NetworkID = "net123"
 
 	// Container from a different sandbox → 403
 	body := `{"Container":"foreign-container"}`

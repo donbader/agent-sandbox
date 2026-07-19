@@ -73,8 +73,8 @@ func TestCountOwnedContainers_ErrorResponse(t *testing.T) {
 
 	proxy := newTestProxy(t, backend)
 	count := proxy.countOwnedContainers()
-	// Fail-open: returns 0 on error (allows create)
-	assert.Equal(t, 0, count)
+	// Fail-closed: returns MaxContainers on error (blocks create)
+	assert.Equal(t, 10, count)
 }
 
 func TestCountOwnedContainers_MalformedJSON(t *testing.T) {
@@ -86,7 +86,8 @@ func TestCountOwnedContainers_MalformedJSON(t *testing.T) {
 
 	proxy := newTestProxy(t, backend)
 	count := proxy.countOwnedContainers()
-	assert.Equal(t, 0, count)
+	// Fail-closed: returns MaxContainers on parse error
+	assert.Equal(t, 10, count)
 }
 
 func TestCountOwnedContainers_UsedInValidateCreate(t *testing.T) {

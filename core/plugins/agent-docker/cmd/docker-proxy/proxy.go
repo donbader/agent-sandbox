@@ -144,7 +144,7 @@ func (dp *DockerProxy) Cleanup() {
 }
 
 func (dp *DockerProxy) handleContainerCreate(w http.ResponseWriter, r *http.Request) {
-	bodyBytes, err := io.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10<<20)) // 10MB max
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read request body")
 		return
@@ -340,16 +340,28 @@ func (dp *DockerProxy) handleBuild(w http.ResponseWriter, r *http.Request) {
 
 	dp.upstream.ServeHTTP(w, r)
 
+	// Only track tags that actually exist after the build completes.
+	// A failed build leaves no image, so image inspect will 404.
 	if len(tags) > 0 && dp.cfg.AllowBuild {
-		dp.mu.Lock()
+		// Check existence OUTSIDE the lock (HTTP call to daemon)
+		var verified []string
 		for _, tag := range tags {
-			if tag != "" {
+			if tag != "" && dp.imageExists(tag) {
+				verified = append(verified, tag)
+			} else if tag != "" {
+				slog.Debug("build tag not tracked (image not found after build)", "tag", tag)
+			}
+		}
+		// Brief lock to update map only
+		if len(verified) > 0 {
+			dp.mu.Lock()
+			for _, tag := range verified {
 				dp.builtImages[tag] = true
 				dp.builtImages[normalizeImage(tag)] = true
 				slog.Info("tracked built image", "tag", tag)
 			}
+			dp.mu.Unlock()
 		}
-		dp.mu.Unlock()
 	}
 }
 
@@ -358,9 +370,19 @@ func (dp *DockerProxy) handleImageTag(w http.ResponseWriter, r *http.Request, pa
 	repo := r.URL.Query().Get("repo")
 	tag := r.URL.Query().Get("tag")
 
-	dp.upstream.ServeHTTP(w, r)
+	// Use responseRecorder to check success before tracking
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, r)
 
-	if dp.cfg.AllowBuild && repo != "" {
+	// Forward response to client
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(rec.body.Bytes())
+
+	// Only track on success (201 Created)
+	if rec.code == http.StatusCreated && dp.cfg.AllowBuild && repo != "" {
 		result := repo
 		if tag != "" {
 			result = repo + ":" + tag
@@ -371,6 +393,19 @@ func (dp *DockerProxy) handleImageTag(w http.ResponseWriter, r *http.Request, pa
 		slog.Info("tracked tagged image", "image", result)
 		dp.mu.Unlock()
 	}
+}
+
+// imageExists checks if an image tag exists on the Docker daemon.
+func (dp *DockerProxy) imageExists(tag string) bool {
+	req, err := http.NewRequest("GET", fmt.Sprintf("/images/%s/json", tag), nil)
+	if err != nil {
+		return false
+	}
+	req.URL.Scheme = "http"
+	req.URL.Host = "docker"
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, req)
+	return rec.code == http.StatusOK
 }
 
 func (dp *DockerProxy) handleContainerList(w http.ResponseWriter, r *http.Request) {
@@ -612,18 +647,18 @@ func (dp *DockerProxy) countOwnedContainers() int {
 	req, err := http.NewRequest("GET", "/containers/json?"+q.Encode(), nil)
 	if err != nil {
 		slog.Warn("countOwnedContainers: failed to create request", "err", err)
-		return 0
+		return dp.cfg.MaxContainers // fail closed
 	}
 	rec := &responseRecorder{header: make(http.Header)}
 	dp.upstream.ServeHTTP(rec, req)
 	if rec.code != http.StatusOK {
 		slog.Warn("countOwnedContainers: unexpected status", "code", rec.code)
-		return 0
+		return dp.cfg.MaxContainers // fail closed
 	}
 	var containers []any
 	if err := json.Unmarshal(rec.body.Bytes(), &containers); err != nil {
 		slog.Warn("countOwnedContainers: failed to parse response", "err", err)
-		return 0
+		return dp.cfg.MaxContainers // fail closed
 	}
 	return len(containers)
 }

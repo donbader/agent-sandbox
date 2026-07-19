@@ -200,12 +200,23 @@ func (dp *DockerProxy) handleNetworkRemove(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	dp.upstream.ServeHTTP(w, r)
+	// Use responseRecorder to check success before untracking
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, r)
 
-	dp.mu.Lock()
-	delete(dp.networks, networkRef)
-	dp.mu.Unlock()
-	dp.names.Untrack(KindNetwork, networkRef)
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(rec.body.Bytes())
+
+	// Only untrack on successful removal
+	if rec.code == http.StatusNoContent || rec.code == http.StatusOK {
+		dp.mu.Lock()
+		delete(dp.networks, networkRef)
+		dp.mu.Unlock()
+		dp.names.Untrack(KindNetwork, networkRef)
+	}
 }
 
 // handleNetworkList filters to only show networks owned by this sandbox.
@@ -231,7 +242,7 @@ func (dp *DockerProxy) handleNetworkList(w http.ResponseWriter, r *http.Request)
 // handleNetworkConnect allows connecting containers to networks we own.
 // Verifies the container being connected is owned by this sandbox.
 func (dp *DockerProxy) handleNetworkConnect(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB max
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read request body")
 		return
@@ -254,7 +265,32 @@ func (dp *DockerProxy) handleNetworkConnect(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// Verify the network is owned by this sandbox or is the sandbox network
+	networkID := extractNetworkIDFromPath(r.URL.Path)
+	if networkID != "" && networkID != dp.cfg.NetworkID {
+		dp.mu.Lock()
+		ownedNet := dp.networks[networkID]
+		dp.mu.Unlock()
+		if !ownedNet && !dp.networkOwnedByLabel(networkID) {
+			writeError(w, http.StatusForbidden, "cannot connect to networks not owned by this sandbox")
+			return
+		}
+	}
+
 	dp.upstream.ServeHTTP(w, r)
+}
+
+// extractNetworkIDFromPath extracts the network ID from paths like /networks/{id}/connect
+func extractNetworkIDFromPath(path string) string {
+	// Strip version prefix if present
+	if i := strings.Index(path, "/networks/"); i >= 0 {
+		rest := path[i+len("/networks/"):]
+		if slash := strings.Index(rest, "/"); slash > 0 {
+			return rest[:slash]
+		}
+		return rest
+	}
+	return ""
 }
 
 // networkOwnedByLabel inspects a network and checks if it has our sandbox label.

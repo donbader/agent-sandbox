@@ -378,6 +378,17 @@ When the sandbox shuts down, the proxy receives SIGTERM and:
 
 No orphaned resources are left behind.
 
+### Startup: Certs Volume Initialization
+
+In compose mode, the proxy auto-populates a Docker volume with the gateway routing script and CA certificate at startup. This volume is mounted into every spawned container so they can establish transparent proxy networking.
+
+The proxy:
+1. Creates the volume (idempotent)
+2. Populates it with `gateway-route.sh` and `ca.crt` only (private keys are excluded via allowlist)
+3. Logs a warning and continues if initialization fails (graceful degradation)
+
+This runs once at startup — no manual volume creation needed.
+
 ## Volume Sharing (DooD)
 
 In Docker-out-of-Docker mode, spawned containers are **sibling containers** — managed by the same host daemon. Bind mount paths resolve against the **host filesystem**, not the agent container's.
