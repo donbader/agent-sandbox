@@ -105,8 +105,20 @@ func (dp *DockerProxy) handleVolumeRemove(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	dp.upstream.ServeHTTP(w, r)
-	dp.names.Untrack(KindVolume, volumeRef)
+	// Use responseRecorder to check success before untracking
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, r)
+
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(rec.code)
+	_, _ = w.Write(rec.body.Bytes())
+
+	// Only untrack on successful removal
+	if rec.code == http.StatusNoContent || rec.code == http.StatusOK {
+		dp.names.Untrack(KindVolume, volumeRef)
+	}
 }
 
 // handleVolumeInspect only allows inspecting volumes owned by this sandbox.
