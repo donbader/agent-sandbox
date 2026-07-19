@@ -52,6 +52,14 @@ func main() {
 	// Initialize volume translator (discovers agent mounts, checks Docker version)
 	if cfg.AllowCompose {
 		proxy.volumes = proxy.NewVolumeTranslator()
+
+		// Ensure the certs volume exists and is populated so spawned containers
+		// can execute gateway-route.sh for transparent proxy setup.
+		if err := proxy.EnsureCertsVolume(); err != nil {
+			slog.Warn("certs volume init failed (spawned containers may fail)", "error", err)
+			// Non-fatal: proxy can still serve, but spawned containers won't have networking.
+			// This allows graceful degradation rather than hard crash.
+		}
 	}
 
 	server := &http.Server{
