@@ -88,9 +88,30 @@ func (dp *DockerProxy) populateCertsVolume(volName string) error {
 }
 
 // createTempContainer creates a non-running container with the certs volume mounted.
+// Tries busybox first (tiny), falls back to alpine (likely cached from proxy image).
 func (dp *DockerProxy) createTempContainer(volName string) (string, error) {
+	for _, image := range []string{"busybox:latest", "alpine:latest"} {
+		id, err := dp.tryCreateContainer(volName, image)
+		if err == nil {
+			return id, nil
+		}
+		// If image not found, try pulling it
+		if strings.Contains(err.Error(), "No such image") {
+			if pullErr := dp.pullImage(image); pullErr == nil {
+				id, err = dp.tryCreateContainer(volName, image)
+				if err == nil {
+					return id, nil
+				}
+			}
+		}
+		slog.Debug("temp container image failed", "image", image, "error", err)
+	}
+	return "", fmt.Errorf("no suitable image available for temp container")
+}
+
+func (dp *DockerProxy) tryCreateContainer(volName, image string) (string, error) {
 	body, _ := json.Marshal(map[string]any{
-		"Image": "busybox:latest",
+		"Image": image,
 		"Cmd":   []string{"true"},
 		"HostConfig": map[string]any{
 			"Mounts": []map[string]any{
@@ -131,6 +152,24 @@ func (dp *DockerProxy) createTempContainer(volName string) (string, error) {
 	return result.Id, nil
 }
 
+// pullImage pulls an image from the registry.
+func (dp *DockerProxy) pullImage(image string) error {
+	req, err := http.NewRequest("POST", fmt.Sprintf("/images/create?fromImage=%s", image), nil)
+	if err != nil {
+		return err
+	}
+	req.URL.Scheme = "http"
+	req.URL.Host = "docker"
+
+	rec := &responseRecorder{header: make(http.Header)}
+	dp.upstream.ServeHTTP(rec, req)
+
+	if rec.code != http.StatusOK {
+		return fmt.Errorf("pull %s: status %d", image, rec.code)
+	}
+	return nil
+}
+
 // uploadArchive uploads a tar archive to a container path via Docker API.
 func (dp *DockerProxy) uploadArchive(containerID, path string, archive []byte) error {
 	req, err := http.NewRequest("PUT",
@@ -162,11 +201,23 @@ func (dp *DockerProxy) removeTempContainer(containerID string) {
 	dp.upstream.ServeHTTP(rec, req)
 
 	if rec.code != http.StatusNoContent && rec.code != http.StatusOK {
-		slog.Warn("failed to remove temp container", "id", containerID[:12], "code", rec.code)
+		logID := containerID
+		if len(logID) > 12 {
+			logID = logID[:12]
+		}
+		slog.Warn("failed to remove temp container", "id", logID, "code", rec.code)
 	}
 }
 
-// buildCertsArchive creates a tar archive containing all files from /shared/certs/.
+// certsAllowList defines which files from /shared/certs/ are safe to
+// expose to spawned containers. Private keys must NEVER be included.
+var certsAllowList = map[string]bool{
+	"gateway-route.sh": true,
+	"ca.crt":           true,
+}
+
+// buildCertsArchive creates a tar archive containing only safe files from /shared/certs/.
+// Private keys (ca.key) are explicitly excluded.
 func buildCertsArchive() ([]byte, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
@@ -180,6 +231,11 @@ func buildCertsArchive() ([]byte, error) {
 		if entry.IsDir() {
 			continue
 		}
+		// Only include explicitly allowed files (never private keys)
+		if !certsAllowList[entry.Name()] {
+			continue
+		}
+
 		path := filepath.Join(certsDir, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
