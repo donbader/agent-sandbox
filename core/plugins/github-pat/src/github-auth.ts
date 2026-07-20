@@ -5,12 +5,35 @@
  *
  * Options:
  *   token: string              — GitHub PAT (injected as Basic auth)
- *   deny_paths?: string[]      — e.g. ["PUT /repos/*/pulls/*/merge", "DELETE /repos/*/*"]
- *   deny_graphql?: { mutations?: string[] }  — e.g. { mutations: ["mergePullRequest"] }
+ *   deny_paths?: string[]      — e.g. ["PUT /repos/*/*/pulls/*/merge"]
+ *   deny_graphql?: { mutations?: string[] }  — BEST-EFFORT only (see note below)
+ *
+ * NOTE on deny_graphql:
+ *   The gateway middleware API does not expose ctx.request.body, so GraphQL
+ *   mutation detection relies on: (1) the X-Github-Graphql-Operation header
+ *   that some clients (including `gh` CLI) send, and (2) query string params.
+ *   A raw HTTP client that omits these headers can bypass this check.
+ *   For full enforcement, the Go runtime needs ctx.request.body support.
+ *   deny_paths blocking of REST equivalents (e.g. PUT /repos/*/*/pulls/*/merge)
+ *   remains the primary enforcement mechanism.
  */
 
+function normalizePath(path: string): string {
+  // Resolve . and .. segments to prevent traversal bypass
+  const parts = path.split("/");
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (part === "." || part === "") continue;
+    if (part === "..") {
+      resolved.pop();
+    } else {
+      resolved.push(part);
+    }
+  }
+  return "/" + resolved.join("/");
+}
+
 function matchPath(pattern: string, actual: string): boolean {
-  // Split pattern and path into segments, `*` matches exactly one segment
   const patParts = pattern.split("/").filter(Boolean);
   const actParts = actual.split("/").filter(Boolean);
 
@@ -23,53 +46,60 @@ function matchPath(pattern: string, actual: string): boolean {
   return true;
 }
 
-function checkDenyPaths(ctx: GatewayContext, denyPaths: string[]): boolean {
+function checkDenyPaths(ctx: GatewayContext, denyPaths: string[]): string | null {
   const method = ctx.request.method.toUpperCase();
-  const path = ctx.request.path;
+  const path = normalizePath(ctx.request.path);
 
   for (const rule of denyPaths) {
     const spaceIdx = rule.indexOf(" ");
-    if (spaceIdx === -1) continue;
+    if (spaceIdx === -1) {
+      gw.log.error(`[github-pat] malformed deny_paths rule (missing METHOD): "${rule}"`);
+      continue;
+    }
 
     const ruleMethod = rule.substring(0, spaceIdx).toUpperCase();
     const rulePath = rule.substring(spaceIdx + 1);
 
     if (ruleMethod !== method) continue;
-    if (matchPath(rulePath, path)) return true;
+    if (matchPath(rulePath, path)) return rule;
   }
-  return false;
+  return null;
 }
 
-function checkDenyGraphQL(ctx: GatewayContext, denyGraphql: { mutations?: string[] }): boolean {
-  // GraphQL requests are POST to /graphql
-  if (ctx.request.method.toUpperCase() !== "POST") return false;
-  if (!ctx.request.path.endsWith("/graphql")) return false;
+function checkDenyGraphQL(ctx: GatewayContext, denyGraphql: { mutations?: string[] }): string | null {
+  // GraphQL requests are POST to /graphql or /api/graphql
+  if (ctx.request.method.toUpperCase() !== "POST") return null;
+  const path = normalizePath(ctx.request.path);
+  if (!path.endsWith("/graphql")) return null;
 
   const mutations = denyGraphql.mutations;
-  if (!mutations || mutations.length === 0) return false;
+  if (!mutations || mutations.length === 0) return null;
 
-  // We can't read the request body directly from the middleware API.
-  // Check the X-Github-Graphql-Operation header that gh CLI sends,
-  // or fall back to blocking all mutations if we can't inspect.
-  // gh CLI sets this header in newer versions.
-  const opHeader = ctx.request.headers["x-github-graphql-operation"] ||
-                   ctx.request.headers["X-Github-Graphql-Operation"] || "";
+  // Check X-Github-Graphql-Operation header (gh CLI sends this)
+  // Headers may be lowercase in the map depending on Go's canonicalization
+  const headers = ctx.request.headers;
+  const opHeader = headers["x-github-graphql-operation"] ||
+                   headers["X-Github-Graphql-Operation"] ||
+                   headers["X-GITHUB-GRAPHQL-OPERATION"] || "";
 
   if (opHeader) {
+    const opLower = opHeader.toLowerCase();
     for (const m of mutations) {
-      if (opHeader.toLowerCase() === m.toLowerCase()) return true;
+      if (opLower === m.toLowerCase()) return m;
     }
   }
 
-  // Fallback: check the query parameter if present (some clients send it there)
-  const queryParam = ctx.request.query["query"] || "";
-  if (queryParam) {
+  // Check query parameters (some clients pass operation name here)
+  const queryOp = ctx.request.query["operationName"] ||
+                  ctx.request.query["operation_name"] || "";
+  if (queryOp) {
+    const qLower = queryOp.toLowerCase();
     for (const m of mutations) {
-      if (queryParam.includes(m)) return true;
+      if (qLower === m.toLowerCase()) return m;
     }
   }
 
-  return false;
+  return null;
 }
 
 const handler: MiddlewareHandler = (ctx, options) => {
@@ -78,29 +108,35 @@ const handler: MiddlewareHandler = (ctx, options) => {
 
   // --- Enforce deny_paths ---
   const denyPaths: string[] = options.deny_paths || [];
-  if (denyPaths.length > 0 && checkDenyPaths(ctx, denyPaths)) {
-    gw.log.error(`[github-pat] BLOCKED: ${ctx.request.method} ${ctx.request.path} (deny_paths)`);
-    ctx.abort(403, JSON.stringify({
-      error: "blocked_by_policy",
-      message: `Action denied: ${ctx.request.method} ${ctx.request.path}`,
-      rule: "deny_paths",
-    }), { "Content-Type": "application/json" });
-    return;
+  if (denyPaths.length > 0) {
+    const matched = checkDenyPaths(ctx, denyPaths);
+    if (matched) {
+      gw.log.error(`[github-pat] BLOCKED: ${ctx.request.method} ${ctx.request.path} (matched: ${matched})`);
+      ctx.abort(403, JSON.stringify({
+        error: "blocked_by_policy",
+        message: `Action denied: ${ctx.request.method} ${ctx.request.path}`,
+        rule: "deny_paths",
+      }), { "Content-Type": "application/json" });
+      return;
+    }
   }
 
-  // --- Enforce deny_graphql ---
+  // --- Enforce deny_graphql (best-effort, see header comment) ---
   const denyGraphql = options.deny_graphql || {};
-  if (denyGraphql.mutations && checkDenyGraphQL(ctx, denyGraphql)) {
-    gw.log.error(`[github-pat] BLOCKED: GraphQL mutation (deny_graphql)`);
-    ctx.abort(403, JSON.stringify({
-      error: "blocked_by_policy",
-      message: "GraphQL mutation denied by policy",
-      rule: "deny_graphql",
-    }), { "Content-Type": "application/json" });
-    return;
+  if (denyGraphql.mutations) {
+    const matched = checkDenyGraphQL(ctx, denyGraphql);
+    if (matched) {
+      gw.log.error(`[github-pat] BLOCKED: GraphQL mutation "${matched}" (best-effort detection)`);
+      ctx.abort(403, JSON.stringify({
+        error: "blocked_by_policy",
+        message: `GraphQL mutation denied: ${matched}`,
+        rule: "deny_graphql",
+      }), { "Content-Type": "application/json" });
+      return;
+    }
   }
 
-  // --- Inject auth ---
+  // --- Inject auth (only after all deny checks pass) ---
   const basic = gw.crypto.base64.encode("x-access-token:" + token);
   ctx.request.setHeader("Authorization", "Basic " + basic);
   gw.secrets.register(token);
