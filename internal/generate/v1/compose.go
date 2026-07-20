@@ -319,7 +319,10 @@ type ComposeAgentEntry struct {
 
 // BuildProjectCompose generates a unified docker-compose.yml for any project (1 or N agents).
 func BuildProjectCompose(agents []ComposeAgentEntry, projectDir string) (string, error) {
-	subnet := findAvailableSubnet()
+	subnet, err := findAvailableSubnet()
+	if err != nil {
+		return "", fmt.Errorf("subnet allocation: %w", err)
+	}
 
 	compose := composeFile{
 		Services: map[string]any{},
