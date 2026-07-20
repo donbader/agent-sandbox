@@ -80,7 +80,7 @@ export class MessageHandler {
     if (msg.method === "auth/authenticate") {
       return { jsonrpc: "2.0", id: msg.id, result: {} };
     }
-    if (msg.method === "session/new") {
+    if (msg.method === "session/new" || msg.method === "session/load") {
       if (!msg.params) msg.params = {};
       const params = msg.params as Record<string, unknown>;
       if (!params.cwd) params.cwd = this.cwd;
