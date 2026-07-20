@@ -349,6 +349,94 @@ func TestProxy_HTTP_StillHandled(t *testing.T) {
 	wg.Wait()
 }
 
+func TestProxy_TLSDetection_LargeClientHello(t *testing.T) {
+	// Verify that SNI is correctly extracted from ClientHellos larger than 4096 bytes.
+	// This tests the full-record read (post-quantum key exchange produces large hellos).
+	p := New(&Config{Listen: "127.0.0.1:0"})
+	handler := &testHandler{
+		domains: []string{"large-hello.example.com"},
+		handled: make(chan string, 1),
+	}
+	p.RegisterHandler(handler)
+
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+
+	go p.handleConn(&pipeConn{server})
+
+	hello := buildLargeClientHello("large-hello.example.com", 5000)
+	require.Greater(t, len(hello), 4096, "test ClientHello must exceed old 4096-byte buffer")
+
+	_, err := client.Write(hello)
+	require.NoError(t, err)
+
+	select {
+	case sni := <-handler.handled:
+		assert.Equal(t, "large-hello.example.com", sni)
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler was not called — SNI not extracted from large ClientHello")
+	}
+}
+
+// buildLargeClientHello constructs a TLS ClientHello with padding extensions
+// placed BEFORE the SNI extension so the total record exceeds paddingSize bytes.
+func buildLargeClientHello(serverName string, paddingSize int) []byte {
+	sniBytes := []byte(serverName)
+	sniLen := len(sniBytes)
+
+	// Padding extension (type 0x0015 = padding)
+	padData := make([]byte, paddingSize)
+	paddingExt := []byte{
+		0x00, 0x15, // extension type: padding
+		byte(paddingSize >> 8), byte(paddingSize & 0xff),
+	}
+	paddingExt = append(paddingExt, padData...)
+
+	// SNI extension placed AFTER padding
+	sniExt := []byte{
+		0x00, 0x00, // extension type: server_name
+		byte((sniLen + 5) >> 8), byte((sniLen + 5) & 0xff),
+		byte((sniLen + 3) >> 8), byte((sniLen + 3) & 0xff),
+		0x00,
+		byte(sniLen >> 8), byte(sniLen & 0xff),
+	}
+	sniExt = append(sniExt, sniBytes...)
+
+	// Extensions: padding + SNI
+	allExt := append(paddingExt, sniExt...)
+	extLen := len(allExt)
+	extensions := []byte{byte(extLen >> 8), byte(extLen & 0xff)}
+	extensions = append(extensions, allExt...)
+
+	// ClientHello body
+	body := []byte{0x03, 0x03} // TLS 1.2
+	body = append(body, make([]byte, 32)...) // random
+	body = append(body, 0x00)               // session ID length: 0
+	body = append(body, 0x00, 0x02)         // cipher suites length: 2
+	body = append(body, 0x00, 0x2f)         // TLS_RSA_WITH_AES_128_CBC_SHA
+	body = append(body, 0x01)               // compression methods length: 1
+	body = append(body, 0x00)               // null compression
+	body = append(body, extensions...)
+
+	// Handshake header
+	handshakeLen := len(body)
+	handshake := []byte{
+		0x01,
+		byte(handshakeLen >> 16), byte(handshakeLen >> 8), byte(handshakeLen & 0xff),
+	}
+	handshake = append(handshake, body...)
+
+	// TLS record header
+	recordLen := len(handshake)
+	record := []byte{
+		0x16, 0x03, 0x01,
+		byte(recordLen >> 8), byte(recordLen & 0xff),
+	}
+	record = append(record, handshake...)
+
+	return record
+}
+
 func TestForwarder_PipesData(t *testing.T) {
 	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
