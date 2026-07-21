@@ -369,6 +369,34 @@ func startMockSOCKS5Server(t *testing.T, reply socks5Reply, targetOut chan<- str
 	return ln
 }
 
+// TestVPNDialer_Openvpn_NotInitialised verifies that dialling through an openvpn
+// profile before StartOpenVPNTunnels has run returns a descriptive error that
+// tells the operator what to call.
+func TestVPNDialer_Openvpn_NotInitialised(t *testing.T) {
+	d := &VPNDialer{profile: VPNProfile{Type: "openvpn", ConfigB64: "dGVzdA=="}}
+	_, err := d.Dial("tcp", "example.com:443")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not initialised")
+	assert.Contains(t, err.Error(), "StartOpenVPNTunnels")
+}
+
+// TestBuildVPNDialers_OpenvpnCreatedWithNilBoundDialer verifies that
+// BuildVPNDialers creates a VPNDialer for openvpn profiles but leaves
+// boundDialer nil — the tunnel is not started until StartOpenVPNTunnels.
+func TestBuildVPNDialers_OpenvpnCreatedWithNilBoundDialer(t *testing.T) {
+	dialers := BuildVPNDialers(map[string]VPNProfile{
+		"corp": {Type: "openvpn", ConfigB64: "dGVzdA=="},
+		"px":   {Type: "socks5", Address: "vpn-proxy:1080"},
+	})
+	require.Len(t, dialers, 2)
+	// openvpn entry exists but tunnel not yet started
+	require.NotNil(t, dialers["corp"])
+	assert.Nil(t, dialers["corp"].boundDialer,
+		"openvpn boundDialer must remain nil until StartOpenVPNTunnels runs")
+	// socks5 entry also created
+	require.NotNil(t, dialers["px"])
+}
+
 // writeConfigFile writes YAML to a temp file, calls LoadConfig, and returns cfg.
 // Fails the test on any error.
 func writeConfigFile(t *testing.T, yaml string) *Config {
