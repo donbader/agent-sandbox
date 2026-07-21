@@ -71,7 +71,6 @@ func (rc *RequestContext) ToJSObject(vm *VM) *goja.Object {
 	_ = requestObj.Set("query", query)
 	// @ts-prop ctx.request.headers: readonly headers: Record<string, string>
 	_ = requestObj.Set("headers", headers)
-	// @ts-prop ctx.request.body: readonly body: string
 	var bodyStr string
 	if rc.Request.Body != nil {
 		bodyBytes, err := io.ReadAll(rc.Request.Body)
@@ -81,6 +80,7 @@ func (rc *RequestContext) ToJSObject(vm *VM) *goja.Object {
 			rc.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
 	}
+	// @ts-prop ctx.request.body: readonly body: string
 	_ = requestObj.Set("body", bodyStr)
 
 	// @ts-method ctx.request.setHeader(key: string, value: string): void
