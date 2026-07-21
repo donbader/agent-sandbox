@@ -182,21 +182,23 @@ func main() {
 				if decision.Rule == nil || decision.Rule.DenyGraphQL == nil || len(decision.Rule.DenyGraphQL.Mutations) == 0 {
 					return false
 				}
-				bodyBytes, err := io.ReadAll(req.Body)
-				if err != nil {
-					return false
-				}
-				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-				mutationName := mitm.ExtractGraphQLMutation(bodyBytes)
-				if mutationName == "" {
-					return false
-				}
-				for _, denied := range decision.Rule.DenyGraphQL.Mutations {
-					if strings.EqualFold(denied, mutationName) {
-						slog.Warn("mitm: graphql mutation denied", "host", host, "mutation", mutationName)
+			bodyBytes, err := io.ReadAll(req.Body)
+			if err != nil {
+				return false
+			}
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			mutationNames := mitm.ExtractGraphQLMutationNames(bodyBytes)
+			if len(mutationNames) == 0 {
+				return false
+			}
+			for _, denied := range decision.Rule.DenyGraphQL.Mutations {
+				for _, name := range mutationNames {
+					if strings.EqualFold(denied, name) {
+						slog.Warn("mitm: graphql mutation denied", "host", host, "mutation", name, "matched_rule", denied)
 						return true
 					}
 				}
+			}
 				return false
 			}
 		}

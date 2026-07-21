@@ -23,6 +23,30 @@ func TestExtractGraphQLMutation_QueryField(t *testing.T) {
 	assert.Equal(t, "MergePullRequest", ExtractGraphQLMutation(body))
 }
 
+func TestExtractGraphQLMutationNames_NamedMutationWithDifferentFieldName(t *testing.T) {
+	// This is the exact gh CLI pattern: operation name "PullRequestMerge" but field name "mergePullRequest"
+	body := []byte(`{"query":"mutation PullRequestMerge($input:MergePullRequestInput!){mergePullRequest(input: $input){clientMutationId}}"}`)
+	names := ExtractGraphQLMutationNames(body)
+	assert.Contains(t, names, "PullRequestMerge", "should include operation name")
+	assert.Contains(t, names, "mergePullRequest", "should include field name")
+}
+
+func TestExtractGraphQLMutationNames_OperationNameFieldIncluded(t *testing.T) {
+	body := []byte(`{"operationName":"FooOp","query":"mutation BarOp($x: ID!) { bazField(input: $x) { id } }"}`)
+	names := ExtractGraphQLMutationNames(body)
+	assert.Contains(t, names, "FooOp")
+	assert.Contains(t, names, "BarOp")
+	assert.Contains(t, names, "bazField")
+}
+
+func TestExtractGraphQLMutationNames_DeduplicatesSameNameDifferentCase(t *testing.T) {
+	// When operationName and named mutation are the same (common case)
+	body := []byte(`{"operationName":"mergePullRequest","query":"mutation mergePullRequest($id: ID!) { mergePullRequest(input: {pullRequestId: $id}) { pullRequest { merged } } }"}`)
+	names := ExtractGraphQLMutationNames(body)
+	// "mergePullRequest" appears as operationName, named mutation, AND field name — should deduplicate
+	assert.Equal(t, []string{"mergePullRequest"}, names)
+}
+
 func TestExtractGraphQLMutation_QueryCaseInsensitiveKeyword(t *testing.T) {
 	// The (?i) flag makes the "mutation" keyword case-insensitive
 	body := []byte(`{"query":"MUTATION UpperCaseMut { upperCaseMut { id } }"}`)
