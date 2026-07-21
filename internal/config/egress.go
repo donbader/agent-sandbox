@@ -19,6 +19,7 @@ type EgressRule struct {
 	Middlewares []string          `yaml:"middlewares,omitempty" json:"middlewares,omitempty" jsonschema:"title=middlewares,description=TypeScript middleware scripts (implies MITM)"`
 	Network     string            `yaml:"network,omitempty" json:"network,omitempty" jsonschema:"title=network,description=Compose network to attach gateway to (for internal services)"`
 	Target      string            `yaml:"target,omitempty" json:"target,omitempty" jsonschema:"title=target,description=Forwarding destination (host:port) for internal services. Omit for standard HTTPS passthrough."`
+	VPN         string            `yaml:"vpn,omitempty" json:"vpn,omitempty" jsonschema:"title=vpn,description=VPN profile name from gateway.vpn_profiles. Routes upstream connections through the named VPN tunnel. Cannot be combined with deny: true."`
 }
 
 // DenyGraphQL configures GraphQL mutation blocking for an egress rule.
@@ -178,6 +179,10 @@ func ValidateEgressRules(rules []EgressRule) []string {
 
 		if rule.Deny && rule.DenyGraphQL != nil {
 			errs = append(errs, fmt.Sprintf("gateway.egress[%d]: cannot have both deny: true and deny_graphql (entire host is already denied)", i))
+		}
+
+		if rule.VPN != "" && rule.Deny {
+			errs = append(errs, fmt.Sprintf("gateway.egress[%d]: cannot have both deny: true and vpn (denied traffic is never forwarded)", i))
 		}
 
 		for j, pattern := range rule.Hosts {

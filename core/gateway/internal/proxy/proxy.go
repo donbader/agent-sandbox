@@ -90,6 +90,14 @@ func (p *Proxy) Close() error {
 	return nil
 }
 
+// StartVPNTunnels starts OpenVPN daemons for every profile with type "openvpn"
+// and attaches bound dialers to the proxy's internal VPN dialer map.
+// Must be called once at startup before traffic begins flowing.
+// Calling it when no openvpn profiles are configured is a no-op.
+func (p *Proxy) StartVPNTunnels() error {
+	return StartOpenVPNTunnels(p.vpnDialers)
+}
+
 func (p *Proxy) handleConn(clientConn net.Conn) {
 	defer func() { _ = clientConn.Close() }()
 

@@ -191,6 +191,10 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 	if len(gatewayEnv) > 0 {
 		gatewaySvc["environment"] = gatewayEnv
 	}
+	// If VPN profiles are configured, expose the TUN device so OpenVPN can create tunnels.
+	if len(cfg.Gateway.VPNProfiles) > 0 {
+		gatewaySvc["devices"] = []string{"/dev/net/tun:/dev/net/tun"}
+	}
 	// Attach extra networks from egress rules to the gateway service.
 	// These are pre-existing Docker networks (external: true) that the gateway
 	// must join to reach services on those networks.
@@ -574,6 +578,18 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 	for _, rule := range cfg.Gateway.Egress {
 		for _, value := range rule.Headers {
 			if ev := envvar.Extract(value); ev != "" {
+				seen[ev] = true
+			}
+		}
+	}
+
+	// From VPN profiles (config_b64 and address may reference ${VAR})
+	for _, profile := range cfg.Gateway.VPNProfiles {
+		if profile != nil {
+			if ev := envvar.Extract(profile.ConfigB64); ev != "" {
+				seen[ev] = true
+			}
+			if ev := envvar.Extract(profile.Address); ev != "" {
 				seen[ev] = true
 			}
 		}

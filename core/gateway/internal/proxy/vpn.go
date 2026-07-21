@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
 	"time"
+
+	"github.com/donbader/agent-sandbox/core/gateway/internal/vpn"
 )
 
 // VPNDialer dials outbound TCP connections through a configured VPN proxy.
 type VPNDialer struct {
-	profile VPNProfile
+	profile      VPNProfile
+	boundDialer  *net.Dialer // set for openvpn profiles after tunnel startup
 }
 
 // Dial connects to addr (host:port) through the VPN proxy using a background context.
@@ -29,6 +33,11 @@ func (d *VPNDialer) DialContext(ctx context.Context, network, addr string) (net.
 	switch d.profile.Type {
 	case "socks5":
 		return socks5DialContext(ctx, d.profile.Address, addr)
+	case "openvpn":
+		if d.boundDialer == nil {
+			return nil, fmt.Errorf("vpn: openvpn tunnel not initialised for profile (was StartOpenVPNTunnels called?)")
+		}
+		return d.boundDialer.DialContext(ctx, network, addr)
 	default:
 		return nil, fmt.Errorf("vpn: unsupported type %q", d.profile.Type)
 	}
@@ -36,12 +45,42 @@ func (d *VPNDialer) DialContext(ctx context.Context, network, addr string) (net.
 
 // BuildVPNDialers constructs a VPNDialer for each named profile.
 // Callers can look up a profile by name and call Dial or DialContext on the result.
+// For openvpn profiles, call StartOpenVPNTunnels after building to start the tunnels.
 func BuildVPNDialers(profiles map[string]VPNProfile) map[string]*VPNDialer {
 	out := make(map[string]*VPNDialer, len(profiles))
 	for name, p := range profiles {
 		out[name] = &VPNDialer{profile: p}
 	}
 	return out
+}
+
+// StartOpenVPNTunnels starts an OpenVPN daemon for every profile whose type is
+// "openvpn" and attaches a bound net.Dialer to the corresponding VPNDialer.
+// tun interfaces are assigned in sorted name order: tun0, tun1, …
+// Must be called once at gateway startup, before any traffic is proxied.
+func StartOpenVPNTunnels(dialers map[string]*VPNDialer) error {
+	// Collect openvpn profiles in deterministic (sorted) order so tun indices
+	// are stable across restarts.
+	names := make([]string, 0, len(dialers))
+	for name, d := range dialers {
+		if d.profile.Type == "openvpn" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	for i, name := range names {
+		tunIface := fmt.Sprintf("tun%d", i)
+		d := dialers[name]
+		if err := vpn.StartTunnel(name, vpn.ProfileConfig{
+			Type:      d.profile.Type,
+			ConfigB64: d.profile.ConfigB64,
+		}, tunIface); err != nil {
+			return fmt.Errorf("vpn profile %q: %w", name, err)
+		}
+		d.boundDialer = vpn.NewBoundDialer(tunIface, 15*time.Second)
+	}
+	return nil
 }
 
 // socks5Dial connects to targetAddr via a no-auth SOCKS5 proxy at proxyAddr.

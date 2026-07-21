@@ -152,6 +152,14 @@ func main() {
 	// Start TCP proxy
 	p := proxy.New(cfg)
 
+	// Start OpenVPN tunnels for any openvpn-type VPN profiles.
+	// socks5 profiles need no startup; openvpn ones launch a daemon and wait
+	// for the tun interface to come up. No-op when no openvpn profiles are present.
+	if err := p.StartVPNTunnels(); err != nil {
+		slog.Error("failed to start VPN tunnels", "error", err)
+		os.Exit(1)
+	}
+
 	// Generate CA and register MITM handler if MITM domains are configured
 	if len(cfg.MITMDomains) > 0 {
 		caCert, err := ca.GenerateAndStore(sharedCertPath, privateKeyPath)
@@ -206,6 +214,13 @@ func main() {
 			// Wire VPN dialing for MITM upstream connections.
 			if len(cfg.VPNProfiles) > 0 {
 				vpnDialers := proxy.BuildVPNDialers(cfg.VPNProfiles)
+				// Start openvpn tunnels for the MITM dialer set. Already-running
+				// tunnels (started above by p.StartVPNTunnels) are detected and
+				// skipped — only the bound dialer is populated.
+				if err := proxy.StartOpenVPNTunnels(vpnDialers); err != nil {
+					slog.Error("failed to start VPN tunnels for MITM", "error", err)
+					os.Exit(1)
+				}
 				mitmHandler.VPNDialFunc = func(serverName string) func(context.Context, string, string) (net.Conn, error) {
 					decision := egressFilter.AllowHost(serverName)
 					if decision.Rule == nil || decision.Rule.VPN == "" {

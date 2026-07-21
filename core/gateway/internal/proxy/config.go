@@ -53,8 +53,13 @@ type EgressRule struct {
 
 // VPNProfile defines a named VPN routing profile used by egress rules.
 type VPNProfile struct {
-	Type    string `yaml:"type"`    // proxy type: "socks5"
-	Address string `yaml:"address"` // proxy address (e.g., "vpn-container:1080")
+	Type string `yaml:"type"` // VPN type: "socks5" or "openvpn"
+
+	// socks5 fields
+	Address string `yaml:"address,omitempty"` // SOCKS5 proxy address (host:port)
+
+	// openvpn fields
+	ConfigB64 string `yaml:"config_b64,omitempty"` // base64-encoded .ovpn config file
 }
 
 // DenyGraphQL configures GraphQL mutation blocking for an egress rule.
