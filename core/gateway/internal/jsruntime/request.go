@@ -1,7 +1,9 @@
 package jsruntime
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 
@@ -69,6 +71,16 @@ func (rc *RequestContext) ToJSObject(vm *VM) *goja.Object {
 	_ = requestObj.Set("query", query)
 	// @ts-prop ctx.request.headers: readonly headers: Record<string, string>
 	_ = requestObj.Set("headers", headers)
+	var bodyStr string
+	if rc.Request.Body != nil {
+		bodyBytes, _ := io.ReadAll(rc.Request.Body)
+		bodyStr = string(bodyBytes)
+		// Always restore body (even on partial read) so downstream forwarding works.
+		rc.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}
+	// @ts-prop ctx.request.body: readonly body: string
+	_ = requestObj.Set("body", bodyStr)
+
 	// @ts-method ctx.request.setHeader(key: string, value: string): void
 	_ = requestObj.Set("setHeader", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
@@ -86,7 +98,7 @@ func (rc *RequestContext) ToJSObject(vm *VM) *goja.Object {
 
 	// Freeze read-only properties so assignment throws a TypeError in strict mode
 	// and is a no-op in sloppy mode (with a helpful error via defineProperty).
-	for _, prop := range []string{"method", "url", "host", "path", "query", "headers"} {
+	for _, prop := range []string{"method", "url", "host", "path", "query", "headers", "body"} {
 		_ = requestObj.DefineDataProperty(prop, requestObj.Get(prop), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
