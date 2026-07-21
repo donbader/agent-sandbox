@@ -71,8 +71,11 @@ function checkDenyGraphQL(ctx: GatewayContext, denyGraphql: { mutations?: string
   if (body) {
     for (const m of mutations) {
       const mLower = m.toLowerCase();
-      // Match mutation keyword or operationName in JSON body
-      if (body.toLowerCase().includes(mLower)) return m;
+      // Word-boundary check: avoids false positives where a blocked mutation
+      // name is a substring of a longer name (e.g. "createRepository" inside
+      // "createRepositoryFromTemplate").
+      const re = new RegExp("(^|[^a-zA-Z])" + mLower + "([^a-zA-Z]|$)", "i");
+      if (re.test(body)) return m;
     }
   }
 

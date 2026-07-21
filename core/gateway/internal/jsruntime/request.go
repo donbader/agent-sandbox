@@ -73,12 +73,10 @@ func (rc *RequestContext) ToJSObject(vm *VM) *goja.Object {
 	_ = requestObj.Set("headers", headers)
 	var bodyStr string
 	if rc.Request.Body != nil {
-		bodyBytes, err := io.ReadAll(rc.Request.Body)
-		if err == nil {
-			bodyStr = string(bodyBytes)
-			// Replace the body so downstream forwarding still works
-			rc.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		}
+		bodyBytes, _ := io.ReadAll(rc.Request.Body)
+		bodyStr = string(bodyBytes)
+		// Always restore body (even on partial read) so downstream forwarding works.
+		rc.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 	// @ts-prop ctx.request.body: readonly body: string
 	_ = requestObj.Set("body", bodyStr)
