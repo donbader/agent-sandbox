@@ -96,7 +96,13 @@ Block specific GraphQL mutations while allowing the host. Useful when `deny_path
       - "deleteBranch"
 ```
 
-The gateway inspects POST requests to paths containing `graphql`, extracts the mutation name from the `operationName` field (preferred) or the `query` field via regex, and returns 403 if it matches the deny list. Matching is case-insensitive.
+The gateway inspects POST requests to paths containing `graphql`, extracts all candidate mutation names from the request body, and returns 403 if any of them match the deny list. Matching is case-insensitive. Candidate names are extracted from:
+
+1. The `operationName` JSON field (if present)
+2. The named operation in the `query` string (e.g. `mutation PullRequestMerge(...)` → `PullRequestMerge`)
+3. The first field name inside the mutation body (e.g. `{ mergePullRequest(...) }` → `mergePullRequest`)
+
+This ensures mutations are blocked regardless of how the client names the operation. For example, `gh pr merge` uses `mutation PullRequestMerge(...){mergePullRequest(...)}` — the deny rule `mergePullRequest` matches the field name even though the operation name differs.
 
 If the request body cannot be parsed as JSON, the request is passed through (fail open).
 
