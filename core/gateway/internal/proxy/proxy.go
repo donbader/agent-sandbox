@@ -20,7 +20,8 @@ type Proxy struct {
 	httpHandler *HTTPHandler
 	listener    net.Listener
 	egress      *EgressFilter
-	sem         chan struct{} // connection semaphore to cap concurrency
+	vpnDialers  map[string]*VPNDialer // keyed by profile name
+	sem         chan struct{}          // connection semaphore to cap concurrency
 }
 
 // New creates a new proxy with the given config.
@@ -30,9 +31,10 @@ func New(cfg *Config) *Proxy {
 		maxConns = 1024
 	}
 	return &Proxy{
-		config: cfg,
-		egress: NewEgressFilter(cfg.EgressRules),
-		sem:    make(chan struct{}, maxConns),
+		config:     cfg,
+		egress:     NewEgressFilter(cfg.EgressRules),
+		vpnDialers: BuildVPNDialers(cfg.VPNProfiles),
+		sem:        make(chan struct{}, maxConns),
 	}
 }
 
@@ -168,15 +170,39 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 }
 
 // passthrough pipes the connection directly to the destination on port 443.
+// If the matched egress rule specifies a VPN profile, the connection is dialled
+// through that profile's proxy instead of directly.
+//
 // NOTE: Since iptables DNAT rewrites the destination, we lose the original port.
 // This means TLS on non-443 ports will be dialed on 443 instead. This is acceptable
 // because nearly all TLS traffic uses 443. Non-standard ports can be supported later
 // via SO_ORIGINAL_DST or port-specific iptables rules.
 func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName string) {
 	destAddr := net.JoinHostPort(serverName, "443")
-	serverConn, err := net.DialTimeout("tcp", destAddr, 10*time.Second)
-	if err != nil {
-		slog.Error("upstream connection failed", "host", destAddr, "error", err)
+
+	var serverConn net.Conn
+	var dialErr error
+
+	// Check whether this host should be routed through a VPN profile.
+	if len(p.vpnDialers) > 0 {
+		decision := p.egress.AllowHost(serverName)
+		if decision.Rule != nil && decision.Rule.VPN != "" {
+			if dialer, ok := p.vpnDialers[decision.Rule.VPN]; ok {
+				slog.Debug("passthrough via vpn", "host", serverName, "vpn_profile", decision.Rule.VPN)
+				serverConn, dialErr = dialer.Dial("tcp", destAddr)
+			} else {
+				// Profile was validated at load time, so this should never happen.
+				slog.Error("vpn profile not found", "profile", decision.Rule.VPN, "host", serverName)
+			}
+		}
+	}
+
+	// Fall back to direct dial if no VPN applies.
+	if serverConn == nil && dialErr == nil {
+		serverConn, dialErr = net.DialTimeout("tcp", destAddr, 10*time.Second)
+	}
+	if dialErr != nil {
+		slog.Error("upstream connection failed", "host", destAddr, "error", dialErr)
 		return
 	}
 	defer func() { _ = serverConn.Close() }()

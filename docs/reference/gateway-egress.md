@@ -31,6 +31,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 | `middlewares` | `[]string` | TypeScript middleware scripts. Implies MITM. |
 | `target` | `string` | Forwarding destination (`host:port`) for internal/HTTP services |
 | `network` | `string` | Compose network to attach gateway to (for reaching internal services) |
+| `vpn` | `string` | VPN profile name. Routes matching traffic through the named proxy. |
 
 ### Field Responsibilities
 
@@ -41,6 +42,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 | Request modification | `headers`, `deny_paths`, `deny_graphql`, `middlewares` | Inject creds or block paths/mutations at L7 (requires MITM) |
 | Routing | `target` | Where to forward traffic (default: passthrough on :443) |
 | Infrastructure | `network` | Docker network attachment for compose generation |
+| VPN routing | `vpn` | Route traffic through a named VPN proxy (SOCKS5) |
 
 ## Host Patterns
 
@@ -249,5 +251,69 @@ gateway:
       network: rkgw-external
       headers:
         x-api-key: "${RKGW_API_KEY}"
+    - hosts: ["*"]
+```
+
+## VPN Profiles
+
+Route specific egress traffic through a VPN proxy by defining named profiles and referencing them from egress rules.
+
+### Configuration
+
+```yaml
+gateway:
+  vpn_profiles:
+    corp-vpn:
+      type: socks5
+      address: "vpn-container:1080"
+
+  egress:
+    - hosts: ["internal.corp.com", "*.corp.internal"]
+      vpn: corp-vpn
+    - hosts: ["api.github.com"]
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
+    - hosts: ["*"]
+```
+
+### VPN Profile Fields
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | `string` | **Required.** Proxy protocol. Only `socks5` is supported. |
+| `address` | `string` | **Required.** Proxy address (`host:port`, e.g. `"vpn-container:1080"`). |
+
+### How It Works
+
+- Traffic to hosts matched by a rule with `vpn:` set is dialled through the named SOCKS5 proxy instead of directly.
+- Works for both passthrough TLS connections and MITM-terminated connections.
+- The SOCKS5 proxy resolves the destination hostname — the gateway never resolves it locally, which preserves split-tunnel DNS semantics.
+- Only no-authentication SOCKS5 is supported. Configure your VPN container to accept unauthenticated connections from the sandbox network.
+
+### Constraints
+
+- `vpn` cannot be combined with `deny: true`. Use separate rules.
+- VPN profile names must be defined in `vpn_profiles` before they can be referenced by egress rules.
+- Each profile name must be unique.
+
+### Example: split-tunnel with internal services
+
+```yaml
+gateway:
+  vpn_profiles:
+    office-vpn:
+      type: socks5
+      address: "gluetun:1080"
+
+  egress:
+    - hosts: ["*.internal.example.com"]
+      vpn: office-vpn
+    - hosts: ["jira.example.com", "confluence.example.com"]
+      vpn: office-vpn
+      headers:
+        Authorization: "Bearer ${JIRA_TOKEN}"
+    - hosts: ["api.github.com"]
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
     - hosts: ["*"]
 ```

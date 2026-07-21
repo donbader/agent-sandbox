@@ -5,6 +5,7 @@ package mitm
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -38,6 +39,12 @@ type Handler struct {
 	// Returns true if the request should be blocked.
 	// Set by the gateway main.go wiring after construction.
 	DenyGraphQLChecker func(host string, req *http.Request) bool
+
+	// VPNDialFunc returns a custom dial function for the given server name, or nil
+	// to use the default direct TCP dial. Used to route MITM upstream connections
+	// through a VPN proxy for hosts that match an egress rule with vpn: set.
+	// Set by the gateway main.go wiring after construction.
+	VPNDialFunc func(serverName string) func(network, addr string) (net.Conn, error)
 }
 
 // NewHandler creates a MITM handler for the given domains.
@@ -249,6 +256,8 @@ func applyMiddlewareWithContext(req *http.Request) (*gateway.MiddlewareContext, 
 
 // getTransport returns a cached *http.Transport for the given serverName, creating
 // one on first use. Reusing transports enables TCP/TLS connection pooling.
+// If a VPNDialFunc is configured and returns a dialer for this serverName, the
+// transport will use it to route upstream connections through the VPN proxy.
 func (h *Handler) getTransport(serverName string) *http.Transport {
 	if v, ok := h.transportCache.Load(serverName); ok {
 		t, _ := v.(*http.Transport)
@@ -261,6 +270,16 @@ func (h *Handler) getTransport(serverName string) *http.Transport {
 			InsecureSkipVerify: h.insecureUpstream, //nolint:gosec // test-only
 		},
 		DisableCompression: true,
+	}
+
+	// Wire VPN dialer if this host's egress rule specifies a VPN profile.
+	if h.VPNDialFunc != nil {
+		if dialFn := h.VPNDialFunc(serverName); dialFn != nil {
+			t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialFn(network, addr)
+			}
+			slog.Debug("mitm: upstream dial via vpn", "host", serverName)
+		}
 	}
 
 	actual, _ := h.transportCache.LoadOrStore(serverName, t)

@@ -10,14 +10,15 @@ import (
 
 // Config holds gateway configuration.
 type Config struct {
-	Listen       string        `yaml:"listen"`        // TCP listen address (e.g., ":8443")
-	DNSListen    string        `yaml:"dns_listen"`    // DNS listen address (e.g., ":53")
-	MaxConns     int           `yaml:"max_conns"`     // max concurrent connections (0 = default 1024)
-	MITMDomains  []string      `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
-	HTTPServices []HTTPService `yaml:"http_services"` // plain HTTP services to proxy
-	PortForwards []PortForward `yaml:"port_forwards"` // TCP port forwards to agent container
-	AuthHeaders  []AuthHeader  `yaml:"auth_headers"`  // header injection rules from config
-	EgressRules  []EgressRule  `yaml:"egress_rules"`  // ordered egress access control rules
+	Listen       string                `yaml:"listen"`        // TCP listen address (e.g., ":8443")
+	DNSListen    string                `yaml:"dns_listen"`    // DNS listen address (e.g., ":53")
+	MaxConns     int                   `yaml:"max_conns"`     // max concurrent connections (0 = default 1024)
+	MITMDomains  []string              `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
+	HTTPServices []HTTPService         `yaml:"http_services"` // plain HTTP services to proxy
+	PortForwards []PortForward         `yaml:"port_forwards"` // TCP port forwards to agent container
+	AuthHeaders  []AuthHeader          `yaml:"auth_headers"`  // header injection rules from config
+	EgressRules  []EgressRule          `yaml:"egress_rules"`  // ordered egress access control rules
+	VPNProfiles  map[string]VPNProfile `yaml:"vpn_profiles,omitempty"` // named VPN profiles referenced by egress rules
 }
 
 // AuthHeader defines a header to inject on requests to a specific domain.
@@ -41,12 +42,19 @@ type PortForward struct {
 
 // EgressRule defines an egress access control rule at the gateway runtime level.
 type EgressRule struct {
-	Hosts       []string          `yaml:"hosts"`                 // host patterns (domain globs, CIDRs, "*")
-	Deny        bool              `yaml:"deny,omitempty"`        // if true, block matching traffic
-	Headers     map[string]string `yaml:"headers,omitempty"`     // headers to inject (implies allow + MITM)
-	DenyPaths   []string          `yaml:"deny_paths,omitempty"`  // URL path patterns to block
+	Hosts       []string          `yaml:"hosts"`                  // host patterns (domain globs, CIDRs, "*")
+	Deny        bool              `yaml:"deny,omitempty"`         // if true, block matching traffic
+	Headers     map[string]string `yaml:"headers,omitempty"`      // headers to inject (implies allow + MITM)
+	DenyPaths   []string          `yaml:"deny_paths,omitempty"`   // URL path patterns to block
 	DenyGraphQL *DenyGraphQL      `yaml:"deny_graphql,omitempty"` // block specific GraphQL mutations
-	Target      string            `yaml:"target,omitempty"`      // forwarding destination (host:port)
+	Target      string            `yaml:"target,omitempty"`       // forwarding destination (host:port)
+	VPN         string            `yaml:"vpn,omitempty"`          // VPN profile name to route traffic through
+}
+
+// VPNProfile defines a named VPN routing profile used by egress rules.
+type VPNProfile struct {
+	Type    string `yaml:"type"`    // proxy type: "socks5"
+	Address string `yaml:"address"` // proxy address (e.g., "vpn-container:1080")
 }
 
 // DenyGraphQL configures GraphQL mutation blocking for an egress rule.
@@ -83,5 +91,39 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.DNSListen = ":53"
 	}
 
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid config %s: %w", path, err)
+	}
+
 	return &cfg, nil
+}
+
+// validate checks cross-field constraints that YAML unmarshalling cannot enforce.
+func (cfg *Config) validate() error {
+	// Validate VPN profile definitions.
+	for name, profile := range cfg.VPNProfiles {
+		if profile.Type == "" {
+			return fmt.Errorf("vpn_profiles[%s]: type is required", name)
+		}
+		if profile.Type != "socks5" {
+			return fmt.Errorf("vpn_profiles[%s]: unsupported type %q (supported: socks5)", name, profile.Type)
+		}
+		if profile.Address == "" {
+			return fmt.Errorf("vpn_profiles[%s]: address is required", name)
+		}
+	}
+
+	// Validate that egress rules reference defined VPN profiles.
+	for i, rule := range cfg.EgressRules {
+		if rule.VPN == "" {
+			continue
+		}
+		if _, ok := cfg.VPNProfiles[rule.VPN]; !ok {
+			return fmt.Errorf("egress_rules[%d]: vpn profile %q is not defined in vpn_profiles", i, rule.VPN)
+		}
+		if rule.Deny {
+			return fmt.Errorf("egress_rules[%d]: vpn cannot be combined with deny: true", i)
+		}
+	}
+	return nil
 }

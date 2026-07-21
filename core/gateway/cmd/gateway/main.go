@@ -201,6 +201,22 @@ func main() {
 			}
 				return false
 			}
+
+			// Wire VPN dialing for MITM upstream connections.
+			if len(cfg.VPNProfiles) > 0 {
+				vpnDialers := proxy.BuildVPNDialers(cfg.VPNProfiles)
+				mitmHandler.VPNDialFunc = func(serverName string) func(string, string) (net.Conn, error) {
+					decision := egressFilter.AllowHost(serverName)
+					if decision.Rule == nil || decision.Rule.VPN == "" {
+						return nil
+					}
+					dialer, ok := vpnDialers[decision.Rule.VPN]
+					if !ok {
+						return nil
+					}
+					return dialer.Dial
+				}
+			}
 		}
 
 		p.RegisterHandler(mitmHandler)
