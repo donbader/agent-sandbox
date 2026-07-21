@@ -192,7 +192,7 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 		gatewaySvc["environment"] = gatewayEnv
 	}
 	// If VPN profiles are configured, expose the TUN device so OpenVPN can create tunnels.
-	if len(cfg.Gateway.VPNProfiles) > 0 {
+	if hasOpenvpnProfile(cfg.Gateway.VPNProfiles) {
 		gatewaySvc["devices"] = []string{"/dev/net/tun:/dev/net/tun"}
 	}
 	// Attach extra networks from egress rules to the gateway service.

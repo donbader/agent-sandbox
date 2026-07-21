@@ -89,19 +89,24 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 		"--script-security", "2",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
+		_ = os.Remove(cfgPath) // safe: daemon failed to start
 		return fmt.Errorf("openvpn start failed: %w\n%s", err, out)
 	}
 
-	// Poll until the tun interface appears and is UP.
+	// Poll until the tun interface appears and is UP. The config file is deleted
+	// once the interface comes up (openvpn has read it by then) so credentials
+	// don't persist on disk longer than necessary.
 	deadline := time.Now().Add(startupTimeout)
 	for time.Now().Before(deadline) {
 		if ifaceIsUp(tunIface) {
+			_ = os.Remove(cfgPath) // openvpn has fully read the config, safe to delete
 			slog.Info("vpn tunnel started", "profile", name, "iface", tunIface)
 			return nil
 		}
 		time.Sleep(pollInterval)
 	}
 
+	_ = os.Remove(cfgPath) // clean up even on timeout
 	return fmt.Errorf("tun interface %q did not come up within %s — check %s", tunIface, startupTimeout, logPath)
 }
 

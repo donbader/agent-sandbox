@@ -3,6 +3,7 @@
 package vpn
 
 import (
+	"log/slog"
 	"net"
 	"syscall"
 	"time"
@@ -16,11 +17,13 @@ func newBoundDialer(iface string, timeout time.Duration) *net.Dialer {
 		Timeout: timeout,
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				// Non-fatal: a transient failure here means the connection falls
-				// back to the default route. SetsockoptString fails immediately if
-				// the tun interface hasn't fully initialised yet; the idempotency
-				// check in startTunnel ensures we only reach here when it is UP.
-				_ = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface)
+				if err := syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface); err != nil {
+					// Non-fatal, but important to surface: when SO_BINDTODEVICE fails
+					// the connection silently falls back to the default route, bypassing
+					// the VPN. This can happen if CAP_NET_RAW is unavailable.
+					slog.Warn("SO_BINDTODEVICE failed, connection will use default route",
+						"iface", iface, "err", err)
+				}
 			})
 		},
 	}
