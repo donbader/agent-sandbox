@@ -60,29 +60,29 @@ func socks5Dial(proxyAddr, targetAddr string) (net.Conn, error) {
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: set deadline: %w", err)
 	}
 
 	// --- Greeting ---
 	// Request no-auth (method 0x00).
 	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: send greeting: %w", err)
 	}
 
 	// Read server method selection.
 	resp := make([]byte, 2)
 	if _, err := io.ReadFull(conn, resp); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: read method response: %w", err)
 	}
 	if resp[0] != 0x05 {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: unexpected version %d in method response", resp[0])
 	}
 	if resp[1] != 0x00 {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: proxy requires authentication (method 0x%02x), only no-auth is supported", resp[1])
 	}
 
@@ -103,7 +103,7 @@ func socks5Dial(proxyAddr, targetAddr string) (net.Conn, error) {
 	req = append(req, byte(port>>8), byte(port)) //nolint:gosec // port fits in uint16
 
 	if _, err := conn.Write(req); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: send connect request: %w", err)
 	}
 
@@ -111,27 +111,27 @@ func socks5Dial(proxyAddr, targetAddr string) (net.Conn, error) {
 	// Minimum reply header: VER(1) REP(1) RSV(1) ATYP(1) = 4 bytes.
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(conn, header); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: read reply header: %w", err)
 	}
 	if header[0] != 0x05 {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: unexpected version %d in reply", header[0])
 	}
 	if header[1] != 0x00 {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: connect failed: %s", socks5ReplyText(header[1]))
 	}
 
 	// Consume the bound address from the reply so the connection is ready to use.
 	if err := socks5DrainBoundAddr(conn, header[3]); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: drain bound address: %w", err)
 	}
 
 	// Clear deadline — caller controls timeouts from here.
 	if err := conn.SetDeadline(time.Time{}); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("socks5: clear deadline: %w", err)
 	}
 

@@ -161,12 +161,12 @@ func TestSOCKS5Dial_Success(t *testing.T) {
 	// Start a mock SOCKS5 server that accepts a connection to "example.com:443"
 	targetSent := make(chan string, 1)
 	ln := startMockSOCKS5Server(t, socks5Reply{code: 0x00}, targetSent)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	conn, err := socks5Dial(ln.Addr().String(), "example.com:443")
 	require.NoError(t, err)
 	require.NotNil(t, conn)
-	conn.Close()
+	_ = conn.Close()
 
 	// Verify the proxy received the correct destination.
 	assert.Equal(t, "example.com:443", <-targetSent)
@@ -176,7 +176,7 @@ func TestSOCKS5Dial_Success(t *testing.T) {
 // requires authentication (returns method 0xFF = no acceptable method).
 func TestSOCKS5Dial_AuthRequired(t *testing.T) {
 	ln := startMockSOCKS5Server(t, socks5Reply{rejectAuth: true}, nil)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	_, err := socks5Dial(ln.Addr().String(), "example.com:443")
 	require.Error(t, err)
@@ -187,7 +187,7 @@ func TestSOCKS5Dial_AuthRequired(t *testing.T) {
 // when the proxy reports connection refused (reply code 0x05).
 func TestSOCKS5Dial_ConnectRefused(t *testing.T) {
 	ln := startMockSOCKS5Server(t, socks5Reply{code: 0x05}, nil)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	_, err := socks5Dial(ln.Addr().String(), "example.com:443")
 	require.Error(t, err)
@@ -212,12 +212,12 @@ func TestSOCKS5Dial_ProxyUnreachable(t *testing.T) {
 // TestVPNDialer_Dial_Socks5 verifies that VPNDialer.Dial routes through SOCKS5.
 func TestVPNDialer_Dial_Socks5(t *testing.T) {
 	ln := startMockSOCKS5Server(t, socks5Reply{code: 0x00}, nil)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	d := &VPNDialer{profile: VPNProfile{Type: "socks5", Address: ln.Addr().String()}}
 	conn, err := d.Dial("tcp", "example.com:443")
 	require.NoError(t, err)
-	conn.Close()
+	_ = conn.Close()
 }
 
 // TestVPNDialer_Dial_UnsupportedType verifies VPNDialer returns an error for unknown types.
@@ -257,24 +257,24 @@ func TestSOCKS5_ReplyText(t *testing.T) {
 // domain-name BND.ADDR (ATYP=0x03) in the SOCKS5 reply.
 func TestSOCKS5Dial_DomainBoundAddr(t *testing.T) {
 	ln := startMockSOCKS5Server(t, socks5Reply{code: 0x00, bindAtyp: 0x03}, nil)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	conn, err := socks5Dial(ln.Addr().String(), "example.com:443")
 	require.NoError(t, err)
 	require.NotNil(t, conn)
-	conn.Close()
+	_ = conn.Close()
 }
 
 // TestSOCKS5Dial_IPv6BoundAddr verifies that socks5Dial correctly drains an
 // IPv6 BND.ADDR (ATYP=0x04) in the SOCKS5 reply.
 func TestSOCKS5Dial_IPv6BoundAddr(t *testing.T) {
 	ln := startMockSOCKS5Server(t, socks5Reply{code: 0x00, bindAtyp: 0x04}, nil)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	conn, err := socks5Dial(ln.Addr().String(), "example.com:443")
 	require.NoError(t, err)
 	require.NotNil(t, conn)
-	conn.Close()
+	_ = conn.Close()
 }
 
 // socks5Reply configures what the mock SOCKS5 server sends back.
@@ -297,7 +297,7 @@ func startMockSOCKS5Server(t *testing.T, reply socks5Reply, targetOut chan<- str
 		if err != nil {
 			return // listener closed
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// --- Greeting ---
 		greeting := make([]byte, 3)
