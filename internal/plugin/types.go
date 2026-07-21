@@ -11,7 +11,8 @@ import (
 // PluginDef represents a parsed plugin.yaml file.
 type PluginDef struct {
 	Name           string                  `yaml:"name"`
-	Requires       []string                `yaml:"requires"`
+	Version        string                  `yaml:"version"` // semver, e.g. "1.2.0"
+	Requires       []string                `yaml:"requires"` // e.g. ["agent-docker", "mcp-oauth>=1.0.0"]
 	Functions      map[string]FunctionDef  `yaml:"functions"`
 	Assets         []AssetEntry            `yaml:"assets"`
 	Options        map[string]OptionSchema `yaml:"options"`
@@ -158,6 +159,7 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 	// only has templates inside string values (valid YAML).
 	var full struct {
 		Name        string                  `yaml:"name"`
+		Version     string                  `yaml:"version"`
 		Requires    []string                `yaml:"requires"`
 		Functions   map[string]FunctionDef  `yaml:"functions"`
 		Assets      []AssetEntry            `yaml:"assets"`
@@ -179,6 +181,7 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 		}
 		return &PluginDef{
 			Name:           full.Name,
+			Version:        full.Version,
 			Requires:       full.Requires,
 			Functions:      full.Functions,
 			Assets:         full.Assets,
@@ -193,6 +196,7 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 
 	var meta struct {
 		Name      string                  `yaml:"name"`
+		Version   string                  `yaml:"version"`
 		Requires  []string                `yaml:"requires"`
 		Functions map[string]FunctionDef  `yaml:"functions"`
 		Assets    []AssetEntry            `yaml:"assets"`
@@ -210,6 +214,7 @@ func ParsePluginYAML(data []byte) (*PluginDef, error) {
 
 	return &PluginDef{
 		Name:           meta.Name,
+		Version:        meta.Version,
 		Requires:       meta.Requires,
 		Functions:      meta.Functions,
 		Assets:         meta.Assets,
