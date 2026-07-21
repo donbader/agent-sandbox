@@ -26,13 +26,15 @@ func makeDenyGraphQLChecker(deniedMutations []string) func(host string, req *htt
 			return false
 		}
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		mutationName := ExtractGraphQLMutation(bodyBytes)
-		if mutationName == "" {
+		mutationNames := ExtractGraphQLMutationNames(bodyBytes)
+		if len(mutationNames) == 0 {
 			return false
 		}
 		for _, denied := range deniedMutations {
-			if strings.EqualFold(denied, mutationName) {
-				return true
+			for _, name := range mutationNames {
+				if strings.EqualFold(denied, name) {
+					return true
+				}
 			}
 		}
 		return false
@@ -106,6 +108,27 @@ func TestDenyGraphQLChecker_CaseInsensitiveMatch(t *testing.T) {
 	req := mustNewRequest(t, http.MethodPost, "https://api.github.com/graphql", body)
 
 	assert.True(t, checker("api.github.com", req), "mutation matching should be case-insensitive")
+}
+
+func TestDenyGraphQLChecker_BlocksFieldNameWhenOperationNameDiffers(t *testing.T) {
+	// This is the exact gh CLI scenario: operation name is "PullRequestMerge"
+	// but the deny list targets the field name "mergePullRequest".
+	checker := makeDenyGraphQLChecker([]string{"mergePullRequest"})
+
+	body := `{"query":"mutation PullRequestMerge($input:MergePullRequestInput!){mergePullRequest(input: $input){clientMutationId}}"}`
+	req := mustNewRequest(t, http.MethodPost, "https://api.github.com/graphql", body)
+
+	assert.True(t, checker("api.github.com", req), "should block by field name even when operation name differs")
+}
+
+func TestDenyGraphQLChecker_BlocksEnableAutoMergeViaFieldName(t *testing.T) {
+	// gh CLI auto-merge uses a different operation name too
+	checker := makeDenyGraphQLChecker([]string{"enablePullRequestAutoMerge"})
+
+	body := `{"query":"mutation EnableAutoMerge($input:EnablePullRequestAutoMergeInput!){enablePullRequestAutoMerge(input: $input){clientMutationId}}"}`
+	req := mustNewRequest(t, http.MethodPost, "https://api.github.com/graphql", body)
+
+	assert.True(t, checker("api.github.com", req), "should block enablePullRequestAutoMerge by field name")
 }
 
 // TestHandler_DenyGraphQLChecker_Wiring verifies that Handler.DenyGraphQLChecker
