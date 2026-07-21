@@ -16,11 +16,11 @@ func newBoundDialer(iface string, timeout time.Duration) *net.Dialer {
 		Timeout: timeout,
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				if err := syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface); err != nil {
-					// Non-fatal: log but continue. The connection will use the default route.
-					// This can happen briefly while the tun interface is still initialising.
-					_ = err
-				}
+				// Non-fatal: a transient failure here means the connection falls
+				// back to the default route. SetsockoptString fails immediately if
+				// the tun interface hasn't fully initialised yet; the idempotency
+				// check in startTunnel ensures we only reach here when it is UP.
+				_ = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface)
 			})
 		},
 	}
