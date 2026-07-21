@@ -37,6 +37,7 @@ interface GatewayRequest {
   readonly path: string;
   readonly query: Record<string, string>;
   readonly headers: Record<string, string>;
+  readonly body: string;
   setHeader(key: string, value: string): void;
   setPath(newPath: string): void;
 }
