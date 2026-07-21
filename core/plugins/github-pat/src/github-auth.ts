@@ -5,7 +5,7 @@
  *
  * Options:
  *   token: string              — GitHub PAT (injected as Basic auth)
- *   deny_paths?: string[]      — e.g. ["PUT /repos/*/*/pulls/*/merge"]
+ *   deny_paths?: string[]      — e.g. ["PUT /repos/my-org/my-repo/pulls/1/merge"]
  *   deny_graphql?: { mutations?: string[] }  — blocks GraphQL mutations by name
  */
 
