@@ -279,8 +279,8 @@ installations:
 ```
 
 - **`deny_paths`** (array, optional) — URL path patterns to block. Format: `METHOD /path/glob` or `/path/glob` (blocks all methods). The gateway returns 403 for matching requests.
-- **`deny_graphql`** (object, optional) — Block specific GraphQL mutations by name. The gateway inspects the `query` field in POST requests to `/graphql` and returns 403 if a blocked mutation is detected.
-  - `mutations` (array) — List of GraphQL mutation operation names to block (e.g. `mergePullRequest`, `deleteBranch`).
+- **`deny_graphql`** (object, optional) — Block specific GraphQL mutations by name. The gateway inspects POST requests to `/graphql`, extracts all candidate mutation names (from `operationName`, the named operation, and the first field inside the mutation body), and returns 403 if any match the deny list. Matching is case-insensitive.
+  - `mutations` (array) — List of GraphQL mutation names to block (e.g. `mergePullRequest`, `deleteBranch`). Names are matched against the operation name **and** the first field name, so mutations are blocked regardless of how the client names the operation.
 
 > **Tip:** Use both `deny_paths` and `deny_graphql` together to prevent bypass. For example, blocking `PUT /repos/*/pulls/*/merge` alone still allows merging via the `mergePullRequest` GraphQL mutation.
 

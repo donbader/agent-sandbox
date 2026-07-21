@@ -158,7 +158,7 @@ gateway:
           - "deleteBranch"
 ```
 
-The gateway inspects POST requests to paths containing `graphql`, extracts the mutation name from `operationName` or the `query` field, and returns 403 if it matches the deny list. Matching is case-insensitive. Requires MITM (auto-enabled).
+The gateway inspects POST requests to paths containing `graphql`, extracts all candidate mutation names (from `operationName`, the named operation, and the first field inside the mutation body), and returns 403 if any match the deny list. Matching is case-insensitive. Requires MITM (auto-enabled).
 
 > **Deprecation note:** `gateway.services` is deprecated but still supported for backward compatibility. It is converted to equivalent egress rules internally. New configs should use `gateway.egress`. See [Gateway Egress Reference](reference/gateway-egress.md) for full details.
 
