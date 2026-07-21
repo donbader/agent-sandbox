@@ -31,6 +31,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 | `middlewares` | `[]string` | TypeScript middleware scripts. Implies MITM. |
 | `target` | `string` | Forwarding destination (`host:port`) for internal/HTTP services |
 | `network` | `string` | Compose network to attach gateway to (for reaching internal services) |
+| `vpn` | `string` | VPN profile name. Routes matching traffic through the named proxy. |
 
 ### Field Responsibilities
 
@@ -41,6 +42,7 @@ Rules are evaluated **in order**. First match wins. No match = **implicit deny**
 | Request modification | `headers`, `deny_paths`, `deny_graphql`, `middlewares` | Inject creds or block paths/mutations at L7 (requires MITM) |
 | Routing | `target` | Where to forward traffic (default: passthrough on :443) |
 | Infrastructure | `network` | Docker network attachment for compose generation |
+| VPN routing | `vpn` | Route traffic through a named VPN profile (`socks5` or `openvpn`) |
 
 ## Host Patterns
 
@@ -249,5 +251,110 @@ gateway:
       network: rkgw-external
       headers:
         x-api-key: "${RKGW_API_KEY}"
+    - hosts: ["*"]
+```
+
+## VPN Profiles
+
+Route specific egress traffic through a VPN proxy by defining named profiles and referencing them from egress rules.
+
+### Configuration
+
+```yaml
+gateway:
+  vpn_profiles:
+    corp-vpn:
+      type: socks5
+      address: "vpn-container:1080"
+
+  egress:
+    - hosts: ["internal.corp.com", "*.corp.internal"]
+      vpn: corp-vpn
+    - hosts: ["api.github.com"]
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
+    - hosts: ["*"]
+```
+
+### VPN Profile Fields
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `type` | `string` | **Required.** VPN type: `socks5` or `openvpn`. |
+| `address` | `string` | **Required for `socks5`.** Proxy address (`host:port`, e.g. `"vpn-container:1080"`). |
+| `config_b64` | `string` | **Required for `openvpn`.** Base64-encoded `.ovpn` client config file. Use a `${VAR}` reference to keep secrets out of the config file (e.g. `config_b64: ${CORP_VPN_OVPN_B64}`). Generate with: `base64 -w0 < client.ovpn`. |
+
+### Type: socks5
+
+Routes traffic through a SOCKS5 proxy. The proxy must already be running and reachable from the gateway container.
+
+- Traffic is dialled through the SOCKS5 proxy instead of directly.
+- The proxy resolves the destination hostname — preserving split-tunnel DNS semantics.
+- Only no-authentication SOCKS5 is supported.
+- Any VPN client that exposes a SOCKS5 listener works (gluetun, redsocks, 3proxy, Dante, etc.).
+
+### Type: openvpn
+
+Starts an OpenVPN daemon **inside the gateway container** at startup and routes matching traffic through the tunnel via Linux `SO_BINDTODEVICE`.
+
+- The gateway image is automatically built with `openvpn` and `iproute2` when any `openvpn` profile is configured.
+- The Docker Compose gateway service automatically gains `devices: [/dev/net/tun:/dev/net/tun]`.
+- Each profile is assigned a deterministic tun interface (`tun0` for the first alphabetical profile, `tun1` for the second, etc.).
+- Tunnel startup is **blocking** — the gateway does not begin proxying until all `openvpn` tunnels are up or until the 60-second timeout is reached.
+- Works with Pritunl, AWS Client VPN, and any standard OpenVPN server.
+
+**Encode your .ovpn file:**
+```bash
+base64 -w0 < client.ovpn   # Linux
+base64 -i client.ovpn      # macOS
+```
+
+**Example (Pritunl/OpenVPN):**
+```yaml
+gateway:
+  vpn_profiles:
+    corp:
+      type: openvpn
+      config_b64: ${CORP_VPN_OVPN_B64}  # base64-encoded .ovpn file
+
+  egress:
+    - hosts: ["agw.playground.straitsx.ai"]
+      vpn: corp
+      headers:
+        Authorization: "Bearer ${AGW_BEARER_TOKEN}"
+    - hosts: ["*"]
+```
+
+**.env:**
+```bash
+CORP_VPN_OVPN_B64=$(base64 -w0 < ~/Downloads/client.ovpn)
+AGW_BEARER_TOKEN=eyJhbGc...
+```
+
+### Constraints
+
+- `vpn` cannot be combined with `deny: true`. Use separate rules.
+- VPN profile names must be defined in `vpn_profiles` before they can be referenced by egress rules.
+- Each profile name must be unique.
+
+### Example: split-tunnel with internal services
+
+```yaml
+gateway:
+  vpn_profiles:
+    office-vpn:
+      type: socks5
+      address: "gluetun:1080"
+
+  egress:
+    - hosts: ["*.internal.example.com"]
+      vpn: office-vpn
+    - hosts: ["jira.example.com", "confluence.example.com"]
+      vpn: office-vpn
+      headers:
+        Authorization: "Bearer ${JIRA_TOKEN}"
+    - hosts: ["api.github.com"]
+      headers:
+        Authorization: "Bearer ${GITHUB_PAT}"
     - hosts: ["*"]
 ```

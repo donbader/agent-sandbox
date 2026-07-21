@@ -86,8 +86,20 @@ type RuntimeConfig struct {
 
 // GatewayConfig holds gateway proxy configuration.
 type GatewayConfig struct {
-	Egress   []EgressRule          `yaml:"egress" json:"egress,omitempty" jsonschema:"title=egress,description=Ordered egress access control rules. First match wins. No match = deny."`
-	Services []GatewayServiceEntry `yaml:"services" json:"services,omitempty" jsonschema:"title=services,description=DEPRECATED: use gateway.egress instead. External services proxied through the gateway."`
+	Egress      []EgressRule          `yaml:"egress" json:"egress,omitempty" jsonschema:"title=egress,description=Ordered egress access control rules. First match wins. No match = deny."`
+	Services    []GatewayServiceEntry `yaml:"services" json:"services,omitempty" jsonschema:"title=services,description=DEPRECATED: use gateway.egress instead. External services proxied through the gateway."`
+	VPNProfiles map[string]*VPNConfig `yaml:"vpn_profiles,omitempty" json:"vpn_profiles,omitempty" jsonschema:"title=vpn_profiles,description=Named VPN tunnel profiles. Egress rules reference these via the vpn: field to route upstream connections through a VPN."`
+}
+
+// VPNConfig describes a VPN tunnel used by egress rules.
+type VPNConfig struct {
+	Type string `yaml:"type" json:"type" jsonschema:"required,title=type,description=VPN provider type.,enum=openvpn,enum=socks5"`
+
+	// socks5 fields
+	Address string `yaml:"address,omitempty" json:"address,omitempty" jsonschema:"title=address,description=SOCKS5 proxy address (host:port). Required when type is 'socks5'."`
+
+	// openvpn fields
+	ConfigB64 string `yaml:"config_b64,omitempty" json:"config_b64,omitempty" jsonschema:"title=config_b64,description=Base64-encoded .ovpn client config file (run: base64 -w0 < client.ovpn). Use an env-var reference to keep secrets out of the config file. Required when type is 'openvpn'."`
 }
 
 // GatewayServiceEntry represents an allowed upstream service.
@@ -159,10 +171,41 @@ func (c *Config) Validate() error {
 		ve.Add(fmt.Sprintf("runtime_engine must be one of %v, got %q", runtime.ValidNames(), c.RuntimeEngine))
 	}
 
+	// Validate VPN profiles
+	for name, profile := range c.Gateway.VPNProfiles {
+		if profile == nil {
+			ve.Add(fmt.Sprintf("gateway.vpn_profiles[%q]: profile must not be null", name))
+			continue
+		}
+		switch profile.Type {
+		case "":
+			ve.Add(fmt.Sprintf("gateway.vpn_profiles[%q]: type is required", name))
+		case "socks5":
+			if profile.Address == "" {
+				ve.Add(fmt.Sprintf("gateway.vpn_profiles[%q]: address is required for type 'socks5'", name))
+			}
+		case "openvpn":
+			if profile.ConfigB64 == "" {
+				ve.Add(fmt.Sprintf("gateway.vpn_profiles[%q]: config_b64 is required for type 'openvpn'", name))
+			}
+		default:
+			ve.Add(fmt.Sprintf("gateway.vpn_profiles[%q]: unsupported type %q (supported: 'openvpn', 'socks5')", name, profile.Type))
+		}
+	}
+
 	// Validate egress rules
 	if len(c.Gateway.Egress) > 0 {
 		for _, msg := range ValidateEgressRules(c.Gateway.Egress) {
 			ve.Add(msg)
+		}
+		// Cross-reference: egress vpn: field must reference a defined profile
+		for i, rule := range c.Gateway.Egress {
+			if rule.VPN == "" {
+				continue
+			}
+			if _, ok := c.Gateway.VPNProfiles[rule.VPN]; !ok {
+				ve.Add(fmt.Sprintf("gateway.egress[%d]: vpn profile %q is not defined in gateway.vpn_profiles", i, rule.VPN))
+			}
 		}
 	}
 

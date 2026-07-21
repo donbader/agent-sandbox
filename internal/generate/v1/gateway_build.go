@@ -82,7 +82,7 @@ func (g *Generator) writeGatewayBuild(buildDir string, cfg *config.Config, contr
 		gatewayVolumes = append(gatewayVolumes, contribs.Gateway.NamespacedVolumes...)
 		gatewayVolumes = append(gatewayVolumes, contribs.Gateway.RawVolumes...)
 	}
-	return g.writeGatewayBuildFiles(gatewayDir, gatewayVolumes)
+	return g.writeGatewayBuildFiles(gatewayDir, gatewayVolumes, hasOpenvpnProfile(cfg.Gateway.VPNProfiles))
 }
 
 // copyGatewayBinary copies the pre-built gateway binary into the build context.
@@ -335,16 +335,36 @@ func normalizeHosts(hosts []string) []string {
 }
 
 // writeGatewayBuildFiles writes the gateway Dockerfile into the gateway build directory.
+// hasOpenvpnProfile reports whether any VPN profile uses the openvpn type.
+// Only openvpn profiles need /dev/net/tun and the openvpn+iproute2 packages;
+// socks5 profiles have no such dependency.
+func hasOpenvpnProfile(profiles map[string]*config.VPNConfig) bool {
+	for _, p := range profiles {
+		if p != nil && p.Type == "openvpn" {
+			return true
+		}
+	}
+	return false
+}
+
 // gatewayVolumes contains volume specs (e.g. "oauth-tokens:/data/plugins/mcp-oauth") whose
 // container-side paths are pre-created in the image so Docker initializes named volumes
-// with root ownership.
-func (g *Generator) writeGatewayBuildFiles(gatewayDir string, gatewayVolumes []string) error {
+// with root ownership. hasVPN controls whether OpenVPN packages are baked in.
+func (g *Generator) writeGatewayBuildFiles(gatewayDir string, gatewayVolumes []string, hasVPN bool) error {
 	if err := os.MkdirAll(gatewayDir, 0755); err != nil {
 		return err
 	}
 	dockerfile, err := g.templates.LoadRaw("gateway.Dockerfile.tmpl")
 	if err != nil {
 		return fmt.Errorf("load gateway Dockerfile template: %w", err)
+	}
+
+	// When VPN profiles are configured, add openvpn and iproute2 to the gateway image.
+	if hasVPN {
+		dockerfile = strings.Replace(dockerfile,
+			"RUN apk add --no-cache ca-certificates wget iptables",
+			"RUN apk add --no-cache ca-certificates wget iptables openvpn iproute2",
+			1)
 	}
 
 	// Compute a content hash of the gateway binary to bust Docker's layer cache.

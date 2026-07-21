@@ -17,9 +17,10 @@ import (
 
 // GatewayConfigOutput is the merged gateway configuration for rendering.
 type GatewayConfigOutput struct {
-	AuthHeaders []AuthHeaderEntry // auth-header entries to bake into config.yaml
+	AuthHeaders []AuthHeaderEntry   // auth-header entries to bake into config.yaml
 	EgressRules []config.EgressRule
 	Ingress     []plugin.IngressRule // TCP port forwards from gateway to agent
+	VPNProfiles map[string]*config.VPNConfig // VPN profiles to start at gateway boot
 }
 
 // AuthHeaderEntry describes an auth-header middleware to generate at build time.
@@ -32,13 +33,14 @@ type AuthHeaderEntry struct {
 
 // gatewayRuntimeConfig matches the proxy.Config struct in core/gateway.
 type gatewayRuntimeConfig struct {
-	Listen       string               `yaml:"listen"`
-	DNSListen    string               `yaml:"dns_listen"`
-	MITMDomains  []string             `yaml:"mitm_domains"`
-	AuthHeaders  []authHeaderRuntime  `yaml:"auth_headers,omitempty"`
-	EgressRules  []egressRuleRuntime  `yaml:"egress_rules,omitempty"`
-	PortForwards []portForwardRuntime `yaml:"port_forwards,omitempty"`
-	HealthAddr   string               `yaml:"health_addr,omitempty"`
+	Listen       string                       `yaml:"listen"`
+	DNSListen    string                       `yaml:"dns_listen"`
+	MITMDomains  []string                     `yaml:"mitm_domains"`
+	AuthHeaders  []authHeaderRuntime          `yaml:"auth_headers,omitempty"`
+	EgressRules  []egressRuleRuntime          `yaml:"egress_rules,omitempty"`
+	PortForwards []portForwardRuntime         `yaml:"port_forwards,omitempty"`
+	HealthAddr   string                       `yaml:"health_addr,omitempty"`
+	VPNProfiles  map[string]vpnProfileRuntime `yaml:"vpn_profiles,omitempty"`
 }
 
 // authHeaderRuntime is the runtime representation of an auth-header entry in config.yaml.
@@ -56,6 +58,14 @@ type egressRuleRuntime struct {
 	DenyPaths   []string            `yaml:"deny_paths,omitempty"`
 	DenyGraphQL *config.DenyGraphQL `yaml:"deny_graphql,omitempty"`
 	Target      string              `yaml:"target,omitempty"`
+	VPN         string              `yaml:"vpn,omitempty"`
+}
+
+// vpnProfileRuntime is the runtime representation of a VPN profile in config.yaml.
+type vpnProfileRuntime struct {
+	Type      string `yaml:"type"`
+	Address   string `yaml:"address,omitempty"`   // socks5
+	ConfigB64 string `yaml:"config_b64,omitempty"` // openvpn
 }
 
 // portForwardRuntime is the runtime representation of a port forward in config.yaml.
@@ -119,6 +129,11 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 			out.EgressRules = insertPluginEgressRule(out.EgressRules, normalized)
 		}
 		out.Ingress = contribs.Gateway.Ingress
+	}
+
+	// Pass VPN profiles through to the output
+	if len(cfg.Gateway.VPNProfiles) > 0 {
+		out.VPNProfiles = cfg.Gateway.VPNProfiles
 	}
 
 	return out
@@ -197,7 +212,20 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			DenyPaths:   rule.DenyPaths,
 			DenyGraphQL: rule.DenyGraphQL,
 			Target:      rule.Target,
+			VPN:         rule.VPN,
 		})
+	}
+
+	// Write VPN profiles to runtime config
+	if len(gwCfg.VPNProfiles) > 0 {
+		rc.VPNProfiles = make(map[string]vpnProfileRuntime, len(gwCfg.VPNProfiles))
+		for name, profile := range gwCfg.VPNProfiles {
+			rc.VPNProfiles[name] = vpnProfileRuntime{
+				Type:      profile.Type,
+				Address:   profile.Address,
+				ConfigB64: profile.ConfigB64,
+			}
+		}
 	}
 
 	// Write port forwards from ingress rules
