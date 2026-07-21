@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -12,18 +13,29 @@ type VPNDialer struct {
 	profile VPNProfile
 }
 
-// Dial connects to addr (host:port) through the VPN proxy.
+// Dial connects to addr (host:port) through the VPN proxy using a background context.
+// It is a convenience wrapper around DialContext for callers that don't carry context.
 func (d *VPNDialer) Dial(network, addr string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, addr)
+}
+
+// DialContext connects to addr (host:port) through the VPN proxy, honouring ctx for
+// cancellation of the initial TCP connection to the proxy.
+// Only "tcp" is supported; any other network returns an error.
+func (d *VPNDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if network != "tcp" {
+		return nil, fmt.Errorf("vpn: only tcp is supported, got %q", network)
+	}
 	switch d.profile.Type {
 	case "socks5":
-		return socks5Dial(d.profile.Address, addr)
+		return socks5DialContext(ctx, d.profile.Address, addr)
 	default:
 		return nil, fmt.Errorf("vpn: unsupported type %q", d.profile.Type)
 	}
 }
 
 // BuildVPNDialers constructs a VPNDialer for each named profile.
-// Callers can look up a profile by name and call Dial on the result.
+// Callers can look up a profile by name and call Dial or DialContext on the result.
 func BuildVPNDialers(profiles map[string]VPNProfile) map[string]*VPNDialer {
 	out := make(map[string]*VPNDialer, len(profiles))
 	for name, p := range profiles {
@@ -33,6 +45,14 @@ func BuildVPNDialers(profiles map[string]VPNProfile) map[string]*VPNDialer {
 }
 
 // socks5Dial connects to targetAddr via a no-auth SOCKS5 proxy at proxyAddr.
+// It is a convenience wrapper around socks5DialContext with a background context.
+func socks5Dial(proxyAddr, targetAddr string) (net.Conn, error) {
+	return socks5DialContext(context.Background(), proxyAddr, targetAddr)
+}
+
+// socks5DialContext connects to targetAddr via a no-auth SOCKS5 proxy at proxyAddr,
+// honouring ctx for cancellation of the initial TCP connection to the proxy.
+// The SOCKS5 handshake uses a fixed 10-second deadline once the connection is established.
 //
 // Protocol (RFC 1928):
 //
@@ -40,7 +60,7 @@ func BuildVPNDialers(profiles map[string]VPNProfile) map[string]*VPNDialer {
 //	Proxy  → Client: VER(1) METHOD(1)               — method selection (0x00 = no auth)
 //	Client → Proxy: VER(1) CMD(1) RSV(1) ATYP(1) DST.ADDR DST.PORT — request
 //	Proxy  → Client: VER(1) REP(1) RSV(1) ATYP(1) BND.ADDR BND.PORT — reply
-func socks5Dial(proxyAddr, targetAddr string) (net.Conn, error) {
+func socks5DialContext(ctx context.Context, proxyAddr, targetAddr string) (net.Conn, error) {
 	// Validate target address before opening any connections.
 	host, portStr, err := net.SplitHostPort(targetAddr)
 	if err != nil {
@@ -54,7 +74,9 @@ func socks5Dial(proxyAddr, targetAddr string) (net.Conn, error) {
 		return nil, fmt.Errorf("socks5: parse port %q: %w", portStr, err)
 	}
 
-	conn, err := net.DialTimeout("tcp", proxyAddr, 10*time.Second)
+	// Use DialContext so caller cancellation can abort the proxy connection attempt.
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := d.DialContext(ctx, "tcp", proxyAddr)
 	if err != nil {
 		return nil, fmt.Errorf("socks5: connect to proxy %s: %w", proxyAddr, err)
 	}
@@ -87,16 +109,15 @@ func socks5Dial(proxyAddr, targetAddr string) (net.Conn, error) {
 	}
 
 	// --- Connect request ---
-	// Build CONNECT request. Use ATYP 0x03 (domain name) for all targets so we
-	// avoid resolving the hostname locally — the proxy resolves it instead, which
-	// is important for VPN split-tunnel scenarios.
+	// Use ATYP 0x03 (domain name) so the proxy resolves the hostname — preserving
+	// split-tunnel DNS semantics and avoiding local resolution in the gateway.
 
 	req := make([]byte, 0, 7+len(host))
 	req = append(req,
-		0x05,       // VER
-		0x01,       // CMD = CONNECT
-		0x00,       // RSV
-		0x03,       // ATYP = domain name
+		0x05,            // VER
+		0x01,            // CMD = CONNECT
+		0x00,            // RSV
+		0x03,            // ATYP = domain name
 		byte(len(host)), // length of domain name
 	)
 	req = append(req, []byte(host)...)
@@ -183,5 +204,3 @@ func socks5ReplyText(code byte) string {
 		return fmt.Sprintf("unknown error code 0x%02x", code)
 	}
 }
-
-

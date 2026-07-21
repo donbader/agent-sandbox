@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -205,7 +206,7 @@ func main() {
 			// Wire VPN dialing for MITM upstream connections.
 			if len(cfg.VPNProfiles) > 0 {
 				vpnDialers := proxy.BuildVPNDialers(cfg.VPNProfiles)
-				mitmHandler.VPNDialFunc = func(serverName string) func(string, string) (net.Conn, error) {
+				mitmHandler.VPNDialFunc = func(serverName string) func(context.Context, string, string) (net.Conn, error) {
 					decision := egressFilter.AllowHost(serverName)
 					if decision.Rule == nil || decision.Rule.VPN == "" {
 						return nil
@@ -214,7 +215,7 @@ func main() {
 					if !ok {
 						return nil
 					}
-					return dialer.Dial
+					return dialer.DialContext
 				}
 			}
 		}

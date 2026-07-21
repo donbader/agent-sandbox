@@ -147,8 +147,9 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 	}
 
 	// Check egress rules before processing
+	var decision EgressDecision
 	if p.egress.HasRules() {
-		decision := p.egress.AllowHost(serverName)
+		decision = p.egress.AllowHost(serverName)
 		if !decision.Allowed {
 			slog.Warn("egress blocked", "sni", serverName, "reason", "denied_by_policy")
 			return
@@ -166,7 +167,7 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 
 	// Default: passthrough to destination
 	slog.Debug("connection passthrough", "sni", serverName)
-	p.passthrough(clientConn, hello, serverName)
+	p.passthrough(clientConn, hello, serverName, decision)
 }
 
 // passthrough pipes the connection directly to the destination on port 443.
@@ -177,23 +178,20 @@ func (p *Proxy) handleConn(clientConn net.Conn) {
 // This means TLS on non-443 ports will be dialed on 443 instead. This is acceptable
 // because nearly all TLS traffic uses 443. Non-standard ports can be supported later
 // via SO_ORIGINAL_DST or port-specific iptables rules.
-func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName string) {
+func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName string, decision EgressDecision) {
 	destAddr := net.JoinHostPort(serverName, "443")
 
 	var serverConn net.Conn
 	var dialErr error
 
-	// Check whether this host should be routed through a VPN profile.
-	if len(p.vpnDialers) > 0 {
-		decision := p.egress.AllowHost(serverName)
-		if decision.Rule != nil && decision.Rule.VPN != "" {
-			if dialer, ok := p.vpnDialers[decision.Rule.VPN]; ok {
-				slog.Debug("passthrough via vpn", "host", serverName, "vpn_profile", decision.Rule.VPN)
-				serverConn, dialErr = dialer.Dial("tcp", destAddr)
-			} else {
-				// Profile was validated at load time, so this should never happen.
-				slog.Error("vpn profile not found", "profile", decision.Rule.VPN, "host", serverName)
-			}
+	// Route through VPN if the matched egress rule specifies a profile.
+	if decision.Rule != nil && decision.Rule.VPN != "" {
+		if dialer, ok := p.vpnDialers[decision.Rule.VPN]; ok {
+			slog.Debug("passthrough via vpn", "host", serverName, "vpn_profile", decision.Rule.VPN)
+			serverConn, dialErr = dialer.Dial("tcp", destAddr)
+		} else {
+			// Profile was validated at load time, so this should never happen.
+			slog.Error("vpn profile not found", "profile", decision.Rule.VPN, "host", serverName)
 		}
 	}
 

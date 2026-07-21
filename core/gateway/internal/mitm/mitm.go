@@ -40,11 +40,12 @@ type Handler struct {
 	// Set by the gateway main.go wiring after construction.
 	DenyGraphQLChecker func(host string, req *http.Request) bool
 
-	// VPNDialFunc returns a custom dial function for the given server name, or nil
-	// to use the default direct TCP dial. Used to route MITM upstream connections
-	// through a VPN proxy for hosts that match an egress rule with vpn: set.
+	// VPNDialFunc returns a context-aware dial function for the given server name, or nil
+	// to use the default direct TCP dial. The returned function matches http.Transport.DialContext
+	// so it can be assigned directly. Used to route MITM upstream connections through a VPN
+	// proxy for hosts that match an egress rule with vpn: set.
 	// Set by the gateway main.go wiring after construction.
-	VPNDialFunc func(serverName string) func(network, addr string) (net.Conn, error)
+	VPNDialFunc func(serverName string) func(context.Context, string, string) (net.Conn, error)
 }
 
 // NewHandler creates a MITM handler for the given domains.
@@ -275,9 +276,7 @@ func (h *Handler) getTransport(serverName string) *http.Transport {
 	// Wire VPN dialer if this host's egress rule specifies a VPN profile.
 	if h.VPNDialFunc != nil {
 		if dialFn := h.VPNDialFunc(serverName); dialFn != nil {
-			t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialFn(network, addr)
-			}
+			t.DialContext = dialFn // matches http.Transport.DialContext signature exactly
 			slog.Debug("mitm: upstream dial via vpn", "host", serverName)
 		}
 	}
