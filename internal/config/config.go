@@ -99,7 +99,7 @@ type VPNConfig struct {
 	Address string `yaml:"address,omitempty" json:"address,omitempty" jsonschema:"title=address,description=SOCKS5 proxy address (host:port). Required when type is 'socks5'."`
 
 	// openvpn fields
-	ConfigB64 string `yaml:"config_b64,omitempty" json:"config_b64,omitempty" jsonschema:"title=config_b64,description=Base64-encoded .ovpn client config file (e.g. base64 -w0 < client.ovpn). Use a \${VAR} reference to keep secrets out of the config file. Required when type is 'openvpn'."`
+	ConfigB64 string `yaml:"config_b64,omitempty" json:"config_b64,omitempty" jsonschema:"title=config_b64,description=Base64-encoded .ovpn client config file (run: base64 -w0 < client.ovpn). Use an env-var reference to keep secrets out of the config file. Required when type is 'openvpn'."`
 }
 
 // GatewayServiceEntry represents an allowed upstream service.
