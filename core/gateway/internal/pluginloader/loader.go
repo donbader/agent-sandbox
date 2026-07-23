@@ -34,7 +34,7 @@ func LoadPluginsFromFile(path string) error {
 // LoadPlugins loads all plugins from the given config.
 func LoadPlugins(cfg *PluginsConfig) error {
 	for _, plugin := range cfg.Plugins {
-		if err := loadPlugin(plugin); err != nil {
+		if err := loadPlugin(plugin, cfg.AllowPrivateIPs); err != nil {
 			return fmt.Errorf("plugin %q: %w", plugin.Name, err)
 		}
 		slog.Info("loaded plugin", "name", plugin.Name,
@@ -44,7 +44,7 @@ func LoadPlugins(cfg *PluginsConfig) error {
 	return nil
 }
 
-func loadPlugin(plugin PluginConfig) error {
+func loadPlugin(plugin PluginConfig, allowPrivateIPs bool) error {
 	dataDir := "/data/plugins/" + plugin.Name
 	if d, ok := plugin.Options["token_dir"].(string); ok {
 		dataDir = d
@@ -67,7 +67,7 @@ func loadPlugin(plugin PluginConfig) error {
 		pluginDataDir := dataDir
 
 		gateway.RegisterMiddleware(mwName, func(ctx *gateway.MiddlewareContext) error {
-			return execMiddleware(bundled, ctx, opts, pluginDataDir)
+			return execMiddleware(bundled, ctx, opts, pluginDataDir, allowPrivateIPs)
 		})
 		gateway.BindDomains(mwName, domains)
 	}
@@ -86,7 +86,7 @@ func loadPlugin(plugin PluginConfig) error {
 		gateway.RegisterRoute(gateway.RouteDef{
 			Path: namespacedPath,
 			Handler: func(w http.ResponseWriter, r *http.Request) {
-				execRouteHandler(bundled, w, r, opts, pluginDataDir)
+				execRouteHandler(bundled, w, r, opts, pluginDataDir, allowPrivateIPs)
 			},
 		})
 	}
@@ -94,9 +94,9 @@ func loadPlugin(plugin PluginConfig) error {
 	return nil
 }
 
-func execMiddleware(bundledJS string, ctx *gateway.MiddlewareContext, opts map[string]any, dataDir string) error {
+func execMiddleware(bundledJS string, ctx *gateway.MiddlewareContext, opts map[string]any, dataDir string, allowPrivateIPs bool) error {
 	vm := jsruntime.NewVM()
-	hostCfg := &jsruntime.HostAPIConfig{DataDir: dataDir}
+	hostCfg := &jsruntime.HostAPIConfig{DataDir: dataDir, AllowPrivateIPs: allowPrivateIPs}
 	jsruntime.InjectHostAPIs(vm, hostCfg)
 
 	reqCtx := jsruntime.NewRequestContext(ctx.Request, nil)
@@ -128,9 +128,9 @@ func execMiddleware(bundledJS string, ctx *gateway.MiddlewareContext, opts map[s
 	return nil
 }
 
-func execRouteHandler(bundledJS string, w http.ResponseWriter, r *http.Request, opts map[string]any, dataDir string) {
+func execRouteHandler(bundledJS string, w http.ResponseWriter, r *http.Request, opts map[string]any, dataDir string, allowPrivateIPs bool) {
 	vm := jsruntime.NewVM()
-	hostCfg := &jsruntime.HostAPIConfig{DataDir: dataDir}
+	hostCfg := &jsruntime.HostAPIConfig{DataDir: dataDir, AllowPrivateIPs: allowPrivateIPs}
 	jsruntime.InjectHostAPIs(vm, hostCfg)
 
 	reqCtx := jsruntime.NewRequestContext(r, w)

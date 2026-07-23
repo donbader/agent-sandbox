@@ -117,6 +117,8 @@ function loadCachedRegistration(providerName: string): Registration | null {
 }
 
 function deriveCallbackURL(ctx: GatewayContext, options: PluginOptions): string {
+  // Prefer explicit callback_url from query param (client-supplied), then plugin config
+  if (ctx.request.query["callback_url"]) return ctx.request.query["callback_url"];
   if (options.callback_url) return options.callback_url;
 
   // Derive from request headers
