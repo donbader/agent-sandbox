@@ -29,5 +29,6 @@ type RouteEntry struct {
 
 // PluginsConfig is the top-level config for all plugins loaded by the gateway.
 type PluginsConfig struct {
-	Plugins []PluginConfig `yaml:"plugins"`
+	Plugins        []PluginConfig `yaml:"plugins"`
+	AllowPrivateIPs bool          `yaml:"-"` // testing only: allow gw.http.fetch to loopback/private IPs
 }

@@ -1,10 +1,12 @@
 package pluginloader
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
@@ -205,4 +207,93 @@ func TestMcpOAuth_OAuthMiddleware(t *testing.T) {
 	// Should pass through without aborting (no token = let upstream respond)
 	assert.Equal(t, 0, ctx.AbortStatus, "should not abort when no token is stored")
 	assert.Empty(t, ctx.AbortBody)
+}
+
+// TestMcpOAuth_LoginUsesQueryCallbackURL verifies that a ?callback_url=... query param
+// is passed as redirect_uri in DCR, not the internal gateway hostname.
+func TestMcpOAuth_LoginUsesQueryCallbackURL(t *testing.T) {
+	gateway.ResetForTesting()
+
+	// Track the redirect_uris sent to the DCR endpoint.
+	var capturedRedirectURIs []string
+
+	// Mock MCP server: serves .well-known metadata and a DCR endpoint.
+	mockMCP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/.well-known/oauth-authorization-server"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 "http://" + r.Host,
+				"authorization_endpoint": "http://" + r.Host + "/authorize",
+				"token_endpoint":         "http://" + r.Host + "/token",
+				"registration_endpoint":  "http://" + r.Host + "/register",
+			})
+		case r.URL.Path == "/register":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if uris, ok := body["redirect_uris"].([]any); ok {
+				for _, u := range uris {
+					if s, ok := u.(string); ok {
+						capturedRedirectURIs = append(capturedRedirectURIs, s)
+					}
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"client_id":     "test-client-id",
+				"client_secret": "test-client-secret",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockMCP.Close()
+
+	pluginDir, err := filepath.Abs("../../../plugins/mcp-oauth")
+	require.NoError(t, err)
+
+	cfg := &PluginsConfig{
+		AllowPrivateIPs: true, // allow mock server on loopback
+		Plugins: []PluginConfig{
+			{
+				Name: "mcp-oauth",
+				Dir:  pluginDir,
+				Options: map[string]any{
+					"providers": map[string]any{
+						"testprovider": map[string]any{
+							"mcp_url": mockMCP.URL + "/mcp",
+						},
+					},
+					"token_dir": t.TempDir(),
+				},
+				Gateway: GatewayContrib{
+					Routes: []RouteEntry{
+						{Path: "/login", Handler: "./src/login.ts"},
+					},
+				},
+			},
+		},
+	}
+
+	err = LoadPlugins(cfg)
+	require.NoError(t, err)
+
+	handler := gateway.MatchRoute("/plugins/mcp-oauth/login")
+	require.NotNil(t, handler)
+
+	// Call with explicit callback_url query param — simulates what the skill instructs.
+	req, _ := http.NewRequest("GET",
+		"http://maggie-gateway:8080/plugins/mcp-oauth/login/testprovider?callback_url=http://127.0.0.1/plugins/mcp-oauth/callback",
+		nil)
+	req.Host = "maggie-gateway:8080"
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	// DCR must have fired with the loopback URL, not the gateway's internal hostname.
+	require.NotEmpty(t, capturedRedirectURIs, "DCR was not called; login response: %s", w.Body.String())
+	assert.Equal(t, "http://127.0.0.1/plugins/mcp-oauth/callback", capturedRedirectURIs[0],
+		"redirect_uri in DCR must be the query-param callback_url, not the gateway hostname")
 }
