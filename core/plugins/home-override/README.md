@@ -19,7 +19,8 @@ installations:
 |--------|------|----------|---------|-------------|
 | `home_directory` | project-path | yes | — | Directory to mount as `/home/agent/`. Must use `@fleet/` prefix (e.g. `@fleet/home`). |
 | `volume` | boolean | no | `false` | Persist home across restarts via a named Docker volume. |
-| `clean_stale` | boolean | no | `false` | Remove stale files from volume on startup. Auto-discovers managed dirs from source. |
+| `clean_stale` | array | no | — | Relative paths within home to keep fully synced. Stale files not in the source are removed on startup. |
+| `readonly` | boolean | no | `false` | Mark seeded files read-only after syncing. Prevents the agent from modifying repo-managed files. Write permission is temporarily restored before each sync so updates are applied cleanly. |
 
 ## How It Works
 
@@ -31,16 +32,20 @@ installations:
 
 **Runtime (volume: true + clean_stale):** After the `cp -a`, scans all files in the volume. For each file, if its parent directory exists in the source but the file itself doesn't — it's stale and gets removed. Empty directories are cleaned up.
 
+**Runtime (readonly: true):** After `cp -a` (and stale cleanup if enabled), runs `chmod a-w` on every file that exists in the seed. Directories are never made read-only, so the agent can still create new files at runtime. Before the next sync, `chmod u+w` is restored on those files so `cp -a` can overwrite them cleanly.
+
 This auto-discovers which paths to manage: directories that exist in your source are kept in sync, directories created only at runtime (like `.traces/`, `.logs/`) are never touched because they don't exist in the source.
 
 Use `volume: true` when the agent writes state to its home directory that should survive container restarts (e.g., auth tokens, shell history, tool caches).
 
 Use `clean_stale: true` to automatically remove files that were deleted from the repo. No need to list paths — it auto-discovers based on what directories exist in the source.
 
+Use `readonly: true` to prevent the agent from accidentally editing config files, skills, or other repo-managed content.
+
 ## What It Contributes
 
 - **Runtime (build):** `COPY` of home directory into `/opt/home-seed/` with ownership set to the agent user
-- **Runtime (pre_entrypoint):** `cp -a` sync + optional stale file cleanup when `clean_stale: true`
+- **Runtime (pre_entrypoint):** `cp -a` sync + optional stale cleanup (`clean_stale`) + optional read-only enforcement (`readonly`)
 - **Runtime (namespaced_volumes):** Named volume `home` (auto-prefixed with `{agentName}-` for fleet isolation) when `volume: true`
 
 ## Example

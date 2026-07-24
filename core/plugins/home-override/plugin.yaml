@@ -13,6 +13,11 @@ options:
     type: array
     required: false
     description: "Relative paths within home to keep fully synced with source. Stale files and directories in these paths are removed on startup. Only use for paths entirely controlled by the repo (e.g. skills, extensions). Do NOT include paths with runtime-generated content."
+  readonly:
+    type: boolean
+    required: false
+    default: false
+    description: "Mark seeded files read-only after syncing. Prevents the agent from overwriting files that come from the repo. Write permission is temporarily restored before each sync so cp can overwrite existing files."
 
 contributes:
   runtime:
@@ -20,7 +25,24 @@ contributes:
       - "COPY {{ .plugin.options.home_directory }} /opt/home-seed/"
       - "RUN chown -R agent:agent /opt/home-seed"
     pre_entrypoint:
+      - |
+        {{- if .plugin.options.readonly }}
+        # Restore write permission on seed files before syncing so cp -a can overwrite them
+        find "$AGENT_HOME" -type f | while read -r f; do
+          rel="${f#$AGENT_HOME/}"
+          [ -e "/opt/home-seed/$rel" ] && chmod u+w "$f" 2>/dev/null || true
+        done
+        {{- end }}
       - 'cp -a /opt/home-seed/. "$AGENT_HOME/"'
+      - |
+        {{- if .plugin.options.readonly }}
+        # Mark all seeded files as read-only; leave directories untouched
+        find /opt/home-seed/ -type f | while read -r f; do
+          rel="${f#/opt/home-seed/}"
+          chmod a-w "$AGENT_HOME/$rel" 2>/dev/null || true
+        done
+        echo "[home-sync] seed files marked read-only"
+        {{- end }}
       - |
         {{- if .plugin.options.clean_stale }}
         for sync_path in {{ range .plugin.options.clean_stale }}"{{ . }}" {{ end }}; do
