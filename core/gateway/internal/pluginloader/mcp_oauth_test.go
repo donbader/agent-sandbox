@@ -222,7 +222,7 @@ func TestMcpOAuth_LoginUsesQueryCallbackURL(t *testing.T) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/.well-known/oauth-authorization-server"):
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"issuer":                 "http://" + r.Host,
 				"authorization_endpoint": "http://" + r.Host + "/authorize",
 				"token_endpoint":         "http://" + r.Host + "/token",
@@ -230,14 +230,19 @@ func TestMcpOAuth_LoginUsesQueryCallbackURL(t *testing.T) {
 			})
 		case r.URL.Path == "/register":
 			var body map[string]any
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			if uris, ok := body["redirect_uris"].([]any); ok {
 				for _, u := range uris {
-					capturedRedirectURIs = append(capturedRedirectURIs, u.(string))
+					if s, ok := u.(string); ok {
+						capturedRedirectURIs = append(capturedRedirectURIs, s)
+					}
 				}
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"client_id":     "test-client-id",
 				"client_secret": "test-client-secret",
 			})
