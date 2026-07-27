@@ -1,0 +1,29 @@
+name: agw-client
+options:
+  token:
+    type: string
+    required: true
+    description: "AGW bearer token env var reference (e.g. ${AGW_TOKEN})"
+  host:
+    type: string
+    required: false
+    default: "agent-gateway.stx-ai.net"
+    description: "Agent Gateway hostname (default: agent-gateway.stx-ai.net)"
+  provider:
+    type: string
+    required: false
+    default: "kiro"
+    description: "AGW provider segment (default: kiro)"
+
+contributes:
+  runtime:
+    extra_builds:
+      # Inject a dummy API key so Claude Code / omp attempt auth.
+      # The gateway intercepts and replaces with the real Bearer token.
+      - "ENV ANTHROPIC_API_KEY=agw-via-gateway"
+      - "ENV ANTHROPIC_BASE_URL=https://{{ .plugin.options.host }}/{{ .plugin.options.provider }}/anthropic/v1"
+  gateway:
+    egress:
+      - hosts: ["{{ .plugin.options.host }}"]
+        middlewares:
+          - "./src/agw-auth.ts"
