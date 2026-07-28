@@ -54,8 +54,9 @@ type Config struct {
 	CoreVersion   string         `yaml:"core_version" json:"core_version" jsonschema:"required,title=core_version,description=Core version to use for generation (semver tag or 'latest' for embedded)"`
 	RuntimeEngine string         `yaml:"runtime_engine" json:"runtime_engine,omitempty" jsonschema:"title=runtime_engine,description=Container runtime engine (docker or podman),enum=docker,enum=podman,default=docker"`
 	Runtime       RuntimeConfig  `yaml:"runtime" json:"runtime" jsonschema:"required,title=runtime,description=Agent container configuration"`
-	Gateway       GatewayConfig  `yaml:"gateway" json:"gateway,omitempty" jsonschema:"title=gateway,description=Transparent egress proxy configuration"`
-	Installations []Installation `yaml:"installations" json:"installations,omitempty" jsonschema:"title=installations,description=Plugins to install"`
+	Gateway       GatewayConfig                      `yaml:"gateway" json:"gateway,omitempty" jsonschema:"title=gateway,description=Transparent egress proxy configuration"`
+	Installations []Installation                     `yaml:"installations" json:"installations,omitempty" jsonschema:"title=installations,description=Plugins to install"`
+	SecretsMapping map[string]map[string]string       `yaml:"secrets_mapping" json:"secrets_mapping,omitempty" jsonschema:"title=secrets_mapping,description=Named credential profiles for runtime token swapping. Each profile maps dummy token names to real credential env var references (e.g. \\${MY_KEY})."`
 }
 
 // StageArtifact describes a file to COPY from a build stage into the final image.

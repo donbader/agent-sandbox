@@ -83,6 +83,44 @@ func main() {
 		gateway.BindDomains(name, []string{domain})
 	}
 
+	// Register credential-swap middleware from config.
+	// At request time: read header, strip prefix, look up dummy token in mapping,
+	// replace with real value. Reject (403) if token not in mapping.
+	for i, sw := range cfg.CredentialSwaps {
+		domain := sw.Domain
+		header := sw.Header
+		prefix := sw.Prefix
+		// Resolve ${ENV_VAR} references in mapping values now, at startup.
+		resolved := make(map[string]string, len(sw.Mapping))
+		for dummy, ref := range sw.Mapping {
+			real := expandEnvVars(ref)
+			if real != "" {
+				resolved[dummy] = real
+				gateway.RegisterSecret(real)
+			}
+		}
+		if len(resolved) == 0 {
+			slog.Warn("credential-swap skipped: no mapping values resolved", "domain", domain, "header", header)
+			continue
+		}
+		name := fmt.Sprintf("cred-swap:%s:%d", domain, i)
+		gateway.RegisterMiddleware(name, func(ctx *gateway.MiddlewareContext) error {
+			raw := ctx.Request.Header.Get(header)
+			token := raw
+			if prefix != "" && strings.HasPrefix(raw, prefix) {
+				token = raw[len(prefix):]
+			}
+			real, ok := resolved[token]
+			if !ok {
+				ctx.Abort(403, `{"error":"credential not recognized"}`)
+				return nil
+			}
+			ctx.Request.Header.Set(header, prefix+real)
+			return nil
+		})
+		gateway.BindDomains(name, []string{domain})
+	}
+
 	// Collect static secrets known at startup (from config auth_headers).
 	// Dynamic secrets registered by TS plugins at request time are picked up
 	// via WithSecretsFunc which reads the live registry on every log record.

@@ -77,6 +77,15 @@ func collectEnvVars(cfg *config.Config, contribs *plugin.Contributions, seen map
 	for _, inst := range cfg.Installations {
 		scanOptionsForEnvVars(inst.Options, seen)
 	}
+
+	// From secrets_mapping values (each value is a ${ENV_VAR} reference)
+	for _, profile := range cfg.SecretsMapping {
+		for _, ref := range profile {
+			for _, ev := range envvar.ExtractAll(ref) {
+				seen[ev] = true
+			}
+		}
+	}
 }
 
 // scanOptionsForEnvVars recursively scans plugin options for ${VAR} references.
