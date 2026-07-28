@@ -80,6 +80,10 @@ installations:            # optional — plugins to install
   - plugin: "@builtin/github-pat"
     options:
       token: "${GITHUB_PAT}"
+
+secrets_mapping:          # optional — named credential profiles for runtime token swapping
+  profile_name:           # arbitrary profile name, referenced from egress header values
+    DUMMY_TOKEN: "${REAL_ENV_VAR}"  # dummy token → real credential (resolved from .env)
 ```
 
 ## Secrets (`.env` file)
@@ -100,6 +104,35 @@ The `generate` command automatically produces a `.env.example` file listing all 
 cp .env.example .env
 # Edit .env with real values
 ```
+
+## Credential Swapping (secrets_mapping)
+
+`secrets_mapping` lets an agent select between multiple real API keys at runtime using dummy tokens, without ever seeing the real credentials.
+
+```yaml
+# agent.yaml
+secrets_mapping:
+  openai:
+    DUMMY_KEY_A: "${OPENAI_KEY_A}"
+    DUMMY_KEY_B: "${OPENAI_KEY_B}"
+
+gateway:
+  egress:
+    - hosts: ["api.openai.com"]
+      headers:
+        Authorization: "Bearer ${secrets_mapping.openai}"
+    - hosts: ["*"]
+```
+
+The agent sends requests with `Authorization: Bearer DUMMY_KEY_B`. The gateway intercepts the request, looks up `DUMMY_KEY_B` in the `openai` profile, and replaces it with the real value from `${OPENAI_KEY_B}` before forwarding. The real key never enters the agent container.
+
+**Behavior:**
+- `${secrets_mapping.PROFILE}` in a header value triggers credential-swap mode for that egress rule instead of static injection.
+- Requests with a token not in the mapping are rejected with `403`.
+- The prefix before the dummy token (e.g. `"Bearer "`) is preserved in the swapped value.
+- Real credential values are registered for log redaction automatically.
+- All `${ENV_VAR}` references inside `secrets_mapping` values are included in the generated `.env.example`.
+
 
 ## Container Runtime
 
