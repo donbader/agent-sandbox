@@ -583,13 +583,22 @@ func collectGatewayEnvVars(cfg *config.Config, contribs *plugin.Contributions) [
 		}
 	}
 
-	// From VPN profiles (config_b64 and address may reference ${VAR})
+	// From VPN profiles (config_b64, address, username, password, totp_secret may reference ${VAR})
 	for _, profile := range cfg.Gateway.VPNProfiles {
 		if profile != nil {
 			if ev := envvar.Extract(profile.ConfigB64); ev != "" {
 				seen[ev] = true
 			}
 			if ev := envvar.Extract(profile.Address); ev != "" {
+				seen[ev] = true
+			}
+			if ev := envvar.Extract(profile.Username); ev != "" {
+				seen[ev] = true
+			}
+			if ev := envvar.Extract(profile.Password); ev != "" {
+				seen[ev] = true
+			}
+			if ev := envvar.Extract(profile.TOTPSecret); ev != "" {
 				seen[ev] = true
 			}
 		}
