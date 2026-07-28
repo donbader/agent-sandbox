@@ -335,20 +335,31 @@ func main() {
 			_, _ = w.Write([]byte("ok"))
 		})
 
-		// VPN management endpoints
+		// VPN management endpoints (restricted to localhost to prevent
+		// untrusted agent containers from cycling VPN connections).
 		if vpnMgr != nil {
-			mux.HandleFunc("/vpn/status", func(w http.ResponseWriter, _ *http.Request) {
+			localhostOnly := func(next http.HandlerFunc) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					host, _, _ := net.SplitHostPort(r.RemoteAddr)
+					if host != "127.0.0.1" && host != "::1" {
+						http.NotFound(w, r)
+						return
+					}
+					next(w, r)
+				}
+			}
+			mux.HandleFunc("/vpn/status", localhostOnly(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				data, err := vpnMgr.StatusJSON()
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
-					_, _ = w.Write([]byte(`{"error":"` + err.Error() + `"}`))
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 					return
 				}
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write(data)
-			})
-			mux.HandleFunc("/vpn/reconnect", func(w http.ResponseWriter, r *http.Request) {
+			}))
+			mux.HandleFunc("/vpn/reconnect", localhostOnly(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost {
 					w.WriteHeader(http.StatusMethodNotAllowed)
 					return
@@ -367,7 +378,7 @@ func main() {
 					w.Header().Set("Content-Type", "application/json")
 					_ = json.NewEncoder(w).Encode(map[string]string{"status": "reconnecting_all"})
 				}
-			})
+			}))
 		}
 
 		// Serve plugin-registered routes (e.g. /plugins/mcp-oauth/callback)

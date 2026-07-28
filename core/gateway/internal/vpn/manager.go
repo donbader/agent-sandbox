@@ -3,11 +3,13 @@
 package vpn
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"os/exec"
+	"sort"
 	"sync"
 	"time"
 )
@@ -51,16 +53,19 @@ type tunnel struct {
 	since     time.Time
 	attempts  int
 	dialer    *net.Dialer
+	cancel    context.CancelFunc // cancels in-flight retry loop
 }
 
 // Manager coordinates multiple VPN tunnels with lifecycle management.
 type Manager struct {
 	tunnels    map[string]*tunnel
+	names      []string // sorted profile names for deterministic iteration
 	maxRetries int
 	backoff    time.Duration
-	mu         sync.Mutex   // protects ready and once
+	mu         sync.Mutex   // protects ready, once, and generation
 	ready      chan struct{} // closed when initial connection attempts complete
 	once       sync.Once
+	generation uint64 // incremented on each ConnectAll to prevent stale closures
 	startFunc  func(name string, profile ProfileConfig, tunIface string) error // injectable for testing
 }
 
@@ -97,8 +102,8 @@ func NewManager(profiles map[string]ProfileConfig, opts ...ManagerOption) *Manag
 	}
 
 	// Assign tun interfaces in sorted order for stability.
-	names := sortedKeys(profiles)
-	for i, name := range names {
+	m.names = sortedKeys(profiles)
+	for i, name := range m.names {
 		m.tunnels[name] = &tunnel{
 			profile: profiles[name],
 			name:    name,
@@ -114,18 +119,34 @@ func NewManager(profiles map[string]ProfileConfig, opts ...ManagerOption) *Manag
 // maxRetries times with backoff. The method returns immediately; callers can
 // wait on Ready() if they need to block until the initial round completes.
 func (m *Manager) ConnectAll() {
+	m.mu.Lock()
+	m.generation++
+	gen := m.generation
+	m.mu.Unlock()
+
 	var wg sync.WaitGroup
 	for _, tun := range m.tunnels {
 		wg.Add(1)
 		go func(t *tunnel) {
 			defer wg.Done()
-			m.connectWithRetry(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.mu.Lock()
+			// Cancel any previous retry loop for this tunnel.
+			if t.cancel != nil {
+				t.cancel()
+			}
+			t.cancel = cancel
+			t.mu.Unlock()
+			m.connectWithRetry(ctx, t)
 		}(tun)
 	}
 	go func() {
 		wg.Wait()
 		m.mu.Lock()
-		m.once.Do(func() { close(m.ready) })
+		// Only close ready if this is still the current generation.
+		if gen == m.generation {
+			m.once.Do(func() { close(m.ready) })
+		}
 		m.mu.Unlock()
 	}()
 }
@@ -139,7 +160,8 @@ func (m *Manager) Ready() <-chan struct{} {
 }
 
 // connectWithRetry attempts to start a tunnel up to maxRetries times.
-func (m *Manager) connectWithRetry(t *tunnel) {
+// It respects ctx cancellation between retry attempts.
+func (m *Manager) connectWithRetry(ctx context.Context, t *tunnel) {
 	t.mu.Lock()
 	t.state = StateConnecting
 	t.since = time.Now()
@@ -148,6 +170,11 @@ func (m *Manager) connectWithRetry(t *tunnel) {
 	t.mu.Unlock()
 
 	for attempt := 1; attempt <= m.maxRetries; attempt++ {
+		// Check if cancelled before attempting.
+		if ctx.Err() != nil {
+			return
+		}
+
 		t.mu.Lock()
 		t.attempts = attempt
 		t.mu.Unlock()
@@ -173,10 +200,18 @@ func (m *Manager) connectWithRetry(t *tunnel) {
 
 		if attempt < m.maxRetries {
 			backoff := m.backoff * time.Duration(attempt)
-			time.Sleep(backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 
+	// Only mark as failed if we weren't cancelled.
+	if ctx.Err() != nil {
+		return
+	}
 	t.mu.Lock()
 	t.state = StateFailed
 	t.since = time.Now()
@@ -193,16 +228,24 @@ func (m *Manager) Reconnect(profileName string) error {
 		return fmt.Errorf("vpn profile %q not found", profileName)
 	}
 
+	// Cancel any in-flight retry loop, then kill the tunnel.
 	t.mu.Lock()
+	if t.cancel != nil {
+		t.cancel()
+	}
 	prevState := t.state
 	t.mu.Unlock()
 
-	// Kill existing openvpn daemon if running.
 	if prevState == StateConnected || prevState == StateConnecting {
 		m.killTunnel(t)
 	}
 
-	go m.connectWithRetry(t)
+	// Start a new retry loop with a fresh context.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.mu.Lock()
+	t.cancel = cancel
+	t.mu.Unlock()
+	go m.connectWithRetry(ctx, t)
 	return nil
 }
 
@@ -210,6 +253,9 @@ func (m *Manager) Reconnect(profileName string) error {
 func (m *Manager) ReconnectAll() {
 	for _, t := range m.tunnels {
 		t.mu.Lock()
+		if t.cancel != nil {
+			t.cancel()
+		}
 		prevState := t.state
 		t.mu.Unlock()
 		if prevState == StateConnected || prevState == StateConnecting {
@@ -224,10 +270,11 @@ func (m *Manager) ReconnectAll() {
 	m.ConnectAll()
 }
 
-// Status returns the current status of all tunnels.
+// Status returns the current status of all tunnels in deterministic order.
 func (m *Manager) Status() []TunnelStatus {
 	statuses := make([]TunnelStatus, 0, len(m.tunnels))
-	for _, t := range m.tunnels {
+	for _, name := range m.names {
+		t := m.tunnels[name]
 		t.mu.Lock()
 		statuses = append(statuses, TunnelStatus{
 			Profile:   t.name,
@@ -305,17 +352,6 @@ func sortedKeys(m map[string]ProfileConfig) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// Use sort from the standard library (already imported in vpn.go via the
-	// same package). Import it here too for self-containment.
-	sortStrings(keys)
+	sort.Strings(keys)
 	return keys
-}
-
-// sortStrings sorts a slice of strings in place.
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
 }
