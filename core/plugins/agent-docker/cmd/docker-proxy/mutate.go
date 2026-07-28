@@ -100,15 +100,27 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 	// Set DNS to gateway IP so containers resolve through the gateway
 	hc["Dns"] = []string{m.cfg.GatewayIP}
 
-	// Mount certs volume (read-only) for CA cert + gateway-route.sh access
+	// Mount certs volume (read-only) for CA cert + gateway-route.sh access.
+	// Skip if /shared/certs is already mounted (e.g. gateway/agent containers from compose).
 	mounts, _ := hc["Mounts"].([]any)
-	mounts = append(mounts, map[string]any{
-		"Type":     "volume",
-		"Source":   m.certsVolumeName(),
-		"Target":   "/shared/certs",
-		"ReadOnly": true,
-	})
-	hc["Mounts"] = mounts
+	certsAlreadyMounted := false
+	for _, mount := range mounts {
+		if mp, ok := mount.(map[string]any); ok {
+			if mp["Target"] == "/shared/certs" {
+				certsAlreadyMounted = true
+				break
+			}
+		}
+	}
+	if !certsAlreadyMounted {
+		mounts = append(mounts, map[string]any{
+			"Type":     "volume",
+			"Source":   m.certsVolumeName(),
+			"Target":   "/shared/certs",
+			"ReadOnly": true,
+		})
+		hc["Mounts"] = mounts
+	}
 
 	// Reference the script by file path — never inline content as a -c argument.
 	// The script is on the read-only certs volume mounted above.
