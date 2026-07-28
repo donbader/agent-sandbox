@@ -169,10 +169,11 @@ func buildAgentPair(p agentPairParams) (agentPairResult, error) {
 		},
 		"volumes": gatewayVolumes,
 		"healthcheck": map[string]any{
-			"test":     []string{"CMD", "wget", "--spider", "-q", "http://localhost:8080/health"},
-			"interval": "5s",
-			"timeout":  "3s",
-			"retries":  3,
+			"test":         []string{"CMD", "wget", "--spider", "-q", "http://localhost:8080/health"},
+			"interval":     "5s",
+			"timeout":      "3s",
+			"retries":      3,
+			"start_period": "10s",
 		},
 	}
 

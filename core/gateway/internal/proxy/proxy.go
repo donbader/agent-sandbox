@@ -2,6 +2,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/donbader/agent-sandbox/core/gateway/internal/vpn"
 )
 
 // Proxy is a transparent TCP proxy that intercepts TLS connections,
@@ -21,6 +24,7 @@ type Proxy struct {
 	listener    net.Listener
 	egress      *EgressFilter
 	vpnDialers  map[string]*VPNDialer // keyed by profile name
+	vpnMgr      *vpn.Manager          // managed VPN tunnels (nil if no openvpn profiles)
 	sem         chan struct{}          // connection semaphore to cap concurrency
 }
 
@@ -96,6 +100,17 @@ func (p *Proxy) Close() error {
 // Calling it when no openvpn profiles are configured is a no-op.
 func (p *Proxy) StartVPNTunnels() error {
 	return StartOpenVPNTunnels(p.vpnDialers)
+}
+
+// SetVPNManager attaches a Manager to the proxy. When set, passthrough uses
+// the Manager's dialers instead of the legacy vpnDialers map.
+func (p *Proxy) SetVPNManager(mgr *vpn.Manager) {
+	p.vpnMgr = mgr
+}
+
+// VPNManager returns the attached Manager, or nil.
+func (p *Proxy) VPNManager() *vpn.Manager {
+	return p.vpnMgr
 }
 
 func (p *Proxy) handleConn(clientConn net.Conn) {
@@ -194,7 +209,15 @@ func (p *Proxy) passthrough(clientConn net.Conn, initialData []byte, serverName 
 
 	// Route through VPN if the matched egress rule specifies a profile.
 	if decision.Rule != nil && decision.Rule.VPN != "" {
-		if dialer, ok := p.vpnDialers[decision.Rule.VPN]; ok {
+		// Prefer Manager-based dialer over legacy vpnDialers map.
+		if p.vpnMgr != nil {
+			if d := p.vpnMgr.Dialer(decision.Rule.VPN); d != nil {
+				slog.Debug("passthrough via vpn (managed)", "host", serverName, "vpn_profile", decision.Rule.VPN)
+				serverConn, dialErr = d.DialContext(context.Background(), "tcp", destAddr)
+			} else {
+				slog.Warn("vpn tunnel not connected, falling back to direct", "profile", decision.Rule.VPN, "host", serverName)
+			}
+		} else if dialer, ok := p.vpnDialers[decision.Rule.VPN]; ok {
 			slog.Debug("passthrough via vpn", "host", serverName, "vpn_profile", decision.Rule.VPN)
 			serverConn, dialErr = dialer.Dial("tcp", destAddr)
 		} else {
