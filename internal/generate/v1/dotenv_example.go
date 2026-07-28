@@ -82,6 +82,11 @@ func collectEnvVars(cfg *config.Config, contribs *plugin.Contributions, seen map
 	for _, profile := range cfg.SecretsMapping {
 		for _, ref := range profile {
 			for _, ev := range envvar.ExtractAll(ref) {
+				seen[ev] = true
+			}
+		}
+	}
+
 	// From VPN profiles (config_b64, address, username, password, totp_secret may reference ${VAR})
 	for _, profile := range cfg.Gateway.VPNProfiles {
 		if profile == nil {
