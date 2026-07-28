@@ -63,9 +63,12 @@ type egressRuleRuntime struct {
 
 // vpnProfileRuntime is the runtime representation of a VPN profile in config.yaml.
 type vpnProfileRuntime struct {
-	Type      string `yaml:"type"`
-	Address   string `yaml:"address,omitempty"`   // socks5
-	ConfigB64 string `yaml:"config_b64,omitempty"` // openvpn
+	Type       string `yaml:"type"`
+	Address    string `yaml:"address,omitempty"`     // socks5
+	ConfigB64  string `yaml:"config_b64,omitempty"`  // openvpn
+	Username   string `yaml:"username,omitempty"`    // openvpn auth
+	Password   string `yaml:"password,omitempty"`    // openvpn auth
+	TOTPSecret string `yaml:"totp_secret,omitempty"` // openvpn TOTP
 }
 
 // portForwardRuntime is the runtime representation of a port forward in config.yaml.
@@ -103,7 +106,7 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 					EnvVar:      ev,
 					ValueFormat: valueFormat,
 				})
-			}
+				}
 		}
 	}
 
@@ -221,9 +224,12 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 		rc.VPNProfiles = make(map[string]vpnProfileRuntime, len(gwCfg.VPNProfiles))
 		for name, profile := range gwCfg.VPNProfiles {
 			rc.VPNProfiles[name] = vpnProfileRuntime{
-				Type:      profile.Type,
-				Address:   profile.Address,
-				ConfigB64: profile.ConfigB64,
+				Type:       profile.Type,
+				Address:    profile.Address,
+				ConfigB64:  profile.ConfigB64,
+				Username:   profile.Username,
+				Password:   profile.Password,
+				TOTPSecret: profile.TOTPSecret,
 			}
 		}
 	}
