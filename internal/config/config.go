@@ -296,4 +296,23 @@ func MergeEgressRules(shared, perAgent []EgressRule) []EgressRule {
 	return shared
 }
 
+// MergeVPNProfiles merges shared VPN profiles with per-agent VPN profiles.
+// Per-agent profiles override shared profiles with the same name.
+func MergeVPNProfiles(shared, perAgent map[string]*VPNConfig) map[string]*VPNConfig {
+	if len(shared) == 0 {
+		return perAgent
+	}
+	if len(perAgent) == 0 {
+		return shared
+	}
+	merged := make(map[string]*VPNConfig, len(shared)+len(perAgent))
+	for k, v := range shared {
+		merged[k] = v
+	}
+	for k, v := range perAgent {
+		merged[k] = v
+	}
+	return merged
+}
+
 

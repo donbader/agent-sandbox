@@ -116,6 +116,16 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.DNSListen = ":53"
 	}
 
+	// Expand env vars in VPN profile fields before validation
+	for name, profile := range cfg.VPNProfiles {
+		profile.ConfigB64 = os.Expand(profile.ConfigB64, os.Getenv)
+		profile.Username = os.Expand(profile.Username, os.Getenv)
+		profile.Password = os.Expand(profile.Password, os.Getenv)
+		profile.TOTPSecret = os.Expand(profile.TOTPSecret, os.Getenv)
+		profile.Address = os.Expand(profile.Address, os.Getenv)
+		cfg.VPNProfiles[name] = profile
+	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config %s: %w", path, err)
 	}
