@@ -5,12 +5,17 @@
 package vpn
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -27,6 +32,9 @@ const (
 type ProfileConfig struct {
 	Type      string // "openvpn"
 	ConfigB64 string // base64-encoded .ovpn file content
+	Username   string // openvpn auth username
+	Password   string // openvpn static password (concatenated before TOTP code)
+	TOTPSecret string // base32-encoded TOTP secret (RFC 6238); empty = no TOTP
 }
 
 // StartTunnel decodes the profile config, writes it to a temp file, launches
@@ -78,18 +86,52 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 	}
 	_ = f.Close()
 
+	// Build auth credentials if provided.
+	var authPath string
+	if profile.Username != "" || profile.Password != "" || profile.TOTPSecret != "" {
+		totpCode := ""
+		if profile.TOTPSecret != "" {
+			code, err := generateTOTP(profile.TOTPSecret)
+			if err != nil {
+				_ = os.Remove(cfgPath)
+				return fmt.Errorf("generate totp: %w", err)
+			}
+			totpCode = code
+		}
+		af, err := os.CreateTemp("", fmt.Sprintf("vpn-%s-*.auth", name))
+		if err != nil {
+			_ = os.Remove(cfgPath)
+			return fmt.Errorf("create auth file: %w", err)
+		}
+		authPath = af.Name()
+		_, err = fmt.Fprintf(af, "%s\n%s%s\n", profile.Username, profile.Password, totpCode)
+		af.Close()
+		if err != nil {
+			_ = os.Remove(cfgPath)
+			_ = os.Remove(authPath)
+			return fmt.Errorf("write auth file: %w", err)
+		}
+	}
+
 	// Launch openvpn as a daemon. We override --dev so each profile gets its
 	// own deterministic tun device, regardless of what the .ovpn file specifies.
 	logPath := fmt.Sprintf("/tmp/vpn-%s.log", name)
-	cmd := exec.Command("openvpn",
+	args := []string{
 		"--config", cfgPath,
 		"--dev", tunIface,
 		"--daemon",
 		"--log", logPath,
 		"--script-security", "2",
-	)
+	}
+	if authPath != "" {
+		args = append(args, "--auth-user-pass", authPath)
+	}
+	cmd := exec.Command("openvpn", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		_ = os.Remove(cfgPath) // safe: daemon failed to start
+		_ = os.Remove(cfgPath)
+		if authPath != "" {
+			_ = os.Remove(authPath)
+		}
 		return fmt.Errorf("openvpn start failed: %w\n%s", err, out)
 	}
 
@@ -100,6 +142,9 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 	for time.Now().Before(deadline) {
 		if ifaceIsUp(tunIface) {
 			_ = os.Remove(cfgPath) // openvpn has fully read the config, safe to delete
+			if authPath != "" {
+				_ = os.Remove(authPath)
+			}
 			slog.Info("vpn tunnel started", "profile", name, "iface", tunIface)
 			return nil
 		}
@@ -107,6 +152,9 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 	}
 
 	_ = os.Remove(cfgPath) // clean up even on timeout
+	if authPath != "" {
+		_ = os.Remove(authPath)
+	}
 	return fmt.Errorf("tun interface %q did not come up within %s — check %s", tunIface, startupTimeout, logPath)
 }
 
@@ -117,4 +165,31 @@ func ifaceIsUp(name string) bool {
 		return false
 	}
 	return iface.Flags&net.FlagUp != 0
+}
+
+// generateTOTPAtTime generates a 6-digit RFC 6238 TOTP code for the 30-second window
+// containing t. secret is a base32-encoded key (case-insensitive, padding optional).
+func generateTOTPAtTime(secret string, t time.Time) (string, error) {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(
+		strings.ToUpper(strings.TrimRight(secret, "=")),
+	)
+	if err != nil {
+		return "", fmt.Errorf("totp: decode secret: %w", err)
+	}
+	var counter [8]byte
+	binary.BigEndian.PutUint64(counter[:], uint64(t.Unix())/30)
+	mac := hmac.New(sha1.New, key)
+	mac.Write(counter[:])
+	h := mac.Sum(nil)
+	offset := h[len(h)-1] & 0x0f
+	code := (uint32(h[offset])&0x7f)<<24 |
+		uint32(h[offset+1])<<16 |
+		uint32(h[offset+2])<<8 |
+		uint32(h[offset+3])
+	return fmt.Sprintf("%06d", code%1_000_000), nil
+}
+
+// generateTOTP generates a 6-digit RFC 6238 TOTP code for the current 30-second window.
+func generateTOTP(secret string) (string, error) {
+	return generateTOTPAtTime(secret, time.Now())
 }

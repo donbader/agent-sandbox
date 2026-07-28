@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"encoding/base32"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,6 +62,11 @@ type VPNProfile struct {
 
 	// openvpn fields
 	ConfigB64 string `yaml:"config_b64,omitempty"` // base64-encoded .ovpn config file
+
+	// auth fields (openvpn)
+	Username   string `yaml:"username,omitempty"`    // openvpn auth username
+	Password   string `yaml:"password,omitempty"`    // openvpn static password (concatenated with TOTP code)
+	TOTPSecret string `yaml:"totp_secret,omitempty"` // base32-encoded TOTP secret (RFC 6238)
 }
 
 // DenyGraphQL configures GraphQL mutation blocking for an egress rule.
@@ -110,11 +117,24 @@ func (cfg *Config) validate() error {
 		if profile.Type == "" {
 			return fmt.Errorf("vpn_profiles[%s]: type is required", name)
 		}
-		if profile.Type != "socks5" {
-			return fmt.Errorf("vpn_profiles[%s]: unsupported type %q (supported: socks5)", name, profile.Type)
-		}
-		if profile.Address == "" {
-			return fmt.Errorf("vpn_profiles[%s]: address is required", name)
+		switch profile.Type {
+		case "socks5":
+			if profile.Address == "" {
+				return fmt.Errorf("vpn_profiles[%s]: address is required for socks5", name)
+			}
+		case "openvpn":
+			if profile.ConfigB64 == "" {
+				return fmt.Errorf("vpn_profiles[%s]: config_b64 is required for openvpn", name)
+			}
+			if profile.TOTPSecret != "" {
+				if _, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(
+					strings.ToUpper(strings.TrimRight(profile.TOTPSecret, "=")),
+				); err != nil {
+					return fmt.Errorf("vpn_profiles[%s]: totp_secret is not valid base32: %w", name, err)
+				}
+			}
+		default:
+			return fmt.Errorf("vpn_profiles[%s]: unsupported type %q (supported: socks5, openvpn)", name, profile.Type)
 		}
 	}
 

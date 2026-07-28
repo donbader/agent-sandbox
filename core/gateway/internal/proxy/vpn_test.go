@@ -416,3 +416,70 @@ func loadConfigFromString(t *testing.T, yaml string) (*Config, error) {
 	require.NoError(t, f.Close())
 	return LoadConfig(f.Name())
 }
+
+// --- OpenVPN config validation tests ---
+
+func TestLoadConfig_Openvpn_Valid(t *testing.T) {
+	cfg := writeConfigFile(t, `
+listen: ":8443"
+vpn_profiles:
+  stx:
+    type: openvpn
+    config_b64: dGVzdA==
+egress_rules:
+  - hosts: ["agent-gateway.stx-ai.net"]
+    vpn: stx
+  - hosts: ["*"]
+    deny: true
+`)
+	require.NotNil(t, cfg)
+	assert.Equal(t, "openvpn", cfg.VPNProfiles["stx"].Type)
+	assert.Equal(t, "dGVzdA==", cfg.VPNProfiles["stx"].ConfigB64)
+}
+
+func TestLoadConfig_Openvpn_WithAuthFields(t *testing.T) {
+	cfg := writeConfigFile(t, `
+listen: ":8443"
+vpn_profiles:
+  stx:
+    type: openvpn
+    config_b64: dGVzdA==
+    username: corey@example.com
+    password: hunter2
+    totp_secret: JBSWY3DPEHPK3PXP
+egress_rules:
+  - hosts: ["agent-gateway.stx-ai.net"]
+    vpn: stx
+  - hosts: ["*"]
+    deny: true
+`)
+	require.NotNil(t, cfg)
+	p := cfg.VPNProfiles["stx"]
+	assert.Equal(t, "corey@example.com", p.Username)
+	assert.Equal(t, "hunter2", p.Password)
+	assert.Equal(t, "JBSWY3DPEHPK3PXP", p.TOTPSecret)
+}
+
+func TestLoadConfig_Openvpn_MissingConfigB64(t *testing.T) {
+	_, err := loadConfigFromString(t, `
+listen: ":8443"
+vpn_profiles:
+  stx:
+    type: openvpn
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config_b64 is required")
+}
+
+func TestLoadConfig_Openvpn_InvalidTOTPSecret(t *testing.T) {
+	_, err := loadConfigFromString(t, `
+listen: ":8443"
+vpn_profiles:
+  stx:
+    type: openvpn
+    config_b64: dGVzdA==
+    totp_secret: "not!valid!base32"
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "totp_secret is not valid base32")
+}
