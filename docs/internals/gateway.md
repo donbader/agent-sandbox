@@ -205,6 +205,37 @@ plugins:
 
 The built-in `auth-headers.ts` plugin is bundled with the gateway binary and simply applies `options.headers` to each request. No code generation, no Go templates — just data flowing through the same plugin system.
 
+
+### Credential Swap (secrets_mapping)
+
+When a header value uses `${secrets_mapping.PROFILE}` syntax, the CLI emits a `credential_swap` rule into `config.yaml` instead of a static auth-header entry. The gateway reads these rules at startup and registers a Go middleware (not a TS plugin) that performs the swap at request time.
+
+```yaml
+# agent.yaml
+secrets_mapping:
+  openai:
+    DUMMY_KEY_A: "${OPENAI_KEY_A}"
+    DUMMY_KEY_B: "${OPENAI_KEY_B}"
+
+gateway:
+  egress:
+    - hosts: ["api.openai.com"]
+      headers:
+        Authorization: "Bearer ${secrets_mapping.openai}"
+```
+
+**Generate-time:** CLI detects `${secrets_mapping.openai}` → resolves all dummy→real mappings from `.env`, emits `credential_swap_rules` in `config.yaml` with the resolved real values. Domain is added to the MITM set so the gateway can inspect the header.
+
+**Runtime (per request):**
+1. Middleware reads the `Authorization` header from the agent's request.
+2. Strips the static prefix (`"Bearer "`).
+3. Looks up the remaining token in the resolved mapping.
+4. Match → replaces header with `prefix + real_value`. No match → `403`.
+
+Real credential values are passed to `gateway.RegisterSecret()` at startup so they are always redacted from logs.
+
+This is a Go-native middleware loop (`main.go`) — no TS VM overhead per request.
+
 ## Connection Flow
 
 1. Agent makes outbound TCP connection (e.g., `curl https://github.com`)

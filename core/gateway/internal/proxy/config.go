@@ -18,9 +18,10 @@ type Config struct {
 	MITMDomains  []string              `yaml:"mitm_domains"`  // domains to MITM (terminate TLS)
 	HTTPServices []HTTPService         `yaml:"http_services"` // plain HTTP services to proxy
 	PortForwards []PortForward         `yaml:"port_forwards"` // TCP port forwards to agent container
-	AuthHeaders  []AuthHeader          `yaml:"auth_headers"`  // header injection rules from config
-	EgressRules  []EgressRule          `yaml:"egress_rules"`  // ordered egress access control rules
-	VPNProfiles  map[string]VPNProfile `yaml:"vpn_profiles,omitempty"` // named VPN profiles referenced by egress rules
+	AuthHeaders     []AuthHeader          `yaml:"auth_headers"`           // header injection rules from config
+	CredentialSwaps []CredentialSwapRule  `yaml:"credential_swaps,omitempty"` // runtime token-swap rules
+	EgressRules     []EgressRule          `yaml:"egress_rules"`           // ordered egress access control rules
+	VPNProfiles     map[string]VPNProfile `yaml:"vpn_profiles,omitempty"` // named VPN profiles referenced by egress rules
 }
 
 // AuthHeader defines a header to inject on requests to a specific domain.
@@ -28,6 +29,18 @@ type AuthHeader struct {
 	Domain string `yaml:"domain"` // target domain (e.g., "api.github.com")
 	Header string `yaml:"header"` // header name (e.g., "Authorization")
 	Value  string `yaml:"value"`  // header value (e.g., "Bearer token123")
+}
+
+// CredentialSwapRule defines a runtime token-swap rule for a domain.
+// When the gateway intercepts a request to Domain, it reads the named Header,
+// strips Prefix, looks up the remaining token in Mapping, and replaces the header
+// with Prefix + resolvedValue. Mapping values are ${ENV_VAR} references expanded at startup.
+// If the token is not found in Mapping, the request is rejected (403).
+type CredentialSwapRule struct {
+	Domain  string            `yaml:"domain"`            // target domain (e.g., "api.openai.com")
+	Header  string            `yaml:"header"`            // header to inspect and rewrite (e.g., "Authorization")
+	Prefix  string            `yaml:"prefix,omitempty"`  // static prefix to strip/restore (e.g., "Bearer ")
+	Mapping map[string]string `yaml:"mapping"`           // dummy token → ${ENV_VAR} ref (expanded at startup)
 }
 
 // HTTPService describes a plain HTTP service the gateway should proxy.

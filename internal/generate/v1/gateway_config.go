@@ -17,10 +17,11 @@ import (
 
 // GatewayConfigOutput is the merged gateway configuration for rendering.
 type GatewayConfigOutput struct {
-	AuthHeaders []AuthHeaderEntry   // auth-header entries to bake into config.yaml
-	EgressRules []config.EgressRule
-	Ingress     []plugin.IngressRule // TCP port forwards from gateway to agent
-	VPNProfiles map[string]*config.VPNConfig // VPN profiles to start at gateway boot
+	AuthHeaders    []AuthHeaderEntry    // auth-header entries to bake into config.yaml
+	CredentialSwaps []CredentialSwapEntry // runtime token-swap entries
+	EgressRules    []config.EgressRule
+	Ingress        []plugin.IngressRule // TCP port forwards from gateway to agent
+	VPNProfiles    map[string]*config.VPNConfig // VPN profiles to start at gateway boot
 }
 
 // AuthHeaderEntry describes an auth-header middleware to generate at build time.
@@ -31,16 +32,27 @@ type AuthHeaderEntry struct {
 	ValueFormat string
 }
 
+// CredentialSwapEntry describes a runtime credential-swap rule for a domain.
+// At request time the gateway reads the header, strips Prefix, looks up the
+// dummy token in Mapping, and replaces the header value with Prefix+realValue.
+type CredentialSwapEntry struct {
+	Domain  string            // host this rule applies to
+	Header  string            // header name (e.g. "Authorization")
+	Prefix  string            // static prefix (e.g. "Bearer ")
+	Mapping map[string]string // dummy token → resolved real credential value
+}
+
 // gatewayRuntimeConfig matches the proxy.Config struct in core/gateway.
 type gatewayRuntimeConfig struct {
-	Listen       string                       `yaml:"listen"`
-	DNSListen    string                       `yaml:"dns_listen"`
-	MITMDomains  []string                     `yaml:"mitm_domains"`
-	AuthHeaders  []authHeaderRuntime          `yaml:"auth_headers,omitempty"`
-	EgressRules  []egressRuleRuntime          `yaml:"egress_rules,omitempty"`
-	PortForwards []portForwardRuntime         `yaml:"port_forwards,omitempty"`
-	HealthAddr   string                       `yaml:"health_addr,omitempty"`
-	VPNProfiles  map[string]vpnProfileRuntime `yaml:"vpn_profiles,omitempty"`
+	Listen          string                         `yaml:"listen"`
+	DNSListen       string                         `yaml:"dns_listen"`
+	MITMDomains     []string                       `yaml:"mitm_domains"`
+	AuthHeaders     []authHeaderRuntime            `yaml:"auth_headers,omitempty"`
+	CredentialSwaps []credentialSwapRuntime        `yaml:"credential_swaps,omitempty"`
+	EgressRules     []egressRuleRuntime            `yaml:"egress_rules,omitempty"`
+	PortForwards    []portForwardRuntime           `yaml:"port_forwards,omitempty"`
+	HealthAddr      string                         `yaml:"health_addr,omitempty"`
+	VPNProfiles     map[string]vpnProfileRuntime   `yaml:"vpn_profiles,omitempty"`
 }
 
 // authHeaderRuntime is the runtime representation of an auth-header entry in config.yaml.
@@ -48,6 +60,15 @@ type authHeaderRuntime struct {
 	Domain string `yaml:"domain"`
 	Header string `yaml:"header"`
 	Value  string `yaml:"value"`
+}
+
+// credentialSwapRuntime is the runtime representation of a credential-swap rule.
+type credentialSwapRuntime struct {
+	Domain  string            `yaml:"domain"`
+	Header  string            `yaml:"header"`
+	Prefix  string            `yaml:"prefix,omitempty"`
+	Mapping map[string]string `yaml:"mapping"` // dummy token → real credential value (resolved)
+	OnMiss  string            `yaml:"on_miss,omitempty"` // "reject" (default) or "passthrough"
 }
 
 // egressRuleRuntime is the runtime representation of an egress rule in config.yaml.
@@ -89,7 +110,9 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 		out.EgressRules = config.MigrateServicesToEgress(cfg.Gateway.Services)
 	}
 
-	// Process egress rules for auth headers
+	// Process egress rules for auth headers and credential swaps.
+	// A header value matching ${secrets_mapping.PROFILE} triggers runtime swap mode;
+	// all other ${ENV_VAR} values use the existing static auth-header injection.
 	for _, rule := range out.EgressRules {
 		if rule.Deny || len(rule.Headers) == 0 {
 			continue
@@ -99,14 +122,26 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 				continue
 			}
 			for header, value := range rule.Headers {
-				ev, valueFormat := envvar.ParseTemplate(value)
-				out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
-					Domain:      host,
-					Header:      header,
-					EnvVar:      ev,
-					ValueFormat: valueFormat,
-				})
+				if prefix, profileName, ok := envvar.ParseSecretsMappingRef(value); ok {
+					// Credential swap: agent sends a dummy token; gateway swaps to real value at request time.
+					if profile := cfg.SecretsMapping[profileName]; len(profile) > 0 {
+						out.CredentialSwaps = append(out.CredentialSwaps, CredentialSwapEntry{
+							Domain:  host,
+							Header:  header,
+							Prefix:  prefix,
+							Mapping: profile, // values are ${ENV_VAR} refs, resolved at gateway startup
+						})
+					}
+				} else {
+					ev, valueFormat := envvar.ParseTemplate(value)
+					out.AuthHeaders = append(out.AuthHeaders, AuthHeaderEntry{
+						Domain:      host,
+						Header:      header,
+						EnvVar:      ev,
+						ValueFormat: valueFormat,
+					})
 				}
+			}
 		}
 	}
 
@@ -185,6 +220,10 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			}
 		}
 	}
+	// Credential swap rules also require MITM (gateway must read the header to swap it).
+	for _, sw := range gwCfg.CredentialSwaps {
+		mitmSet[sw.Domain] = true
+	}
 
 	domains := make([]string, 0, len(mitmSet))
 	for domain := range mitmSet {
@@ -203,6 +242,18 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 			Domain: ah.Domain,
 			Header: ah.Header,
 			Value:  value,
+		})
+	}
+
+	// Convert credential-swap entries to runtime format.
+	// Mapping values are ${ENV_VAR} references stored verbatim; the gateway binary
+	// expands them at startup via expandEnvVars (same pattern as auth_headers).
+	for _, sw := range gwCfg.CredentialSwaps {
+		rc.CredentialSwaps = append(rc.CredentialSwaps, credentialSwapRuntime{
+			Domain:  sw.Domain,
+			Header:  sw.Header,
+			Prefix:  sw.Prefix,
+			Mapping: sw.Mapping,
 		})
 	}
 
