@@ -73,8 +73,11 @@ func StartOpenVPNTunnels(dialers map[string]*VPNDialer) error {
 		tunIface := fmt.Sprintf("tun%d", i)
 		d := dialers[name]
 		if err := vpn.StartTunnel(name, vpn.ProfileConfig{
-			Type:      d.profile.Type,
-			ConfigB64: d.profile.ConfigB64,
+			Type:       d.profile.Type,
+			ConfigB64:  d.profile.ConfigB64,
+			Username:   d.profile.Username,
+			Password:   d.profile.Password,
+			TOTPSecret: d.profile.TOTPSecret,
 		}, tunIface); err != nil {
 			return fmt.Errorf("vpn profile %q: %w", name, err)
 		}

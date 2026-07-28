@@ -5,12 +5,18 @@
 package vpn
 
 import (
+	"bufio"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -27,6 +33,9 @@ const (
 type ProfileConfig struct {
 	Type      string // "openvpn"
 	ConfigB64 string // base64-encoded .ovpn file content
+	Username   string // openvpn auth username
+	Password   string // openvpn static password (concatenated before TOTP code)
+	TOTPSecret string // base32-encoded TOTP secret (RFC 6238); empty = no TOTP
 }
 
 // StartTunnel decodes the profile config, writes it to a temp file, launches
@@ -48,8 +57,7 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 		return fmt.Errorf("unsupported VPN type %q (only 'openvpn' is supported)", profile.Type)
 	}
 
-	// Idempotency: if the interface is already up (e.g. another code path already
-	// started this tunnel), just return without launching a second daemon.
+	// Idempotency: if the interface is already up, reuse it.
 	if ifaceIsUp(tunIface) {
 		slog.Info("vpn tunnel already running, reusing interface", "profile", name, "iface", tunIface)
 		return nil
@@ -65,7 +73,7 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 		}
 	}
 
-	// Write to a temp file.
+	// Write config to a temp file.
 	f, err := os.CreateTemp("", fmt.Sprintf("vpn-%s-*.ovpn", name))
 	if err != nil {
 		return fmt.Errorf("create temp config: %w", err)
@@ -78,35 +86,47 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 	}
 	_ = f.Close()
 
-	// Launch openvpn as a daemon. We override --dev so each profile gets its
-	// own deterministic tun device, regardless of what the .ovpn file specifies.
+	// Build openvpn args.
 	logPath := fmt.Sprintf("/tmp/vpn-%s.log", name)
-	cmd := exec.Command("openvpn",
+	args := []string{
 		"--config", cfgPath,
 		"--dev", tunIface,
 		"--daemon",
 		"--log", logPath,
 		"--script-security", "2",
-	)
+	}
+
+	// If credentials are configured, use the OpenVPN management interface for
+	// authentication instead of writing credentials to disk. This lets openvpn
+	// query us for a fresh TOTP code on every connect and reconnect.
+	if profile.Username != "" || profile.Password != "" || profile.TOTPSecret != "" {
+		port := tunManagementPort(tunIface)
+		args = append(args,
+			"--management", "127.0.0.1", fmt.Sprintf("%d", port),
+			"--management-query-passwords",
+		)
+		go serveManagement(fmt.Sprintf("127.0.0.1:%d", port), profile)
+	}
+
+	cmd := exec.Command("openvpn", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		_ = os.Remove(cfgPath) // safe: daemon failed to start
+		_ = os.Remove(cfgPath)
 		return fmt.Errorf("openvpn start failed: %w\n%s", err, out)
 	}
 
 	// Poll until the tun interface appears and is UP. The config file is deleted
-	// once the interface comes up (openvpn has read it by then) so credentials
-	// don't persist on disk longer than necessary.
+	// once the interface comes up (openvpn has read it by then).
 	deadline := time.Now().Add(startupTimeout)
 	for time.Now().Before(deadline) {
 		if ifaceIsUp(tunIface) {
-			_ = os.Remove(cfgPath) // openvpn has fully read the config, safe to delete
+			_ = os.Remove(cfgPath)
 			slog.Info("vpn tunnel started", "profile", name, "iface", tunIface)
 			return nil
 		}
 		time.Sleep(pollInterval)
 	}
 
-	_ = os.Remove(cfgPath) // clean up even on timeout
+	_ = os.Remove(cfgPath)
 	return fmt.Errorf("tun interface %q did not come up within %s — check %s", tunIface, startupTimeout, logPath)
 }
 
@@ -117,4 +137,86 @@ func ifaceIsUp(name string) bool {
 		return false
 	}
 	return iface.Flags&net.FlagUp != 0
+}
+
+// tunManagementPort returns the OpenVPN management socket port for a tun interface.
+// tun0 → 11940, tun1 → 11941, and so on.
+func tunManagementPort(tunIface string) int {
+	var idx int
+	_, _ = fmt.Sscanf(tunIface, "tun%d", &idx)
+	return 11940 + idx
+}
+
+// serveManagement connects to the OpenVPN management interface and responds to
+// credential queries. It runs in a goroutine for the lifetime of the gateway,
+// reconnecting automatically when the connection drops (e.g. on openvpn reconnect).
+// On each auth query a fresh TOTP code is generated so every reconnect uses a
+// valid, unexpired credential.
+func serveManagement(addr string, profile ProfileConfig) {
+	const retryDelay = 500 * time.Millisecond
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			time.Sleep(retryDelay)
+			continue
+		}
+		if err := handleManagementConn(conn, profile); err != nil {
+			slog.Debug("vpn management connection closed", "addr", addr, "error", err)
+		}
+		_ = conn.Close()
+		time.Sleep(retryDelay)
+	}
+}
+
+// handleManagementConn reads from an OpenVPN management socket and responds to
+// password queries. Returns when the connection is closed or an error occurs.
+func handleManagementConn(conn net.Conn, profile ProfileConfig) error {
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, ">PASSWORD:Need 'Auth'") {
+			continue
+		}
+		totpCode := ""
+		if profile.TOTPSecret != "" {
+			code, err := generateTOTP(profile.TOTPSecret)
+			if err != nil {
+				slog.Error("vpn: generate totp for management auth", "error", err)
+				continue
+			}
+			totpCode = code
+		}
+		if _, err := fmt.Fprintf(conn, "username \"Auth\" %s\npassword \"Auth\" %s%s\n",
+			profile.Username, profile.Password, totpCode); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
+// generateTOTPAtTime generates a 6-digit RFC 6238 TOTP code for the 30-second window
+// containing t. secret is a base32-encoded key (case-insensitive, padding optional).
+func generateTOTPAtTime(secret string, t time.Time) (string, error) {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(
+		strings.ToUpper(strings.TrimRight(secret, "=")),
+	)
+	if err != nil {
+		return "", fmt.Errorf("totp: decode secret: %w", err)
+	}
+	var counter [8]byte
+	binary.BigEndian.PutUint64(counter[:], uint64(t.Unix())/30)
+	mac := hmac.New(sha1.New, key)
+	mac.Write(counter[:])
+	h := mac.Sum(nil)
+	offset := h[len(h)-1] & 0x0f
+	code := (uint32(h[offset])&0x7f)<<24 |
+		uint32(h[offset+1])<<16 |
+		uint32(h[offset+2])<<8 |
+		uint32(h[offset+3])
+	return fmt.Sprintf("%06d", code%1_000_000), nil
+}
+
+// generateTOTP generates a 6-digit RFC 6238 TOTP code for the current 30-second window.
+func generateTOTP(secret string) (string, error) {
+	return generateTOTPAtTime(secret, time.Now())
 }
