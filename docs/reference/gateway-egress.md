@@ -305,7 +305,7 @@ Starts an OpenVPN daemon **inside the gateway container** at startup and routes 
 
 #### VPN Management Endpoints
 
-The gateway exposes HTTP endpoints on `:8080` for monitoring and controlling VPN tunnels:
+The gateway exposes HTTP endpoints on `:8080` for monitoring and controlling VPN tunnels. These endpoints are restricted to localhost (`127.0.0.1` / `::1`) and are not accessible from the agent container.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
