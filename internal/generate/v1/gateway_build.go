@@ -112,30 +112,24 @@ func (g *Generator) copyGatewayBinary(gatewayDir string, buildDir string, resolv
 		// Try building from source (dev mode)
 		srcDir := filepath.Join(g.coreDir, "..")
 		mainPkg := "./core/gateway/cmd/gateway/"
-		if _, err := os.Stat(filepath.Join(srcDir, "core", "gateway", "cmd", "gateway", "main.go")); err == nil {
-			if goPath, err := exec.LookPath("go"); err == nil {
-				fmt.Fprintf(os.Stderr, "[dev] Building gateway binary (linux/%s)...\n", arch)
-				cmd := exec.Command(goPath, "build", "-o", destPath, mainPkg)
-				cmd.Dir = srcDir
-				cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0")
-				cmd.Stderr = os.Stderr
-				if err := cmd.Run(); err == nil {
-					g.cachedGatewayBinary = destPath
-					return nil
-				}
-				fmt.Fprintf(os.Stderr, "[dev] Gateway build failed, falling back to pre-built binary\n")
-			}
+		mainGoPath := filepath.Join(srcDir, "core", "gateway", "cmd", "gateway", "main.go")
+		if _, err := os.Stat(mainGoPath); err != nil {
+			return fmt.Errorf("gateway source not found at %s: %w", mainGoPath, err)
 		}
-
-		// Fall back to pre-built binary
-		binaryPath := filepath.Join(g.coreDir, "gateway", "bin", "gateway-linux-"+arch)
-		data, err := os.ReadFile(binaryPath)
-		if err == nil {
-			if err := os.WriteFile(destPath, data, 0755); err != nil {
-				return fmt.Errorf("write gateway binary: %w", err)
-			}
-			return nil
+		goPath, err := exec.LookPath("go")
+		if err != nil {
+			return fmt.Errorf("'go' not found in PATH — required for --dev mode gateway build: %w", err)
 		}
+		fmt.Fprintf(os.Stderr, "[dev] Building gateway binary (linux/%s)...\n", arch)
+		cmd := exec.Command(goPath, "build", "-o", destPath, mainPkg)
+		cmd.Dir = srcDir
+		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0")
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("gateway build failed: %w", err)
+		}
+		g.cachedGatewayBinary = destPath
+		return nil
 	}
 
 	if g.gatewayFS != nil {
