@@ -342,6 +342,166 @@ docker exec <gateway-container> wget -qO- --post-data='' http://localhost:8080/v
 docker exec <gateway-container> wget -qO- --post-data='' 'http://localhost:8080/vpn/reconnect?profile=corp'
 ```
 
+**Agent skill (copy-paste):**
+
+If your agent supports skills (e.g. omp, Claude Code, OpenCode), drop this file into your agent's skills directory to enable VPN self-healing. The agent will automatically check VPN status and reconnect when VPN-routed requests fail.
+
+<details>
+<summary>skills/vpn-ops/SKILL.md</summary>
+
+````markdown
+---
+name: vpn-ops
+description: Check VPN tunnel status and reconnect when VPN-routed requests fail. Use when seeing connection timeouts to VPN-routed hosts, when asked about VPN status, or when configuring VPN profiles.
+---
+
+# VPN Operations
+
+Manage OpenVPN tunnels through the gateway's VPN management endpoints.
+
+## When to Use
+
+- Requests to VPN-routed hosts timeout or return connection errors
+- User asks about VPN status or connectivity
+- After container restart, to verify tunnels are healthy
+- Setting up or modifying VPN configuration
+
+## Configuration
+
+### agent.yaml / fleet.yaml
+
+```yaml
+gateway:
+  vpn_profiles:
+    corp:
+      type: openvpn
+      config_b64: ${CORP_VPN_OVPN_B64}      # base64-encoded .ovpn file
+      username: ${CORP_VPN_USERNAME}          # optional: OpenVPN auth username
+      totp_secret: ${CORP_VPN_TOTP_SECRET}   # optional: base32 TOTP secret for 2FA
+
+  egress:
+    - hosts: ["internal-api.example.com"]
+      vpn: corp                               # route through "corp" profile
+      headers:
+        Authorization: "Bearer ${API_TOKEN}"
+```
+
+### .env
+
+```bash
+# Encode your .ovpn config file:
+#   Linux:  base64 -w0 < client.ovpn
+#   macOS:  base64 -i client.ovpn
+CORP_VPN_OVPN_B64=<base64-encoded .ovpn content>
+
+# Optional: for servers requiring username/password + TOTP
+CORP_VPN_USERNAME=myuser
+CORP_VPN_TOTP_SECRET=JBSWY3DPEHPK3PXP   # base32-encoded, no padding needed
+```
+
+### Key Points
+
+- `type` must be `openvpn` (or `socks5` for SOCKS5 proxy)
+- `config_b64` is the ONLY required field for basic OpenVPN
+- `username` + `totp_secret` enable auto-auth via OpenVPN management interface (fresh TOTP generated on each connect/reconnect)
+- Each profile gets a deterministic tun interface: first alphabetically → `tun0`, second → `tun1`
+- Reference profiles from egress rules with `vpn: <profile-name>`
+- VPN profiles must be defined BEFORE they are referenced in egress rules
+
+### After Configuration
+
+```bash
+agent-sandbox generate            # regenerate .build/
+agent-sandbox compose up --build -d
+```
+
+The gateway will:
+1. Start immediately (health endpoint responds right away)
+2. Connect VPN tunnels asynchronously in background (3 retries, exponential backoff)
+3. Log tunnel status: `vpn tunnel connected` or `vpn tunnel failed after retries`
+
+## Commands
+
+```bash
+# Check status of all tunnels
+curl -s "http://${GATEWAY_HOST}:8080/vpn/status" | jq .
+
+# Reconnect all tunnels
+curl -s -X POST "http://${GATEWAY_HOST}:8080/vpn/reconnect"
+
+# Reconnect a specific profile
+curl -s -X POST "http://${GATEWAY_HOST}:8080/vpn/reconnect?profile=<name>"
+```
+
+## Status Response
+
+```json
+[
+  {
+    "profile": "corp",
+    "interface": "tun0",
+    "state": "connected",
+    "since": "2026-07-28T13:28:51Z",
+    "attempts": 1
+  }
+]
+```
+
+States: `connected`, `connecting`, `failed`, `disconnected`.
+
+## Procedure
+
+### 1. Diagnose
+
+```bash
+curl -s "http://${GATEWAY_HOST}:8080/vpn/status" | jq .
+```
+
+- `connected` → VPN is fine, problem is elsewhere
+- `failed` → trigger reconnect
+- `connecting` → wait 30s then check again
+
+### 2. Reconnect
+
+```bash
+curl -s -X POST "http://${GATEWAY_HOST}:8080/vpn/reconnect?profile=<name>"
+```
+
+Wait 15-30 seconds, then verify status.
+
+### 3. If Still Failing
+
+1. Check error: `curl -s "http://${GATEWAY_HOST}:8080/vpn/status" | jq '.[].error'`
+2. Try reconnecting one more time
+3. If still failing, inform the user that the VPN server may be unreachable
+
+## Multi-Profile
+
+- `GET /vpn/status` returns all profiles (sorted alphabetically)
+- `POST /vpn/reconnect` (no param) reconnects ALL profiles
+- `POST /vpn/reconnect?profile=X` reconnects only X
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `tun interface did not come up` | VPN server unreachable or UDP blocked | Check network, retry |
+| `openvpn start failed` | Bad config or missing /dev/net/tun | Verify config_b64, check `devices` in compose |
+| `decode config_b64` | Invalid base64 encoding | Re-encode: `base64 -w0 < file.ovpn` |
+| Status stuck on `connecting` | Slow VPN server, TOTP clock skew | Wait for retries to finish, check system time |
+| Connected but requests fail | DNS not routing through VPN | Verify `vpn:` field on the egress rule |
+
+## Notes
+
+- Reconnect is async — always poll `/vpn/status` to confirm
+- TOTP codes are generated automatically on each attempt
+- Don't spam reconnect — each attempt takes up to 30s (3 retries)
+- When VPN is down, traffic falls back to direct (will likely fail for VPN-only hosts)
+- The gateway container needs `devices: [/dev/net/tun:/dev/net/tun]` and `cap_add: [NET_ADMIN]` — these are auto-configured when any openvpn profile is present
+````
+
+</details>
+
 **Encode your .ovpn file:**
 ```bash
 base64 -w0 < client.ovpn   # Linux
