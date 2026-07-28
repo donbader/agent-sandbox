@@ -99,7 +99,10 @@ type VPNConfig struct {
 	Address string `yaml:"address,omitempty" json:"address,omitempty" jsonschema:"title=address,description=SOCKS5 proxy address (host:port). Required when type is 'socks5'."`
 
 	// openvpn fields
-	ConfigB64 string `yaml:"config_b64,omitempty" json:"config_b64,omitempty" jsonschema:"title=config_b64,description=Base64-encoded .ovpn client config file (run: base64 -w0 < client.ovpn). Use an env-var reference to keep secrets out of the config file. Required when type is 'openvpn'."`
+	ConfigB64  string `yaml:"config_b64,omitempty" json:"config_b64,omitempty" jsonschema:"title=config_b64,description=Base64-encoded .ovpn client config file (run: base64 -w0 < client.ovpn). Use an env-var reference to keep secrets out of the config file. Required when type is 'openvpn'."`
+	Username   string `yaml:"username,omitempty" json:"username,omitempty" jsonschema:"title=username,description=OpenVPN auth username. Must not contain newline characters."`
+	Password   string `yaml:"password,omitempty" json:"password,omitempty" jsonschema:"title=password,description=OpenVPN static password prepended to TOTP code. Must not contain newline characters."`
+	TOTPSecret string `yaml:"totp_secret,omitempty" json:"totp_secret,omitempty" jsonschema:"title=totp_secret,description=Base32-encoded TOTP secret (RFC 6238). When set a fresh 6-digit code is generated on every VPN connect and appended to the password."`
 }
 
 // GatewayServiceEntry represents an allowed upstream service.
