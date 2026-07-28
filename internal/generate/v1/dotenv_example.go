@@ -77,6 +77,18 @@ func collectEnvVars(cfg *config.Config, contribs *plugin.Contributions, seen map
 	for _, inst := range cfg.Installations {
 		scanOptionsForEnvVars(inst.Options, seen)
 	}
+
+	// From VPN profiles (config_b64, address, username, password, totp_secret may reference ${VAR})
+	for _, profile := range cfg.Gateway.VPNProfiles {
+		if profile == nil {
+			continue
+		}
+		for _, s := range []string{profile.ConfigB64, profile.Address, profile.Username, profile.Password, profile.TOTPSecret} {
+			for _, ev := range envvar.ExtractAll(s) {
+				seen[ev] = true
+			}
+		}
+	}
 }
 
 // scanOptionsForEnvVars recursively scans plugin options for ${VAR} references.
