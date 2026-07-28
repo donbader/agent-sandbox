@@ -300,8 +300,47 @@ Starts an OpenVPN daemon **inside the gateway container** at startup and routes 
 - The gateway image is automatically built with `openvpn` and `iproute2` when any `openvpn` profile is configured.
 - The Docker Compose gateway service automatically gains `devices: [/dev/net/tun:/dev/net/tun]`.
 - Each profile is assigned a deterministic tun interface (`tun0` for the first alphabetical profile, `tun1` for the second, etc.).
-- Tunnel startup is **blocking** — the gateway does not begin proxying until all `openvpn` tunnels are up or until the 60-second timeout is reached.
+- Tunnel startup is **non-blocking** — the gateway starts immediately and connects tunnels asynchronously with up to 3 retry attempts. If a tunnel fails, the gateway stays healthy and traffic to VPN-routed hosts falls back to direct connection (with a warning log). Use the `/vpn/reconnect` endpoint to retry.
 - Works with Pritunl, AWS Client VPN, and any standard OpenVPN server.
+
+#### VPN Management Endpoints
+
+The gateway exposes HTTP endpoints on `:8080` for monitoring and controlling VPN tunnels. These endpoints are restricted to localhost (`127.0.0.1` / `::1`) and are not accessible from the agent container.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/vpn/status` | `GET` | Returns JSON array of all tunnel statuses |
+| `/vpn/reconnect` | `POST` | Reconnect all tunnels |
+| `/vpn/reconnect?profile=<name>` | `POST` | Reconnect a specific tunnel |
+
+**Status response:**
+
+```json
+[
+  {
+    "profile": "corp",
+    "interface": "tun0",
+    "state": "connected",
+    "since": "2026-07-28T13:28:51Z",
+    "attempts": 1
+  }
+]
+```
+
+Possible `state` values: `disconnected`, `connecting`, `connected`, `failed`.
+
+**Reconnect from the host:**
+
+```bash
+# Check status
+docker exec <gateway-container> wget -qO- http://localhost:8080/vpn/status
+
+# Reconnect all tunnels
+docker exec <gateway-container> wget -qO- --post-data='' http://localhost:8080/vpn/reconnect
+
+# Reconnect a specific profile
+docker exec <gateway-container> wget -qO- --post-data='' 'http://localhost:8080/vpn/reconnect?profile=corp'
+```
 
 **Encode your .ovpn file:**
 ```bash

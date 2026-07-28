@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/donbader/agent-sandbox/core/gateway/internal/pluginloader"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/proxy"
 	"github.com/donbader/agent-sandbox/core/gateway/internal/redact"
+	"github.com/donbader/agent-sandbox/core/gateway/internal/vpn"
 	"github.com/donbader/agent-sandbox/core/sdk/gateway"
 )
 
@@ -190,12 +192,24 @@ func main() {
 	// Start TCP proxy
 	p := proxy.New(cfg)
 
-	// Start OpenVPN tunnels for any openvpn-type VPN profiles.
-	// socks5 profiles need no startup; openvpn ones launch a daemon and wait
-	// for the tun interface to come up. No-op when no openvpn profiles are present.
-	if err := p.StartVPNTunnels(); err != nil {
-		slog.Error("failed to start VPN tunnels", "error", err)
-		os.Exit(1)
+	// Build VPN Manager for openvpn profiles. The Manager starts tunnels
+	// asynchronously with retries — the gateway stays alive even if VPN fails.
+	var vpnMgr *vpn.Manager
+	if len(cfg.VPNProfiles) > 0 {
+		profiles := make(map[string]vpn.ProfileConfig, len(cfg.VPNProfiles))
+		for name, vp := range cfg.VPNProfiles {
+			profiles[name] = vpn.ProfileConfig{
+				Type:       vp.Type,
+				ConfigB64:  vp.ConfigB64,
+				Username:   vp.Username,
+				Password:   vp.Password,
+				TOTPSecret: vp.TOTPSecret,
+			}
+		}
+		vpnMgr = vpn.NewManager(profiles)
+		p.SetVPNManager(vpnMgr)
+		vpnMgr.ConnectAll()
+		slog.Info("vpn tunnels connecting asynchronously", "profiles", len(profiles))
 	}
 
 	// Generate CA and register MITM handler if MITM domains are configured
@@ -250,11 +264,22 @@ func main() {
 			}
 
 			// Wire VPN dialing for MITM upstream connections.
-			if len(cfg.VPNProfiles) > 0 {
+			// Uses the Manager if available (non-blocking), falls back to legacy.
+			if vpnMgr != nil {
+				mitmHandler.VPNDialFunc = func(serverName string) func(context.Context, string, string) (net.Conn, error) {
+					decision := egressFilter.AllowHost(serverName)
+					if decision.Rule == nil || decision.Rule.VPN == "" {
+						return nil
+					}
+					d := vpnMgr.Dialer(decision.Rule.VPN)
+					if d == nil {
+						slog.Warn("mitm: vpn tunnel not connected", "profile", decision.Rule.VPN, "host", serverName)
+						return nil
+					}
+					return d.DialContext
+				}
+			} else if len(cfg.VPNProfiles) > 0 {
 				vpnDialers := proxy.BuildVPNDialers(cfg.VPNProfiles)
-				// Start openvpn tunnels for the MITM dialer set. Already-running
-				// tunnels (started above by p.StartVPNTunnels) are detected and
-				// skipped — only the bound dialer is populated.
 				if err := proxy.StartOpenVPNTunnels(vpnDialers); err != nil {
 					slog.Error("failed to start VPN tunnels for MITM", "error", err)
 					os.Exit(1)
@@ -338,7 +363,8 @@ func main() {
 		slog.Warn("iptables setup skipped", "error", err)
 	}
 
-	// Health + route handler endpoint
+	// Health + route handler endpoint (started early so Docker healthcheck passes
+	// while VPN tunnels are still connecting).
 	healthAddr := ":8080"
 	go func() {
 		mux := http.NewServeMux()
@@ -346,6 +372,53 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ok"))
 		})
+
+		// VPN management endpoints (restricted to localhost to prevent
+		// untrusted agent containers from cycling VPN connections).
+		if vpnMgr != nil {
+			localhostOnly := func(next http.HandlerFunc) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					host, _, _ := net.SplitHostPort(r.RemoteAddr)
+					if host != "127.0.0.1" && host != "::1" {
+						http.NotFound(w, r)
+						return
+					}
+					next(w, r)
+				}
+			}
+			mux.HandleFunc("/vpn/status", localhostOnly(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				data, err := vpnMgr.StatusJSON()
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(data)
+			}))
+			mux.HandleFunc("/vpn/reconnect", localhostOnly(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				profile := r.URL.Query().Get("profile")
+				if profile != "" {
+					if err := vpnMgr.Reconnect(profile); err != nil {
+						w.WriteHeader(http.StatusNotFound)
+						_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]string{"status": "reconnecting", "profile": profile})
+				} else {
+					vpnMgr.ReconnectAll()
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]string{"status": "reconnecting_all"})
+				}
+			}))
+		}
+
 		// Serve plugin-registered routes (e.g. /plugins/mcp-oauth/callback)
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			handler := gateway.MatchRoute(r.URL.Path)
