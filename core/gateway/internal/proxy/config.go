@@ -64,8 +64,8 @@ type VPNProfile struct {
 	ConfigB64 string `yaml:"config_b64,omitempty"` // base64-encoded .ovpn config file
 
 	// auth fields (openvpn)
-	Username   string `yaml:"username,omitempty"`    // openvpn auth username
-	Password   string `yaml:"password,omitempty"`    // openvpn static password (concatenated with TOTP code)
+	Username   string `yaml:"username,omitempty"`    // openvpn auth username; must not contain newline characters
+	Password   string `yaml:"password,omitempty"`    // openvpn static password prepended to TOTP code; must not contain newline characters
 	TOTPSecret string `yaml:"totp_secret,omitempty"` // base32-encoded TOTP secret (RFC 6238)
 }
 
@@ -125,6 +125,12 @@ func (cfg *Config) validate() error {
 		case "openvpn":
 			if profile.ConfigB64 == "" {
 				return fmt.Errorf("vpn_profiles[%s]: config_b64 is required for openvpn", name)
+			}
+			if strings.ContainsAny(profile.Username, "\n\r") {
+				return fmt.Errorf("vpn_profiles[%s]: username must not contain newline characters", name)
+			}
+			if strings.ContainsAny(profile.Password, "\n\r") {
+				return fmt.Errorf("vpn_profiles[%s]: password must not contain newline characters", name)
 			}
 			if profile.TOTPSecret != "" {
 				if _, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(

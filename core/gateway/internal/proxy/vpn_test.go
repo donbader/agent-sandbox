@@ -483,3 +483,15 @@ vpn_profiles:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "totp_secret is not valid base32")
 }
+
+func TestLoadConfig_Openvpn_UsernameWithNewline(t *testing.T) {
+	_, err := loadConfigFromString(t, "listen: \":8443\"\nvpn_profiles:\n  stx:\n    type: openvpn\n    config_b64: dGVzdA==\n    username: \"user\\ninjected\"\n")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "username must not contain newline characters")
+}
+
+func TestLoadConfig_Openvpn_PasswordWithNewline(t *testing.T) {
+	_, err := loadConfigFromString(t, "listen: \":8443\"\nvpn_profiles:\n  stx:\n    type: openvpn\n    config_b64: dGVzdA==\n    password: \"pass\\ninjected\"\n")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "password must not contain newline characters")
+}
