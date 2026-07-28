@@ -106,7 +106,7 @@ func BuildGatewayConfig(cfg *config.Config, contribs *plugin.Contributions) *Gat
 					EnvVar:      ev,
 					ValueFormat: valueFormat,
 				})
-			}
+				}
 		}
 	}
 
@@ -223,14 +223,14 @@ func WriteGatewayRuntimeConfig(buildDir string, gwCfg *GatewayConfigOutput) erro
 	if len(gwCfg.VPNProfiles) > 0 {
 		rc.VPNProfiles = make(map[string]vpnProfileRuntime, len(gwCfg.VPNProfiles))
 		for name, profile := range gwCfg.VPNProfiles {
-		rc.VPNProfiles[name] = vpnProfileRuntime{
-			Type:       profile.Type,
-			Address:    profile.Address,
-			ConfigB64:  profile.ConfigB64,
-			Username:   profile.Username,
-			Password:   profile.Password,
-			TOTPSecret: profile.TOTPSecret,
-		}
+			rc.VPNProfiles[name] = vpnProfileRuntime{
+				Type:       profile.Type,
+				Address:    profile.Address,
+				ConfigB64:  profile.ConfigB64,
+				Username:   profile.Username,
+				Password:   profile.Password,
+				TOTPSecret: profile.TOTPSecret,
+			}
 		}
 	}
 
