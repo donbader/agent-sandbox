@@ -143,7 +143,7 @@ func ifaceIsUp(name string) bool {
 // tun0 → 11940, tun1 → 11941, and so on.
 func tunManagementPort(tunIface string) int {
 	var idx int
-	fmt.Sscanf(tunIface, "tun%d", &idx)
+	_, _ = fmt.Sscanf(tunIface, "tun%d", &idx)
 	return 11940 + idx
 }
 
@@ -163,7 +163,7 @@ func serveManagement(addr string, profile ProfileConfig) {
 		if err := handleManagementConn(conn, profile); err != nil {
 			slog.Debug("vpn management connection closed", "addr", addr, "error", err)
 		}
-		conn.Close()
+		_ = conn.Close()
 		time.Sleep(retryDelay)
 	}
 }
