@@ -105,7 +105,7 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 		}
 		authPath = af.Name()
 		_, err = fmt.Fprintf(af, "%s\n%s%s\n", profile.Username, profile.Password, totpCode)
-		af.Close()
+		_ = af.Close()
 		if err != nil {
 			_ = os.Remove(cfgPath)
 			_ = os.Remove(authPath)
