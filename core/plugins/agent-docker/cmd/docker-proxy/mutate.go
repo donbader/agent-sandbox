@@ -101,12 +101,23 @@ func (m *Mutator) injectInitWrapper(body map[string]any, hc map[string]any) {
 	hc["Dns"] = []string{m.cfg.GatewayIP}
 
 	// Mount certs volume (read-only) for CA cert + gateway-route.sh access.
-	// Skip if /shared/certs is already mounted (e.g. gateway/agent containers from compose).
+	// Skip if /shared/certs is already present — Docker Compose sends long-form
+	// specs via Mounts and short-form strings via Binds; check both to avoid a
+	// duplicate mount error when compose up runs through this proxy socket.
 	mounts, _ := hc["Mounts"].([]any)
 	certsAlreadyMounted := false
 	for _, mount := range mounts {
 		if mp, ok := mount.(map[string]any); ok {
 			if mp["Target"] == "/shared/certs" {
+				certsAlreadyMounted = true
+				break
+			}
+		}
+	}
+	if !certsAlreadyMounted {
+		binds, _ := hc["Binds"].([]any)
+		for _, b := range binds {
+			if s, ok := b.(string); ok && strings.Contains(s, ":/shared/certs") {
 				certsAlreadyMounted = true
 				break
 			}
