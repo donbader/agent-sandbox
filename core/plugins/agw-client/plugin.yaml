@@ -1,0 +1,18 @@
+name: agw-client
+options:
+  token:
+    type: string
+    required: true
+    description: "AGW bearer token env var reference (e.g. ${AGW_TOKEN})"
+  host:
+    type: string
+    required: false
+    default: "agent-gateway.stx-ai.net"
+    description: "Agent Gateway hostname (default: agent-gateway.stx-ai.net)"
+
+contributes:
+  gateway:
+    egress:
+      - hosts: ["{{ .plugin.options.host }}"]
+        middlewares:
+          - "./src/agw-auth.ts"
