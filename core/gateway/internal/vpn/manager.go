@@ -1,5 +1,6 @@
 // Package vpn — manager.go provides a Manager that tracks tunnel lifecycle,
-// supports non-blocking startup with retries, and exposes reconnect capability.
+// supports non-blocking startup with retries, health watching, and exposes
+// reconnect capability.
 package vpn
 
 import (
@@ -30,6 +31,14 @@ const (
 
 	// defaultRetryBackoff is the base delay between retry attempts.
 	defaultRetryBackoff = 5 * time.Second
+
+	// defaultHealthInterval is how often the health watcher polls the tun interface.
+	defaultHealthInterval = 30 * time.Second
+
+	// defaultHealthThreshold is the number of consecutive failed health checks
+	// required before the Manager triggers a reconnect. This provides a grace
+	// window for openvpn's own --ping-restart (which transiently takes tun down).
+	defaultHealthThreshold = 2
 )
 
 // TunnelStatus is the JSON-serializable status of a single VPN tunnel.
@@ -44,29 +53,35 @@ type TunnelStatus struct {
 
 // tunnel is internal state for a single VPN profile.
 type tunnel struct {
-	mu        sync.Mutex
-	profile   ProfileConfig
-	name      string
-	iface     string
-	state     State
-	lastErr   string
-	since     time.Time
-	attempts  int
-	dialer    *net.Dialer
-	cancel    context.CancelFunc // cancels in-flight retry loop
+	mu      sync.Mutex
+	profile ProfileConfig
+	name    string
+	iface   string
+	state   State
+	lastErr string
+	since   time.Time
+	attempts int
+	dialer  *net.Dialer
+	cancel  context.CancelFunc // cancels in-flight retry loop + health watcher
 }
 
-// Manager coordinates multiple VPN tunnels with lifecycle management.
+// Manager coordinates multiple VPN tunnels with lifecycle management,
+// automatic health watching, and graceful shutdown.
 type Manager struct {
-	tunnels    map[string]*tunnel
-	names      []string // sorted profile names for deterministic iteration
-	maxRetries int
-	backoff    time.Duration
-	mu         sync.Mutex   // protects ready, once, and generation
-	ready      chan struct{} // closed when initial connection attempts complete
-	once       sync.Once
-	generation uint64 // incremented on each ConnectAll to prevent stale closures
-	startFunc  func(name string, profile ProfileConfig, tunIface string) error // injectable for testing
+	tunnels         map[string]*tunnel
+	names           []string      // sorted profile names for deterministic iteration
+	maxRetries      int
+	backoff         time.Duration
+	healthInterval  time.Duration
+	healthThreshold int
+	ifaceCheck      func(iface string) bool // injectable for testing; default: ifaceIsUp
+	startFunc       func(name string, profile ProfileConfig, tunIface string) error
+	mu              sync.Mutex   // protects ready, once, and generation
+	ready           chan struct{} // closed when initial connection attempts complete
+	once            sync.Once
+	generation      uint64 // incremented on each ConnectAll to prevent stale closures
+	rootCtx         context.Context
+	rootCancel      context.CancelFunc
 }
 
 // ManagerOption configures a Manager.
@@ -77,7 +92,7 @@ func WithMaxRetries(n int) ManagerOption {
 	return func(m *Manager) { m.maxRetries = n }
 }
 
-// WithRetryBackoff sets the base delay between retries.
+// WithRetryBackoff sets the base delay between retry attempts.
 func WithRetryBackoff(d time.Duration) ManagerOption {
 	return func(m *Manager) { m.backoff = d }
 }
@@ -87,15 +102,40 @@ func WithStartFunc(f func(name string, profile ProfileConfig, tunIface string) e
 	return func(m *Manager) { m.startFunc = f }
 }
 
+// WithIfaceCheck overrides the interface liveness check (for testing).
+// The default is ifaceIsUp.
+func WithIfaceCheck(f func(iface string) bool) ManagerOption {
+	return func(m *Manager) { m.ifaceCheck = f }
+}
+
+// WithHealthInterval sets how often the health watcher polls each tunnel's
+// tun interface. Default is 30 seconds.
+func WithHealthInterval(d time.Duration) ManagerOption {
+	return func(m *Manager) { m.healthInterval = d }
+}
+
+// WithHealthThreshold sets the number of consecutive failed health polls
+// before a reconnect is triggered. Default is 2, which gives a grace window
+// for openvpn's own --ping-restart to recover without interference.
+func WithHealthThreshold(n int) ManagerOption {
+	return func(m *Manager) { m.healthThreshold = n }
+}
+
 // NewManager creates a Manager for the given profiles. Tunnels are assigned
 // tun interfaces in sorted name order (tun0, tun1, …) for determinism.
 func NewManager(profiles map[string]ProfileConfig, opts ...ManagerOption) *Manager {
+	rootCtx, rootCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		tunnels:    make(map[string]*tunnel, len(profiles)),
-		maxRetries: defaultMaxRetries,
-		backoff:    defaultRetryBackoff,
-		ready:      make(chan struct{}),
-		startFunc:  startTunnel,
+		tunnels:         make(map[string]*tunnel, len(profiles)),
+		maxRetries:      defaultMaxRetries,
+		backoff:         defaultRetryBackoff,
+		healthInterval:  defaultHealthInterval,
+		healthThreshold: defaultHealthThreshold,
+		ifaceCheck:      ifaceIsUp,
+		startFunc:       startTunnel,
+		ready:           make(chan struct{}),
+		rootCtx:         rootCtx,
+		rootCancel:      rootCancel,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -129,9 +169,9 @@ func (m *Manager) ConnectAll() {
 		wg.Add(1)
 		go func(t *tunnel) {
 			defer wg.Done()
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(m.rootCtx)
 			t.mu.Lock()
-			// Cancel any previous retry loop for this tunnel.
+			// Cancel any previous retry loop / watcher for this tunnel.
 			if t.cancel != nil {
 				t.cancel()
 			}
@@ -160,6 +200,7 @@ func (m *Manager) Ready() <-chan struct{} {
 }
 
 // connectWithRetry attempts to start a tunnel up to maxRetries times.
+// On success it spawns a health watcher on the same ctx.
 // It respects ctx cancellation between retry attempts.
 func (m *Manager) connectWithRetry(ctx context.Context, t *tunnel) {
 	t.mu.Lock()
@@ -170,7 +211,6 @@ func (m *Manager) connectWithRetry(ctx context.Context, t *tunnel) {
 	t.mu.Unlock()
 
 	for attempt := 1; attempt <= m.maxRetries; attempt++ {
-		// Check if cancelled before attempting.
 		if ctx.Err() != nil {
 			return
 		}
@@ -187,6 +227,9 @@ func (m *Manager) connectWithRetry(ctx context.Context, t *tunnel) {
 			t.dialer = newBoundDialer(t.iface, 15*time.Second)
 			t.mu.Unlock()
 			slog.Info("vpn tunnel connected", "profile", t.name, "iface", t.iface, "attempts", attempt)
+			// Start health watcher on the same ctx — cancelled when tunnel is
+			// killed or Manager is shut down.
+			go m.watchTunnel(ctx, t)
 			return
 		}
 
@@ -219,6 +262,69 @@ func (m *Manager) connectWithRetry(ctx context.Context, t *tunnel) {
 	slog.Error("vpn tunnel failed after retries", "profile", t.name, "attempts", m.maxRetries, "last_error", t.lastErr)
 }
 
+// watchTunnel polls the tun interface at healthInterval. After healthThreshold
+// consecutive failed polls it triggers a Reconnect. The watcher exits when ctx
+// is cancelled (i.e. when the tunnel is killed or Shutdown is called).
+//
+// Consecutive-failure threshold guards against transient tun drops during
+// openvpn's own --ping-restart cycle, which would otherwise fight the daemon's
+// own recovery attempt.
+//
+// On threshold breach: nil the dialer immediately so new connections fast-fail,
+// but leave state as StateConnected so Reconnect's prevState check correctly
+// invokes killTunnel on the dead/half-dead openvpn process.
+func (m *Manager) watchTunnel(ctx context.Context, t *tunnel) {
+	ticker := time.NewTicker(m.healthInterval)
+	defer ticker.Stop()
+
+	consecutive := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			t.mu.Lock()
+			state := t.state
+			t.mu.Unlock()
+
+			// Only watch tunnels that are connected; skip if already being
+			// reconnected/failed.
+			if state != StateConnected {
+				consecutive = 0
+				continue
+			}
+
+			if m.ifaceCheck(t.iface) {
+				consecutive = 0
+				continue
+			}
+
+			consecutive++
+			slog.Warn("vpn health check: iface down",
+				"profile", t.name, "iface", t.iface,
+				"consecutive", consecutive, "threshold", m.healthThreshold)
+
+			if consecutive < m.healthThreshold {
+				continue
+			}
+
+			// Threshold reached. Nil the dialer so in-flight and new connections
+			// fail fast. Keep state=StateConnected so Reconnect will kill the
+			// openvpn process before restarting.
+			slog.Warn("vpn health threshold reached, triggering reconnect",
+				"profile", t.name, "iface", t.iface)
+			t.mu.Lock()
+			t.dialer = nil
+			t.mu.Unlock()
+			consecutive = 0
+
+			// Reconnect cancels this ctx, so the watcher exits after the call
+			// returns and the for-loop's next iteration hits ctx.Done().
+			_ = m.Reconnect(t.name)
+		}
+	}
+}
+
 // Reconnect kills any existing openvpn process for the named profile and
 // restarts the tunnel with fresh retries. Returns an error only if the profile
 // doesn't exist. Connection result is communicated via Status().
@@ -228,7 +334,7 @@ func (m *Manager) Reconnect(profileName string) error {
 		return fmt.Errorf("vpn profile %q not found", profileName)
 	}
 
-	// Cancel any in-flight retry loop, then kill the tunnel.
+	// Cancel any in-flight retry loop / watcher, then kill the tunnel.
 	t.mu.Lock()
 	if t.cancel != nil {
 		t.cancel()
@@ -240,8 +346,8 @@ func (m *Manager) Reconnect(profileName string) error {
 		m.killTunnel(t)
 	}
 
-	// Start a new retry loop with a fresh context.
-	ctx, cancel := context.WithCancel(context.Background())
+	// Start a new retry loop with a fresh context derived from root.
+	ctx, cancel := context.WithCancel(m.rootCtx)
 	t.mu.Lock()
 	t.cancel = cancel
 	t.mu.Unlock()
@@ -268,6 +374,22 @@ func (m *Manager) ReconnectAll() {
 	m.ready = make(chan struct{})
 	m.mu.Unlock()
 	m.ConnectAll()
+}
+
+// Shutdown cancels the root context, stopping all health watchers and
+// in-flight retry loops. It also cancels every management goroutine that was
+// spawned by startTunnel (those derive from context.Background(), not rootCtx,
+// so they must be stopped explicitly via the package-level mgmtCancels map).
+// Shutdown does not kill running openvpn processes.
+func (m *Manager) Shutdown() {
+	m.rootCancel()
+	for _, t := range m.tunnels {
+		if cancel, ok := mgmtCancels.LoadAndDelete(t.iface); ok {
+			if c, ok := cancel.(context.CancelFunc); ok {
+				c()
+			}
+		}
+	}
 }
 
 // Status returns the current status of all tunnels in deterministic order.
