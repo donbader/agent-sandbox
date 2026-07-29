@@ -275,3 +275,149 @@ func TestManager_SortedInterfaceAssignment(t *testing.T) {
 	assert.Equal(t, "tun1", ifaceByName["mike"])
 	assert.Equal(t, "tun2", ifaceByName["zebra"])
 }
+
+// TestManager_HealthWatcher_TriggersReconnect verifies that the health watcher
+// triggers a Reconnect when the iface check fails consecutiveThreshold times.
+func TestManager_HealthWatcher_TriggersReconnect(t *testing.T) {
+	var startCalls atomic.Int32
+	profiles := map[string]ProfileConfig{
+		"vpn1": {Type: "openvpn", ConfigB64: "dGVzdA=="},
+	}
+
+	var ifaceUp atomic.Bool
+	ifaceUp.Store(true)
+
+	mgr := NewManager(profiles,
+		WithMaxRetries(1),
+		WithRetryBackoff(1*time.Millisecond),
+		WithHealthInterval(10*time.Millisecond),
+		WithHealthThreshold(2),
+		WithStartFunc(func(_ string, _ ProfileConfig, _ string) error {
+			startCalls.Add(1)
+			return nil
+		}),
+		WithIfaceCheck(func(_ string) bool { return ifaceUp.Load() }),
+	)
+	defer mgr.Shutdown()
+
+	mgr.ConnectAll()
+	<-mgr.Ready()
+	require.True(t, mgr.AllConnected())
+	require.Equal(t, int32(1), startCalls.Load())
+
+	// Simulate iface going down.
+	ifaceUp.Store(false)
+
+	// After threshold (2) consecutive failures the watcher calls Reconnect.
+	// Reconnect → killTunnel has a 1s sleep, so allow 3s total.
+	require.Eventually(t, func() bool {
+		return startCalls.Load() >= 2
+	}, 3*time.Second, time.Millisecond, "health watcher should have triggered reconnect")
+}
+
+// TestManager_HealthWatcher_NoReconnectWhenIfaceUp verifies that the watcher
+// does NOT trigger a reconnect when the interface stays healthy.
+func TestManager_HealthWatcher_NoReconnectWhenIfaceUp(t *testing.T) {
+	var startCalls atomic.Int32
+	profiles := map[string]ProfileConfig{
+		"vpn1": {Type: "openvpn", ConfigB64: "dGVzdA=="},
+	}
+
+	mgr := NewManager(profiles,
+		WithMaxRetries(1),
+		WithRetryBackoff(1*time.Millisecond),
+		WithHealthInterval(10*time.Millisecond),
+		WithHealthThreshold(2),
+		WithStartFunc(func(_ string, _ ProfileConfig, _ string) error {
+			startCalls.Add(1)
+			return nil
+		}),
+		WithIfaceCheck(func(_ string) bool { return true }),
+	)
+	defer mgr.Shutdown()
+
+	mgr.ConnectAll()
+	<-mgr.Ready()
+	require.True(t, mgr.AllConnected())
+
+	// Let the watcher run for several intervals.
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, int32(1), startCalls.Load(), "health watcher should not reconnect when iface is healthy")
+}
+
+// TestManager_HealthWatcher_ConsecutiveThreshold verifies that a single failed
+// poll does NOT trigger a reconnect — only sustained failures do.
+func TestManager_HealthWatcher_ConsecutiveThreshold(t *testing.T) {
+	var startCalls atomic.Int32
+	profiles := map[string]ProfileConfig{
+		"vpn1": {Type: "openvpn", ConfigB64: "dGVzdA=="},
+	}
+
+	var checkMu sync.Mutex
+	checkCount := 0
+	// Down on checks 2–3, up on check 4 (recovers before threshold=4).
+	mgr := NewManager(profiles,
+		WithMaxRetries(1),
+		WithRetryBackoff(1*time.Millisecond),
+		WithHealthInterval(10*time.Millisecond),
+		WithHealthThreshold(4),
+		WithStartFunc(func(_ string, _ ProfileConfig, _ string) error {
+			startCalls.Add(1)
+			return nil
+		}),
+		WithIfaceCheck(func(_ string) bool {
+			checkMu.Lock()
+			defer checkMu.Unlock()
+			checkCount++
+			return checkCount != 2 && checkCount != 3
+		}),
+	)
+	defer mgr.Shutdown()
+
+	mgr.ConnectAll()
+	<-mgr.Ready()
+	require.True(t, mgr.AllConnected())
+
+	// Let the watcher run through several poll cycles.
+	time.Sleep(200 * time.Millisecond)
+
+	assert.Equal(t, int32(1), startCalls.Load(), "transient iface-down should not trigger reconnect")
+}
+
+// TestManager_Shutdown_StopsHealthWatcher verifies that Shutdown stops the health
+// watcher and no further reconnects are triggered after shutdown.
+func TestManager_Shutdown_StopsHealthWatcher(t *testing.T) {
+	var startCalls atomic.Int32
+	profiles := map[string]ProfileConfig{
+		"vpn1": {Type: "openvpn", ConfigB64: "dGVzdA=="},
+	}
+
+	var ifaceUp atomic.Bool
+	ifaceUp.Store(true)
+
+	mgr := NewManager(profiles,
+		WithMaxRetries(1),
+		WithRetryBackoff(1*time.Millisecond),
+		WithHealthInterval(10*time.Millisecond),
+		WithHealthThreshold(1),
+		WithStartFunc(func(_ string, _ ProfileConfig, _ string) error {
+			startCalls.Add(1)
+			return nil
+		}),
+		WithIfaceCheck(func(_ string) bool { return ifaceUp.Load() }),
+	)
+
+	mgr.ConnectAll()
+	<-mgr.Ready()
+	require.True(t, mgr.AllConnected())
+
+	// Shut down before taking the iface down.
+	mgr.Shutdown()
+
+	// Now simulate iface failure — watcher is stopped so no reconnect should fire.
+	ifaceUp.Store(false)
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, int32(1), startCalls.Load(), "no reconnects should happen after Shutdown")
+}

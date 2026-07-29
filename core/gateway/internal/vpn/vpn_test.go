@@ -1,6 +1,9 @@
 package vpn
 
 import (
+	"context"
+	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,4 +80,52 @@ func TestGenerateTOTP_PaddingTolerant(t *testing.T) {
 	noPad, err := generateTOTPAtTime("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ====", t1)
 	require.NoError(t, err)
 	assert.Equal(t, withPad, noPad)
+}
+
+func TestServeManagement_ExitsOnCtxCancel(t *testing.T) {
+	// Start a TCP server that accepts connections and holds them open.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	var connected atomic.Int32
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			connected.Add(1)
+			// Hold open so serveManagement stays in the scan loop.
+			go func() {
+				defer conn.Close()
+				buf := make([]byte, 1)
+				for {
+					if _, err := conn.Read(buf); err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveManagement(ctx, ln.Addr().String(), ProfileConfig{})
+	}()
+
+	// Wait until serveManagement has connected at least once.
+	require.Eventually(t, func() bool { return connected.Load() > 0 },
+		time.Second, time.Millisecond, "serveManagement never connected")
+
+	// Cancel and verify the goroutine exits promptly.
+	cancel()
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveManagement did not exit after ctx cancellation")
+	}
 }

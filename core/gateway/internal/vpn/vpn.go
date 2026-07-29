@@ -6,6 +6,7 @@ package vpn
 
 import (
 	"bufio"
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base32"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -31,12 +33,17 @@ const (
 
 // ProfileConfig is the VPN profile configuration passed from the gateway config.
 type ProfileConfig struct {
-	Type      string // "openvpn"
-	ConfigB64 string // base64-encoded .ovpn file content
+	Type       string // "openvpn"
+	ConfigB64  string // base64-encoded .ovpn file content
 	Username   string // openvpn auth username
 	Password   string // openvpn static password (concatenated before TOTP code)
 	TOTPSecret string // base32-encoded TOTP secret (RFC 6238); empty = no TOTP
 }
+
+// mgmtCancels tracks the cancel func for each active management goroutine,
+// keyed by tun interface name (e.g. "tun0"). Prevents goroutine leaks when
+// startTunnel is called again for the same interface (e.g. via Reconnect).
+var mgmtCancels sync.Map // map[tunIface string]context.CancelFunc
 
 // StartTunnel decodes the profile config, writes it to a temp file, launches
 // an openvpn daemon pinned to the given tun device, and waits for the
@@ -99,14 +106,39 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 	// If credentials are configured, use the OpenVPN management interface for
 	// authentication instead of writing credentials to disk. This lets openvpn
 	// query us for a fresh TOTP code on every connect and reconnect.
+	//
+	// Cancel any previous management goroutine for this interface first to
+	// prevent leaks. A defer+succeeded flag ensures the newly spawned goroutine
+	// is also cancelled if startTunnel fails after spawning it.
+	var mgmtCancel context.CancelFunc
 	if profile.Username != "" || profile.Password != "" || profile.TOTPSecret != "" {
 		port := tunManagementPort(tunIface)
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+
+		// Kill any existing management goroutine for this iface.
+		if prev, ok := mgmtCancels.Load(tunIface); ok {
+			prev.(context.CancelFunc)()
+		}
+
+		var mgmtCtx context.Context
+		mgmtCtx, mgmtCancel = context.WithCancel(context.Background())
+		mgmtCancels.Store(tunIface, mgmtCancel)
+
 		args = append(args,
 			"--management", "127.0.0.1", fmt.Sprintf("%d", port),
 			"--management-query-passwords",
 		)
-		go serveManagement(fmt.Sprintf("127.0.0.1:%d", port), profile)
+		go serveManagement(mgmtCtx, addr, profile)
 	}
+
+	// Cancel the management goroutine if startTunnel returns an error.
+	succeeded := false
+	defer func() {
+		if !succeeded && mgmtCancel != nil {
+			mgmtCancel()
+			mgmtCancels.Delete(tunIface)
+		}
+	}()
 
 	cmd := exec.Command("openvpn", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -119,6 +151,7 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 	deadline := time.Now().Add(startupTimeout)
 	for time.Now().Before(deadline) {
 		if ifaceIsUp(tunIface) {
+			succeeded = true
 			_ = os.Remove(cfgPath)
 			slog.Info("vpn tunnel started", "profile", name, "iface", tunIface)
 			return nil
@@ -148,29 +181,61 @@ func tunManagementPort(tunIface string) int {
 }
 
 // serveManagement connects to the OpenVPN management interface and responds to
-// credential queries. It runs in a goroutine for the lifetime of the gateway,
+// credential queries. It runs in a goroutine for the lifetime of the tunnel,
 // reconnecting automatically when the connection drops (e.g. on openvpn reconnect).
 // On each auth query a fresh TOTP code is generated so every reconnect uses a
-// valid, unexpired credential.
-func serveManagement(addr string, profile ProfileConfig) {
+// valid, unexpired credential. The goroutine exits when ctx is cancelled.
+func serveManagement(ctx context.Context, addr string, profile ProfileConfig) {
 	const retryDelay = 500 * time.Millisecond
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 		if err != nil {
-			time.Sleep(retryDelay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retryDelay):
+			}
 			continue
 		}
-		if err := handleManagementConn(conn, profile); err != nil {
+		if err := handleManagementConn(ctx, conn, profile); err != nil {
 			slog.Debug("vpn management connection closed", "addr", addr, "error", err)
 		}
 		_ = conn.Close()
-		time.Sleep(retryDelay)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryDelay):
+		}
 	}
 }
 
 // handleManagementConn reads from an OpenVPN management socket and responds to
-// password queries. Returns when the connection is closed or an error occurs.
-func handleManagementConn(conn net.Conn, profile ProfileConfig) error {
+// password queries. Returns when the connection is closed, an error occurs, or
+// ctx is cancelled.
+func handleManagementConn(ctx context.Context, conn net.Conn, profile ProfileConfig) error {
+	// done is closed when this function returns, signalling the watcher goroutine
+	// to exit. Without done, the goroutine would block on <-ctx.Done() for the
+	// entire tunnel lifetime, accumulating one goroutine per openvpn reconnect.
+	done := make(chan struct{})
+	defer close(done)
+
+	// Close conn when ctx is cancelled so the scanner unblocks.
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+			// handleManagementConn returned normally; nothing to do.
+		}
+	}()
+
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -197,23 +262,34 @@ func handleManagementConn(conn net.Conn, profile ProfileConfig) error {
 // generateTOTPAtTime generates a 6-digit RFC 6238 TOTP code for the 30-second window
 // containing t. secret is a base32-encoded key (case-insensitive, padding optional).
 func generateTOTPAtTime(secret string, t time.Time) (string, error) {
-	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(
-		strings.ToUpper(strings.TrimRight(secret, "=")),
-	)
+	// Normalise: upper-case and strip padding — base32.DecodeString is strict.
+	secret = strings.ToUpper(strings.TrimRight(secret, "="))
+	// Re-pad to the next multiple of 8.
+	if pad := len(secret) % 8; pad != 0 {
+		secret += strings.Repeat("=", 8-pad)
+	}
+	key, err := base32.StdEncoding.DecodeString(secret)
 	if err != nil {
 		return "", fmt.Errorf("totp: decode secret: %w", err)
 	}
-	var counter [8]byte
-	binary.BigEndian.PutUint64(counter[:], uint64(t.Unix())/30)
+
+	// RFC 4226 §5.3: counter = floor(unix / 30)
+	counter := uint64(t.Unix()) / 30
+	var msg [8]byte
+	binary.BigEndian.PutUint64(msg[:], counter)
+
 	mac := hmac.New(sha1.New, key)
-	mac.Write(counter[:])
+	mac.Write(msg[:])
 	h := mac.Sum(nil)
+
+	// Dynamic truncation (RFC 4226 §5.4)
 	offset := h[len(h)-1] & 0x0f
-	code := (uint32(h[offset])&0x7f)<<24 |
+	code := (uint32(h[offset]&0x7f)<<24 |
 		uint32(h[offset+1])<<16 |
 		uint32(h[offset+2])<<8 |
-		uint32(h[offset+3])
-	return fmt.Sprintf("%06d", code%1_000_000), nil
+		uint32(h[offset+3])) % 1_000_000
+
+	return fmt.Sprintf("%06d", code), nil
 }
 
 // generateTOTP generates a 6-digit RFC 6238 TOTP code for the current 30-second window.
