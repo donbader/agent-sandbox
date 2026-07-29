@@ -86,7 +86,7 @@ func TestServeManagement_ExitsOnCtxCancel(t *testing.T) {
 	// Start a TCP server that accepts connections and holds them open.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	var connected atomic.Int32
 	go func() {
@@ -98,7 +98,7 @@ func TestServeManagement_ExitsOnCtxCancel(t *testing.T) {
 			connected.Add(1)
 			// Hold open so serveManagement stays in the scan loop.
 			go func() {
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
 				buf := make([]byte, 1)
 				for {
 					if _, err := conn.Read(buf); err != nil {

@@ -117,7 +117,9 @@ func startTunnel(name string, profile ProfileConfig, tunIface string) error {
 
 		// Kill any existing management goroutine for this iface.
 		if prev, ok := mgmtCancels.Load(tunIface); ok {
-			prev.(context.CancelFunc)()
+			if c, ok := prev.(context.CancelFunc); ok {
+				c()
+			}
 		}
 
 		var mgmtCtx context.Context

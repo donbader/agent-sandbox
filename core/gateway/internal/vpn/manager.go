@@ -385,7 +385,9 @@ func (m *Manager) Shutdown() {
 	m.rootCancel()
 	for _, t := range m.tunnels {
 		if cancel, ok := mgmtCancels.LoadAndDelete(t.iface); ok {
-			cancel.(context.CancelFunc)()
+			if c, ok := cancel.(context.CancelFunc); ok {
+				c()
+			}
 		}
 	}
 }
