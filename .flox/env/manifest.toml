@@ -1,3 +1,11 @@
+## Flox Environment Manifest -----------------------------------------
+##
+##   _Everything_ you need to know about the _manifest_ is here:
+##
+##   https://flox.dev/docs/reference/command-reference/manifest.toml/
+##
+## -------------------------------------------------------------------
+# Flox manifest version managed by Flox CLI
 schema-version = "1.12.0"
 
 
@@ -9,7 +17,6 @@ schema-version = "1.12.0"
 [install]
 go.pkg-path = "go"
 go.version = "^1.26"
-gcc.pkg-path = "gcc"
 
 
 ## Environment Variables ---------------------------------------------
