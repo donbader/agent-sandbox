@@ -206,6 +206,19 @@ func waitForDocker() {
 	log.Println("[port-forward] warning: Docker API not reachable after 60s, proceeding anyway")
 }
 
+// dockerClient uses a transport that forces fresh DNS resolution on each
+// connection. This prevents stale cached IPs when the proxy container is
+// recreated with a new address.
+var dockerClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).DialContext,
+	},
+	Timeout: 30 * time.Second,
+}
+
 // dockerGet makes a GET request to the Docker API.
 func dockerGet(path string) (*http.Response, error) {
 	host := os.Getenv("DOCKER_HOST")
@@ -214,7 +227,7 @@ func dockerGet(path string) (*http.Response, error) {
 	}
 	addr := strings.TrimPrefix(host, "tcp://")
 	url := fmt.Sprintf("http://%s%s", addr, path)
-	return http.Get(url)
+	return dockerClient.Get(url)
 }
 
 // containerPorts returns (hostPort, containerIP, containerPort) tuples for a container.
